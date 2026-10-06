@@ -5,8 +5,9 @@ export type PlanBody = {needs_clarification: boolean; questions: string[]; parap
   objective?: string; data_refs?: string[]; split?: {method:string;group_key:string;subset:string;seed:number};
   metric?: {name:string;direction:string;definition:string}; implementation_steps?: string[];
   budget?: {coder_calls:number;training_attempts:number;training_seconds:number;output_bytes:number}; expected_outputs?: string[]};
-export type Idea = {id: string; text: string; state: string; error: string|null; created_at: string;
+export type Idea = {id: string; title: string; text: string; state: string; error: string|null; created_at: string;
   conversation: ({role:'user';text:string;reply_to:string}|{role:'assistant';proposal_id:string;version:number;body:PlanBody})[]};
+export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
 export type Context = {context_sha256: string; snapshot: {project_id: string;
   idea: {id: string; text: string}; resources: Resource[]}};
 export type History = {proposals: {id: string; version: number; state: string; context_sha256: string}[];

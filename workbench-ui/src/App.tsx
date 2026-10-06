@@ -1,5 +1,5 @@
 import {FormEvent, useEffect, useState} from 'react';
-import {api, Context, History, Idea, Project, Resource, Proposal} from './api';
+import {api, Context, History, Idea, ideaTitle, Project, Resource, Proposal} from './api';
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
@@ -19,6 +19,7 @@ export default function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [ideaId, setIdeaId] = useState('');
   const [ideaText, setIdeaText] = useState('');
+  const [title, setTitle] = useState('');
   const [editingIdea,setEditingIdea] = useState<Idea|null>(null);
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState<Resource|null>(null);
@@ -39,7 +40,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('workbench.project', projectId);
     setSelected([]); setContext(null); setIdeaId(''); setEditing(null); setForm(blank);
-    setIdeaText(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
+    setIdeaText(''); setTitle(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
   }, [projectId]);
 
   useEffect(() => {
@@ -153,13 +154,18 @@ export default function App() {
         {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Code và training chỉ thực hiện sau approval.</p>
           <form className="stack" onSubmit={event => {event.preventDefault(); void action(async () => {
             const path = `/projects/${projectId}/ideas` + (editingIdea ? `/${editingIdea.id}` : '');
-            const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {text: ideaText,...(editingIdea ? {expected_text:editingIdea.text} : {})});
-            setIdeaId(idea.id); setIdeaText(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea bản nháp.');
-          });}}><label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || loading || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');}}>Hủy sửa idea</button>}</div></form>
+            const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {title,text: ideaText,...(editingIdea ? {expected_text:editingIdea.text,expected_title:editingIdea.title} : {})});
+            setIdeaId(idea.id); setIdeaText(''); setTitle(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea.');
+          });}}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
+          <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || loading || !title.trim() || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');setTitle('');}}>Hủy sửa idea</button>}</div></form>
           <IdeaCards ideas={ideas} selectedId={ideaId} busy={busy} onSelect={selectIdea}
-            onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);}}/>
+            onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);}}
+            onRename={async (idea,newTitle)=>{await action(async()=>{
+              await api(`/projects/${projectId}/ideas/${idea.id}/title`,'PATCH',{title:newTitle,expected_title:idea.title});
+              setRevision(n=>n+1);setNotice('Đã lưu tiêu đề idea.');
+            });}}/>
         </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn idea và đúng nguồn của project. Xem trước không gọi Codex; bấm lập proposal để gọi Codex thật.</p>
-          <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.map(idea => <option key={idea.id} value={idea.id}>Idea {idea.id.slice(0,8)}</option>)}</select></label>
+          <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.map(idea => <option key={idea.id} value={idea.id}>{ideaTitle(idea)}</option>)}</select></label>
             {resources.map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || loading || !ideaId || !selected.length} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
             <button className="primary" disabled={busy || loading || planning || !ideaId || !selected.length || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {

@@ -12,7 +12,7 @@ import uuid
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS project_meta(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, schema_version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS resources(id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, url TEXT, content TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, content_sha256 TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY, text TEXT NOT NULL, conversation_json TEXT NOT NULL, state TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY, text TEXT NOT NULL, conversation_json TEXT NOT NULL, state TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, title TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, idea_id TEXT NOT NULL REFERENCES ideas(id), version INTEGER NOT NULL, body_json TEXT NOT NULL, context_snapshot_json TEXT NOT NULL, context_sha256 TEXT NOT NULL, state TEXT NOT NULL, approved_at TEXT);
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL REFERENCES proposals(id), node_id TEXT, node_json TEXT, state TEXT NOT NULL, intent_key TEXT UNIQUE NOT NULL, code_sha256 TEXT, identity_json TEXT, artifact_dir TEXT NOT NULL, error TEXT, report_path TEXT);
 CREATE TABLE IF NOT EXISTS logs(run_id TEXT NOT NULL REFERENCES runs(id), generation INTEGER NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, stream TEXT NOT NULL, UNIQUE(run_id,generation,seq));
@@ -34,6 +34,13 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def idea_title(title):
+    title = " ".join(title.split())
+    if not title or len(title) > 80:
+        raise ValueError("Tiêu đề idea phải có từ 1 đến 80 ký tự")
+    return title
+
+
 class StoreConflict(ValueError):
     pass
 
@@ -45,6 +52,9 @@ class ProjectStore:
         for project in self.list_projects():
             with self.connection(project['id']) as connection:
                 connection.executescript(IMPLEMENTATION_SCHEMA)
+                if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
+                    connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+                connection.execute('UPDATE project_meta SET schema_version=2 WHERE schema_version<2')
 
     def _path(self, project_id):
         if not re.fullmatch(r"[0-9a-f]{32}", project_id):
@@ -81,7 +91,7 @@ class ProjectStore:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
             connection.executescript(IMPLEMENTATION_SCHEMA)
-            connection.execute("INSERT INTO project_meta VALUES(?,?,?,1)",
+            connection.execute("INSERT INTO project_meta VALUES(?,?,?,2)",
                                (project_id, name.strip(), datetime.now(timezone.utc).isoformat()))
             connection.commit()
         finally:
@@ -140,13 +150,14 @@ class ProjectStore:
                 result.append(item)
             return result
 
-    def save_idea(self, project_id, text):
+    def save_idea(self, project_id, text, title=None):
         if not text.strip():
             raise ValueError("Idea must contain text")
         idea_id = uuid.uuid4().hex
+        title = idea_title(title) if title is not None else ''
         with self.connection(project_id) as connection:
-            connection.execute("INSERT INTO ideas VALUES(?,?,?,'DRAFT',NULL,?)",
-                               (idea_id, text, "[]", datetime.now(timezone.utc).isoformat()))
+            connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title) VALUES(?,?,?,'DRAFT',NULL,?,?)",
+                               (idea_id, text, "[]", datetime.now(timezone.utc).isoformat(), title))
         return next(item for item in self.ideas(project_id) if item["id"] == idea_id)
 
     def context_snapshot(self, project_id, idea_id, resource_ids):
@@ -251,18 +262,37 @@ class ProjectStore:
             connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
         return self.idea(project_id, idea_id)
 
-    def update_idea(self, project_id, idea_id, text, expected_text):
+    def update_idea(self, project_id, idea_id, text, expected_text, title=None, expected_title=None):
         if not text.strip():
             raise ValueError("Idea must contain text")
+        title = idea_title(title) if title is not None else None
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT text,state FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            row = connection.execute("SELECT text,state,title FROM ideas WHERE id=?", (idea_id,)).fetchone()
             if row is None:
                 raise KeyError("Idea not found in this project")
             if row["text"] != expected_text or row["state"] in {"PLANNING", "APPROVED"}:
                 raise StoreConflict("Idea changed, is planning, or was approved; reload or create a new idea")
-            connection.execute("UPDATE ideas SET text=?,conversation_json='[]',state='DRAFT',error=NULL WHERE id=?", (text, idea_id))
-            connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
+            if title is not None and row['title'] != expected_title:
+                raise StoreConflict('Tiêu đề đã thay đổi; tải lại idea trước khi lưu')
+            if title is None or text != row['text']:
+                connection.execute("UPDATE ideas SET text=?,conversation_json='[]',state='DRAFT',error=NULL WHERE id=?", (text, idea_id))
+                connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
+            if title is not None:
+                connection.execute('UPDATE ideas SET title=? WHERE id=?', (title, idea_id))
+        return self.idea(project_id, idea_id)
+
+    def rename_idea(self, project_id, idea_id, title, expected_title):
+        title = idea_title(title)
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT title FROM ideas WHERE id=?', (idea_id,)).fetchone()
+            if row is None:
+                raise KeyError('Idea not found in this project')
+            if row['title'] != expected_title:
+                raise StoreConflict('Tiêu đề đã thay đổi; tải lại idea trước khi lưu')
+            # Display metadata is independent of the approved request and its context hash.
+            connection.execute('UPDATE ideas SET title=? WHERE id=?', (title, idea_id))
         return self.idea(project_id, idea_id)
 
     def proposals(self, project_id, idea_id=None):

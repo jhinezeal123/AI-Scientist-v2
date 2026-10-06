@@ -183,11 +183,12 @@ Store/MCP client là module/class cụ thể, chưa cần thêm các Protocol ch
     journal.json                    # export từ DB, không dùng làm state authority thứ hai
 ```
 
-SQLite schema nhỏ, `schema_version=1` và `CREATE TABLE IF NOT EXISTS` đủ cho prototype:
+SQLite schema nhỏ, `schema_version=2`; khi khởi động, tự thêm cột `ideas.title` cho DB cũ:
 
 - `project_meta`: id/name/created_at/schema_version.
 - `resources`: id/kind/title/url/content/status/version/content_sha256.
-- `ideas`: id/text/conversation_json/state/error/created_at.
+- `ideas`: id/title/text/conversation_json/state/error/created_at. Tiêu đề tối đa 80 ký tự là nhãn
+  hiển thị do user đặt; đổi tiêu đề không thay context hash, approval hoặc kết quả của run.
 - `proposals`: id/idea_id/version/body_json/context_snapshot_json/context_sha256/state/approved_at.
 - `runs`: id/proposal_id/node_id/node_json/state/intent_key UNIQUE/code_sha256/identity_json/artifact_dir/error/report_path.
 - `logs`: run_id/generation/seq/text/stream, UNIQUE(run_id,generation,seq).

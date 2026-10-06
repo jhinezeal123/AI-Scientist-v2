@@ -54,8 +54,11 @@ config validation từ chối path không tồn tại trước khi mở app.
 1. Chọn/tạo project. **Library:** lưu đề bài, evaluation/rules và data reference có schema,
    đường mount, provenance. URL không kèm nội dung được ghi “chưa đọc”; app không tự fetch.
    **Nhập nguồn T01** dùng snapshot đã đọc ngày 2026-10-06, không tự refresh.
-2. **Idea:** nhập ý tưởng và **Lưu idea**. Idea đã lưu hiện thành card alias `Idea <8 ký tự ID>`
-   kèm trạng thái; bấm card để mở nội dung và chọn idea cho proposal, bấm lại để thu gọn.
+2. **Idea:** nhập **Tiêu đề idea** ngắn gọn (tối đa 80 ký tự), nội dung và **Lưu idea**.
+   Card và danh sách chọn dùng tiêu đề bạn đặt, kèm trạng thái; bấm card để mở nội dung
+   và chọn idea cho proposal, bấm lại để thu gọn. Trong chi tiết, dùng **Đổi tiêu đề → Lưu tiêu đề**
+   cho cả idea đã duyệt; thao tác này giữ nguyên proposal, conversation và kết quả run.
+   Idea cũ chưa có tên hiện **Chưa đặt tiêu đề** kèm trích đoạn nội dung để nhận diện.
    Chọn checkbox nguồn phù hợp rồi lập proposal. Nếu agent hỏi lại, nhập câu trả lời
    trong conversation và tiếp tục lập proposal.
 3. Đọc mục tiêu, split, metric, các bước, budget và outputs. Bấm **Duyệt proposal vN** của
@@ -275,7 +278,7 @@ Mở `http://127.0.0.1:8000/`. Phiên preview dùng khi bàn giao T03 đang ở 
 
 ### Persistence và giới hạn
 
-Mỗi project có DB authority riêng: `.workbench/projects/<project_id>/project.sqlite`. Schema version 1 gồm project_meta/resources/ideas/proposals/runs/logs, WAL/foreign keys/busy timeout và connection riêng cho mỗi operation. Danh sách project đọc các thư mục DB, không có catalog thứ hai. Artifact lớn/dataset không đưa vào DB.
+Mỗi project có DB authority riêng: `.workbench/projects/<project_id>/project.sqlite`. Schema version 2 gồm project_meta/resources/ideas/proposals/runs/logs và cột `ideas.title`, WAL/foreign keys/busy timeout và connection riêng cho mỗi operation. DB cũ được nâng cấp khi khởi động; bản sao trước lần nâng cấp hiện tại nằm trong `.workbench/backups/idea-titles-v2/`. Danh sách project đọc các thư mục DB, không có catalog thứ hai. Artifact lớn/dataset không đưa vào DB.
 
 Nguồn có ID, version và SHA256 trên kind/title/URL/content/status. PUT yêu cầu expected_version, trả 409 nếu edit stale. Context chỉ gồm idea và những nguồn được chọn, tối đa 30 nguồn/100 KB; resource ID thuộc project khác bị từ chối. Snapshot trong proposal được lưu riêng và không thay đổi khi sửa resource; proposal chưa duyệt bị đánh dấu STALE. Store primitive này chưa có public API tạo/approve proposal ở T03.
 

@@ -35,6 +35,7 @@ class ResourceUpdate(ResourceInput):
 
 class IdeaInput(StrictModel):
     text: str = Field(min_length=1, max_length=20_000)
+    title: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class ContextInput(StrictModel):
@@ -44,6 +45,12 @@ class ContextInput(StrictModel):
 
 class IdeaUpdate(IdeaInput):
     expected_text: str = Field(max_length=20_000)
+    expected_title: str | None = Field(default=None, max_length=80)
+
+
+class IdeaTitleUpdate(StrictModel):
+    title: str = Field(min_length=1, max_length=80)
+    expected_title: str = Field(max_length=80)
 
 
 class AnswerInput(StrictModel):
@@ -124,11 +131,16 @@ def library_router(store, workspace_root):
 
     @router.post("/projects/{project_id}/ideas", status_code=201)
     def add_idea(project_id: str, body: IdeaInput):
-        return call(store.save_idea, project_id, body.text)
+        return call(store.save_idea, project_id, body.text, body.title)
 
     @router.put("/projects/{project_id}/ideas/{idea_id}")
     def update_idea(project_id: str, idea_id: str, body: IdeaUpdate):
-        return call(store.update_idea, project_id, idea_id, body.text, body.expected_text)
+        return call(store.update_idea, project_id, idea_id, body.text, body.expected_text,
+                    body.title, body.expected_title)
+
+    @router.patch("/projects/{project_id}/ideas/{idea_id}/title")
+    def rename_idea(project_id: str, idea_id: str, body: IdeaTitleUpdate):
+        return call(store.rename_idea, project_id, idea_id, body.title, body.expected_title)
 
     @router.post("/projects/{project_id}/plan", status_code=202)
     async def plan(project_id: str, body: ContextInput, request: Request):
