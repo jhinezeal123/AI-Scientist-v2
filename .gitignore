@@ -124,6 +124,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-mvp0/
 .venv_jax
 env/
 venv/
@@ -174,6 +175,12 @@ data/
 templates/*/run_0/
 templates/*/*.png
 results/
+# MVP 0 local config, SQLite state, run artifacts, and generated UI dependencies.
+.workbench/
+workbench-ui/node_modules/
+workbench-ui/dist/
+workbench-ui/.vite/
+workbench-ui/*.tsbuildinfo
 # logs/
 
 # data folders under review_iclr_bench/

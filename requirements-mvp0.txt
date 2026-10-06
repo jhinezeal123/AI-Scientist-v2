@@ -1,0 +1,18 @@
+# Minimal local Workbench runtime and upstream Journal import dependencies.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.8,<3
+httpx>=0.27,<1
+mcp>=1.12,<2
+nbformat>=5.10,<6
+numpy
+dataclasses-json
+rich
+humanize
+black
+jsonschema
+backoff
+funcy
+openai
+anthropic
+pytest>=8,<9
