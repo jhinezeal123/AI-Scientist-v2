@@ -57,3 +57,36 @@ Các probe readiness không cấp quyền code idea/training. Nếu token hoặc
 
 `config-mvp0.example.json` chứa các đường dẫn/runtime đã kiểm tra và alias account được chọn; không chứa credential. Đường dẫn Codex CLI có mã thư mục version và có thể đổi sau khi cập nhật Codex. Chỉ tạo `.workbench/config.local.json` sau khi danh tính Kaggle được xác nhận.
 
+## T02 — runtime và journal bootstrap
+
+T02 đã triển khai tại `ai_scientist/workbench/`. `runtime.py` nạp module donor nguyên bản từ config, chọn đúng model/reasoning và generic role `mvp0_plan`, `mvp0_code`, `mvp0_report`. Payload được validate bằng Pydantic strict/extra-forbid, reject envelope có files. Chưa expose API gọi coder/report hoặc submit; approval/store thuộc task sau.
+
+FastAPI lifespan tạo một worker `ThreadPoolExecutor(max_workers=1)` và giữ một MCP stdio session qua toàn bộ vòng đời app. Runtime blocking chạy ngoài event loop, không xếp thêm job khi worker bận. Shutdown gửi cancellation và chờ trong `shutdown_seconds` (mặc định 15 giây); dùng nguyên cơ chế timeout/kill/parser của donor. Nếu không xác nhận được child đã dừng, job ghi `unknown` và từ chối nhận job tiếp theo. Không coi timeout shutdown là bằng chứng process đã bị kill.
+
+`.workbench/runtime-state.json` là marker job local tạm thời trước khi có project store T03. Restart chuyển `running` thành `interrupted`, không replay Codex. Marker `unknown` cần đối soát process trước khi reset; ở T02 chưa có GUI đối soát. Journal dùng `Node.to_dict/from_dict` và `Journal.append/get_node_by_id` upstream, deepcopy trước restore, nối lại parent/children qua IDs; không gọi best-node/provider summary.
+
+### Chạy skeleton trên PowerShell
+
+Từ `D:\Documents\AI-Scientist-v2`:
+
+```powershell
+& .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --config config-mvp0.example.json
+```
+
+Đọc health tại `http://127.0.0.1:8000/health`; `Ctrl+C` shutdown app. Có thể đổi port bằng `--port 8001`. T02 bàn giao backend skeleton; GUI đã được bổ sung ở T03 bên dưới. Muốn dùng config riêng, copy example sang `.workbench/config.local.json`; sau đó có thể bỏ `--config`.
+
+Smoke explicit chỉ kiểm JSON transport, không tạo workload:
+
+```powershell
+& .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --config config-mvp0.example.json --smoke
+```
+
+### Bằng chứng nghiệm thu T02 — 2026-10-06
+
+- Codex CLI thật qua adapter donor trả `RuntimeResult` và `PlanPayload` hợp lệ, files rỗng; smoke exit 0. Session `01a10f5a-a214-7d50-8f89-1e9e6ef451de`. MCP thật initialize/tools-list được 12 tool, đóng session khi smoke kết thúc.
+- `tests/workbench/test_bootstrap.py`: 5 focused checks cho journal round-trip/input không bị sửa, role validation, health khi worker bận, cancellation/marker shutdown, restart không replay và unknown outcome không nhận thêm job.
+- 3 focused checks donor tại `test_research.py` đạt: bounded CLI fixture/timeout, JSONL final-message/files parser, Codex native read-only argv/parser. Không chạy toàn bộ harness/provider suite.
+- Import bootstrap runtime/journal không nạp Torch. Source stock và runtime donor không bị sửa.
+- Uvicorn thật trên loopback port 8769 trả `/health` HTTP 200 với session MCP thật; graceful shutdown hoàn tất và không nạp Torch. Port kiểm tra đã được đóng sau probe.
+
+T02 là nền tảng runtime/journal; chưa chứng minh notebook/training/report thật. Blocker attach/mount của T01 vẫn giữ nguyên.
