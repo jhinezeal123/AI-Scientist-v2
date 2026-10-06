@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from .kaggle import connect_mcp
 from .runtime import load_runtime
 from .worker import RuntimeWorker
+from .api import library_router
+from .store import ProjectStore
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -27,6 +29,9 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 await worker.close(config.shutdown_seconds)
 
     app = FastAPI(title="AI Scientist Workbench", lifespan=lifespan)
+    store = ProjectStore(config.workspace_root / ".workbench/projects")
+    app.state.store = store
+    app.include_router(library_router(store, config.workspace_root))
 
     @app.get("/health")
     async def health():

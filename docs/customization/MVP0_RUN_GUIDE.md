@@ -90,3 +90,54 @@ Smoke explicit chỉ kiểm JSON transport, không tạo workload:
 - Uvicorn thật trên loopback port 8769 trả `/health` HTTP 200 với session MCP thật; graceful shutdown hoàn tất và không nạp Torch. Port kiểm tra đã được đóng sau probe.
 
 T02 là nền tảng runtime/journal; chưa chứng minh notebook/training/report thật. Blocker attach/mount của T01 vẫn giữ nguyên.
+
+## T03 — Library, project store và GUI
+
+T03 đã hoàn thành hành trình tạo project → lưu nguồn/idea → xem context theo nguồn đã chọn → restart và mở lại. Clarification/proposal/approval/Codex job từ GUI được bổ sung ở T04 bên dưới; training thuộc T05/T06.
+
+### Mở GUI
+
+Frontend đã build tại `workbench-ui/dist`, được FastAPI serve cùng origin. Nếu backend T02 của bạn còn chạy, nhấn `Ctrl+C` ở cửa sổ đó rồi chạy lại để nạp code mới:
+
+```powershell
+& .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --config config-mvp0.example.json
+```
+
+Mở `http://127.0.0.1:8000/`. Phiên preview dùng khi bàn giao T03 đang ở `http://127.0.0.1:8011/`; dữ liệu project dùng chung trên ổ đĩa, không nằm trong browser. Port không làm thay đổi project store.
+
+1. Chọn project `Soil Grain Size MVP0` đã tạo, hoặc nhập tên để tạo project mới.
+2. **Library:** thêm text/URL/dataset reference; sửa nguồn sẽ tăng version. Nút **Nhập nguồn T01** nhập 4 trang competition đã đọc và 1 reference schema/access. Các bản đọc từ 2026-10-06 không tự refresh từ Internet. Chỉ URL, không text → `reference_only`/“chưa đọc”; có text → `provided_text`, không khẳng định app đã fetch URL.
+3. **Idea:** nhập và lưu bản nháp, chọn idea đã lưu và các checkbox nguồn, bấm **Xem context đã chọn**. UI hiện source ID/version/status cùng context hash và nội dung. Preview không gọi Codex; lựa chọn checkbox chưa được lưu thành proposal. T04 sẽ freeze snapshot trong proposal.
+4. **Run:** hiện các run đã lưu; hiện chưa có training run.
+5. **History:** xem proposal/run của đúng project. Khi bàn giao T03, project Soil chưa có idea; T04 đã thêm idea QA và proposal chờ user duyệt. Project `T03 QA — kiểm tra lưu dữ liệu` chứa dữ liệu test có nhãn QA, không dùng cho proposal training.
+
+### Persistence và giới hạn
+
+Mỗi project có DB authority riêng: `.workbench/projects/<project_id>/project.sqlite`. Schema version 1 gồm project_meta/resources/ideas/proposals/runs/logs, WAL/foreign keys/busy timeout và connection riêng cho mỗi operation. Danh sách project đọc các thư mục DB, không có catalog thứ hai. Artifact lớn/dataset không đưa vào DB.
+
+Nguồn có ID, version và SHA256 trên kind/title/URL/content/status. PUT yêu cầu expected_version, trả 409 nếu edit stale. Context chỉ gồm idea và những nguồn được chọn, tối đa 30 nguồn/100 KB; resource ID thuộc project khác bị từ chối. Snapshot trong proposal được lưu riêng và không thay đổi khi sửa resource; proposal chưa duyệt bị đánh dấu STALE. Store primitive này chưa có public API tạo/approve proposal ở T03.
+
+Library không tự tải paper/dataset/URL; nội dung nhập được hiển thị dưới dạng text đã escape. Bản import T01 ghi rõ mount chưa được xác minh và placeholder CSV không phải prediction hợp lệ. Không nhận path file tùy ý hoặc đọc toàn donor repo.
+
+### Build/dev và kiểm tra
+
+```powershell
+# Trong workbench-ui:
+npm ci
+npm run build
+
+# Trong thư mục repo:
+& .\.venv-mvp0\Scripts\python.exe -m pytest tests\workbench -q
+```
+
+Dev: chạy backend ở 8000 và `npm run dev` trong `workbench-ui`, mở `http://127.0.0.1:5173/`; Vite proxy `/api` và `/health` về backend. Bản build dùng cùng origin, không bật CORS wildcard. Frontend giữ manifest/lock donor; attribution và licenses trong `workbench-ui/NOTICE.md` và `public/fonts/`. Advisory transitive đã ghi ở T01 chưa được sửa bằng nâng lock trong T03.
+
+### Bằng chứng nghiệm thu T03 — 2026-10-06
+
+- `npm run build` (`tsc -b && vite build`) thành công; React/Vite stack giữ donor lock.
+- 8 focused test workbench đạt (5 T02 + 3 store/API T03): persistence/isolation/version, snapshot bất biến sau sửa nguồn, reference-only/context bound, stale edit/API/import idempotence.
+- GUI thật đã tạo `Soil Grain Size MVP0` (`d062f7ee5f5a48f68442ed951d879275`), nhập 5 nguồn T01, không có idea training được tự tạo.
+- GUI QA tạo nguồn URL thiếu text (`reference_only` v1), sửa thêm text (`provided_text` v2), lưu idea QA và xem context với đúng source ID/version/hash. Restart backend thật + reload vẫn giữ source v2, cùng ID và nội dung idea. Đổi về project Soil chỉ thấy 5 nguồn Soil, không thấy QA resource.
+- Ảnh bằng chứng local: `.workbench/readiness/T03-library.jpg`. Không gọi Codex, push notebook hoặc training trong thao tác T03.
+
+Blocker attach/mount T01 vẫn cần giải quyết trước submit; T03 không chứng minh P0-04 hoặc cả MVP0 hoàn thành.
