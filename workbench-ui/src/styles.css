@@ -9,17 +9,20 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 @media(max-width:1050px){.columns{grid-template-columns:1fr}main{padding:0 20px 30px}}@media(max-width:650px){.rail{position:static;width:auto;gap:16px;border-right:0;border-bottom:1px solid var(--line)}nav{grid-template-columns:repeat(3,1fr)}nav button{text-align:center;padding:8px}.rail-footer{display:none}main{margin-left:0}header{padding-top:22px}.panel{padding:18px}.new-project{grid-template-columns:1fr auto;align-items:end}}
 .proposal-panel{grid-column:1/-1}.state-tag{font:11px 'Geist Mono',monospace;border:1px solid var(--line);border-radius:4px;padding:5px 8px;color:var(--mint)}.conversation{margin-top:18px;border-left:2px solid var(--line);padding-left:15px}.conversation li,.proposal li{font-size:14px;line-height:1.7;margin:7px 0}.proposal{margin-top:22px;border-top:1px solid var(--line);padding-top:22px}.proposal>h3{margin-top:24px}.budget-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px}.budget-grid>span{background:var(--panel2);padding:14px;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:4px}.budget-grid strong{display:block;color:#e8ecea;font:18px 'Geist Mono',monospace;margin-top:8px}
 .run-panel{grid-column:1/-1}
-.run-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:10px;margin-top:20px}
-.run-card{display:flex;flex-direction:column;gap:10px;text-align:left;padding:14px 16px;min-width:0;border-radius:6px}
-.run-card.selected{border-color:var(--mint);background:#263327;box-shadow:inset 3px 0 var(--mint)}
-.run-alias{font:13px 'Geist Mono',monospace;color:#e8ecea}
-.run-card-status{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}
-.run-status-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#9ba59b}
+.run-cards,.idea-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:10px;margin-top:20px}
+.run-card,.idea-card{display:flex;flex-direction:column;gap:10px;text-align:left;padding:14px 16px;min-width:0;border-radius:6px}
+.run-card.selected,.idea-card.selected{border-color:var(--mint);background:#263327;box-shadow:inset 3px 0 var(--mint)}
+.run-alias,.idea-alias{font:13px 'Geist Mono',monospace;color:#e8ecea}
+.run-card-status,.idea-card-status{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.run-status-dot,.idea-status-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#9ba59b}
+.idea-card-status[data-state='APPROVED'] .idea-status-dot{background:var(--mint)}
+.idea-card-status[data-state='FAILED'] .idea-status-dot{background:#f08f83}
+.idea-card-status[data-state='PLANNING'] .idea-status-dot,.idea-card-status[data-state='NEEDS_CLARIFICATION'] .idea-status-dot,.idea-card-status[data-state='AWAITING_APPROVAL'] .idea-status-dot{background:#e4bd7a}
 .run-card-status[data-state='REMOTE_SUCCEEDED'] .run-status-dot,.run-card-status[data-state='COMPLETED'] .run-status-dot,.run-card-status[data-state='PREFLIGHT'] .run-status-dot{background:var(--mint)}
 .run-card-status[data-state='FAILED'] .run-status-dot,.run-card-status[data-state='REMOTE_FAILED'] .run-status-dot{background:#f08f83}
 .run-card-status[data-state='UNKNOWN'] .run-status-dot,.run-card-status[data-state='IMPLEMENTING'] .run-status-dot,.run-card-status[data-state='SUBMITTING'] .run-status-dot,.run-card-status[data-state='REMOTE_RUNNING'] .run-status-dot{background:#e4bd7a}
 .run-hint{margin-bottom:0}
-.run-detail>.panel-head:first-child{margin-bottom:12px}
+.run-detail>.panel-head:first-child,.idea-detail>.panel-head:first-child{margin-bottom:12px}
 .live-log pre{max-height:360px;margin-bottom:0}.live-log span[data-stream='stderr']{color:#f08f83}
 .training-metrics{margin:20px 0;padding:16px;border:1px solid var(--line);border-radius:5px;background:var(--panel2)}
 .training-metrics>label{margin-top:14px}.training-metrics select{background:var(--panel);min-width:0}

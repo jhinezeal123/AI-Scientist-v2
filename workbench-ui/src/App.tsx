@@ -2,6 +2,7 @@ import {FormEvent, useEffect, useState} from 'react';
 import {api, Context, History, Idea, Project, Resource, Proposal} from './api';
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
+import IdeaCards from './IdeaCards';
 
 const blank = {kind: 'text' as Resource['kind'], title: '', url: '', content: ''};
 const statusText = (status: string) => status === 'reference_only' ? 'Chỉ có liên kết · chưa đọc' : 'Có nội dung được cung cấp';
@@ -50,7 +51,7 @@ export default function App() {
       .then(([r, i, h, p]) => {
         if (cancelled) return;
         setResources(r); setIdeas(i); setHistory(h); setProposals(p);
-        setIdeaId(current => i.some(idea => idea.id === current) ? current : i[0]?.id || '');
+        setIdeaId(current => i.some(idea => idea.id === current) ? current : '');
       }).catch(e => {if (!cancelled) setError(e.message);})
       .finally(() => {if (!cancelled) setLoading(false);});
     return () => {cancelled = true;};
@@ -103,6 +104,9 @@ export default function App() {
   }
 
   const project = projects.find(p => p.id === projectId);
+  function selectIdea(id:string) {
+    setIdeaId(id);setContext(null);
+  }
   return <div className="app">
     <aside className="rail">
       <div className="brand"><span className="brand-mark">∿</span><div>AI SCIENTIST<small>LOCAL WORKBENCH</small></div></div>
@@ -152,10 +156,10 @@ export default function App() {
             const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {text: ideaText,...(editingIdea ? {expected_text:editingIdea.text} : {})});
             setIdeaId(idea.id); setIdeaText(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea bản nháp.');
           });}}><label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || loading || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');}}>Hủy sửa idea</button>}</div></form>
-          <h2 className="section-heading">Bản nháp đã lưu</h2>{!ideas.length && <p className="empty">Chưa có idea.</p>}
-          {ideas.map(idea => <article className="resource" key={idea.id}><div className="panel-head"><p className="source-meta">{idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><button disabled={busy || idea.state === 'PLANNING' || idea.state === 'APPROVED'} onClick={() => {setEditingIdea(idea);setIdeaText(idea.text);}}>Sửa idea</button></div><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}
+          <IdeaCards ideas={ideas} selectedId={ideaId} busy={busy} onSelect={selectIdea}
+            onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);}}/>
         </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn idea và đúng nguồn của project. Xem trước không gọi Codex; bấm lập proposal để gọi Codex thật.</p>
-          <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => {setIdeaId(e.target.value);setContext(null);}}><option value="">Chọn idea</option>{ideas.map(idea => <option key={idea.id} value={idea.id}>{idea.text.slice(0,70)}</option>)}</select></label>
+          <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.map(idea => <option key={idea.id} value={idea.id}>Idea {idea.id.slice(0,8)}</option>)}</select></label>
             {resources.map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || loading || !ideaId || !selected.length} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
             <button className="primary" disabled={busy || loading || planning || !ideaId || !selected.length || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {

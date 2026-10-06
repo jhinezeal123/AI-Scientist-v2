@@ -54,8 +54,10 @@ config validation từ chối path không tồn tại trước khi mở app.
 1. Chọn/tạo project. **Library:** lưu đề bài, evaluation/rules và data reference có schema,
    đường mount, provenance. URL không kèm nội dung được ghi “chưa đọc”; app không tự fetch.
    **Nhập nguồn T01** dùng snapshot đã đọc ngày 2026-10-06, không tự refresh.
-2. **Idea:** nhập ý tưởng và **Lưu idea**, chọn idea và checkbox nguồn phù hợp, rồi lập
-   proposal. Nếu agent hỏi lại, nhập câu trả lời trong conversation và tiếp tục lập proposal.
+2. **Idea:** nhập ý tưởng và **Lưu idea**. Idea đã lưu hiện thành card alias `Idea <8 ký tự ID>`
+   kèm trạng thái; bấm card để mở nội dung và chọn idea cho proposal, bấm lại để thu gọn.
+   Chọn checkbox nguồn phù hợp rồi lập proposal. Nếu agent hỏi lại, nhập câu trả lời
+   trong conversation và tiếp tục lập proposal.
 3. Đọc mục tiêu, split, metric, các bước, budget và outputs. Bấm **Duyệt proposal vN** của
    bản hiện hành. Sửa idea/nguồn trước approval sẽ làm proposal cũ `STALE`; cần lập bản mới.
    Approval tạo run, chưa tự chạy coder hoặc gửi Kaggle.
