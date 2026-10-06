@@ -5,6 +5,7 @@ import RunMonitorPanel from './RunMonitorPanel';
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_budget:number;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
   result_metric?:{name:string;direction:string;final_value:number;best_value:number};
+  collection?:{phase:string;report_attempts:number;report_limit:number};
   identity:{account:string;username:string;kernel_ref:string;version?:number;session_id?:number;kernel_id?:number;script_version_id?:number;status?:string;submit_attempts:number}|null;
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
@@ -31,7 +32,7 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
     APPROVED:'Đã duyệt', IMPLEMENTING:'Đang tạo code', PREFLIGHT:'Sẵn sàng gửi',
     SUBMITTING:'Đang gửi Kaggle', UNKNOWN:'Cần đối soát', FAILED:'Có lỗi',
     REMOTE_RUNNING:'Kaggle đang chạy', REMOTE_SUCCEEDED:'Kaggle hoàn tất',
-    REMOTE_FAILED:'Kaggle có lỗi', COMPLETED:'Hoàn tất',COLLECTING:'Kaggle hoàn tất · Chờ outputs',RUNNING:'Kaggle đang chạy',QUEUED:'Đang xếp hàng',STARTING:'Đang khởi động',
+    REMOTE_FAILED:'Kaggle có lỗi', COMPLETED:'Hoàn tất',COLLECTING:'Đang hoàn tất kết quả',RUNNING:'Kaggle đang chạy',QUEUED:'Đang xếp hàng',STARTING:'Đang khởi động',
   };
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +54,8 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
         onClick={() => setSelection(selectedId === run.id ? null : {projectId,id:run.id})}>
         <span className="run-alias">Run {run.id.slice(0,8)}</span>
         <span className="run-card-status" data-state={observations[run.id] || run.state}>
-          <span className="run-status-dot" aria-hidden="true"/>{labels[observations[run.id] || run.state] || observations[run.id] || run.state}
+          <span className="run-status-dot" aria-hidden="true"/>{run.state === 'COLLECTING' && details.find(item => item.id === run.id)?.collection?.phase === 'retry_exhausted'
+            ? 'Report cần xử lý' : labels[observations[run.id] || run.state] || observations[run.id] || run.state}
         </span>
       </button>)}
     </div>}
@@ -70,6 +72,8 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
         disabled={busy || run.attempts.length >= run.coder_budget}
         onClick={() => void onStart(run.id)}>{run.state === 'FAILED' ? 'Tiếp tục trong ngân sách còn lại' : 'Tạo code và notebook bằng Codex'}</button>}
       <p className="muted">Coder: {run.attempts.length}/{run.coder_budget} lượt đã cấp · Submit: {run.identity?.submit_attempts || 0}/1.</p>
+      {run.collection && <p className="muted">Report: {run.collection.report_attempts}/{run.collection.report_limit} lượt đã cấp.</p>}
+      {run.state === 'COLLECTING' && run.collection?.phase === 'retry_exhausted' && <p role="alert" className="alert error">Outputs đã được xác minh. Report đã hết lượt thử cho phép; cần xử lý lỗi và duyệt thêm lượt report để tiếp tục.</p>}
       {run.state === 'SUBMITTING' && <p role="status">Đang gửi notebook qua MCP và xác minh phiên chạy…</p>}
       {run.ready && <button className="primary" disabled={busy} onClick={() => void onSubmit(run.id)}>Gửi notebook và chạy trên Kaggle</button>}
       {run.identity && <div className="context"><h3>Notebook trên Kaggle</h3>
@@ -79,7 +83,7 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
         {run.identity.status && <p>Trạng thái Kaggle: {run.identity.status}</p>}
         {run.state === 'UNKNOWN' && <p>Chưa biết chắc kết quả gửi. Đối soát chỉ đọc notebook đã gửi; không tạo lần gửi mới.</p>}
         <button disabled={busy || run.state === 'SUBMITTING'} onClick={() => void onReconcile(run.id)}>{run.state === 'UNKNOWN' ? 'Đối soát lần gửi' : 'Cập nhật trạng thái từ Kaggle'}</button>
-        {(['REMOTE_SUCCEEDED','COLLECTING'].includes(observations[run.id] || run.state)) && <p role="status">Kaggle đã hoàn tất. Workbench đang xác minh outputs và tạo report.</p>}
+        {(['REMOTE_SUCCEEDED','COLLECTING'].includes(observations[run.id] || run.state) && run.collection?.phase !== 'retry_exhausted') && <p role="status">Kaggle đã hoàn tất. Workbench đang xác minh outputs và tạo report.</p>}
       </div>}
       <div className="context"><h3>Mục tiêu</h3><p>{run.purpose}</p><code className="source-id">Proposal {run.proposal_id} · v{run.proposal_version}</code>
         {!!run.expected_outputs?.length && <p className="muted">Đầu ra đã duyệt: {run.expected_outputs.join(' · ')}</p>}

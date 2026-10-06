@@ -1,4 +1,159 @@
-# MVP 0 — hướng dẫn và readiness note
+# MVP 0 — hướng dẫn sử dụng và bằng chứng nghiệm thu
+
+## Khởi động từ checkout hiện có
+
+Chạy PowerShell tại `D:\Documents\AI-Scientist-v2`:
+
+```powershell
+& .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --port 8011
+```
+
+Mở **http://127.0.0.1:8011/**. Lệnh này khởi động backend, MCP Kaggle qua stdio và
+serve GUI đã build. Chỉ chạy một backend cho workspace. Dừng bằng `Ctrl+C`, rồi dùng
+cùng lệnh để mở lại. Project không nằm trong browser và không phụ thuộc port.
+
+### Setup lần đầu
+
+Checkout đang dùng Python 3.12, Node 24/npm 11, donor tại `D:\Documents\kaggle_token`
+và hai virtualenv riêng. Donor phải có các dependencies, registry account, token và
+browser profile đã cấu hình theo README của donor. Đăng nhập Codex CLI và Kaggle bằng
+tài khoản của bạn trước khi dùng app; giữ credential trong donor, không đưa vào config/Git.
+
+```powershell
+# Từ thư mục repo, nếu chưa có virtualenv:
+py -3.12 -m venv .venv-mvp0
+& .\.venv-mvp0\Scripts\python.exe -m pip install -r requirements-mvp0.lock.txt
+
+# Build frontend:
+Push-Location workbench-ui
+npm ci
+npm run build
+Pop-Location
+
+# Chỉ tạo config nếu chưa tồn tại, giữ nguyên config hiện có:
+New-Item -ItemType Directory -Path .workbench -Force | Out-Null
+if (-not (Test-Path -LiteralPath .workbench/config.local.json)) {
+    Copy-Item -LiteralPath config-mvp0.example.json -Destination .workbench/config.local.json
+}
+```
+
+Sửa đường dẫn tuyệt đối trong `.workbench/config.local.json` cho máy của bạn:
+`donor_root`, `donor_python`, `workspace_root`, `codex_executable`; chọn
+`codex_model`, `codex_reasoning_effort`, `kaggle_account_alias` và `kaggle_username`.
+Example hiện dùng `gpt-6-luna`/`max`, alias `jhin_access_token.txt`, username
+`huynhtrungcuong`. Alias là tên account đã đăng ký trong donor, không phải token.
+Executable hiện trỏ tới bản Codex npm trong đường dẫn vendor cố định, không dùng thư mục
+version của desktop app. Nếu package layout thay đổi, cập nhật path rồi khởi động lại;
+config validation từ chối path không tồn tại trước khi mở app.
+
+### Đi hết pipeline bằng GUI
+
+1. Chọn/tạo project. **Library:** lưu đề bài, evaluation/rules và data reference có schema,
+   đường mount, provenance. URL không kèm nội dung được ghi “chưa đọc”; app không tự fetch.
+   **Nhập nguồn T01** dùng snapshot đã đọc ngày 2026-10-06, không tự refresh.
+2. **Idea:** nhập ý tưởng và **Lưu idea**, chọn idea và checkbox nguồn phù hợp, rồi lập
+   proposal. Nếu agent hỏi lại, nhập câu trả lời trong conversation và tiếp tục lập proposal.
+3. Đọc mục tiêu, split, metric, các bước, budget và outputs. Bấm **Duyệt proposal vN** của
+   bản hiện hành. Sửa idea/nguồn trước approval sẽ làm proposal cũ `STALE`; cần lập bản mới.
+   Approval tạo run, chưa tự chạy coder hoặc gửi Kaggle.
+4. **Run:** bấm thẻ alias của run đã duyệt → **Tạo code và notebook bằng Codex**.
+   Xem source/config/notebook và preflight. Nếu code bị từ chối, dùng lượt sửa còn lại trong
+   budget; preflight là kiểm tra contract/static, không chứng minh thuật toán ML đúng toàn bộ.
+5. Khi run hiện **Sẵn sàng gửi** (`PREFLIGHT` đạt), bấm **Gửi notebook và chạy trên Kaggle**
+   một lần. App kiểm account/rules/data/quota, lưu submit
+   intent và ghim owner/ref/kernel/version/script version/session. Không tự gửi leaderboard.
+6. Giữ tab **Run** để xem status và log; các tab Library/History vẫn dùng được trong lúc chờ.
+   Log dùng cursor được lưu ở backend. Sau exact-session success, app tải outputs, kiểm
+   manifest/hash và kết quả, gọi Codex viết report, rồi mới ghi `COMPLETED`.
+7. **History → Mở chi tiết run:** xem snapshot idea/proposal/source đã duyệt, report preview,
+   notebook/source, facts và output links. Mở lại sau restart vẫn giữ cùng run và kết quả.
+
+### Dữ liệu lưu ở đâu
+
+| Đường dẫn trong workspace | Nội dung |
+| --- | --- |
+| `.workbench/config.local.json` | Config local, không chứa credential |
+| `.workbench/projects/<project_id>/project.sqlite` | Library, idea/proposal, run, journal, log/cursor |
+| `.workbench/projects/<project_id>/runs/<run_id>/` | Source, notebook, checks, submit/monitor/collection state, outputs, report/facts |
+| `.workbench/runtime-state.json` | Marker worker; restart không replay job Codex |
+| `.workbench/logs/` | Log backend/proxy để chẩn đoán |
+
+Những thư mục runtime được ignore Git; commit task không sao lưu dataset hoặc kết quả local.
+Muốn sao lưu project, dừng backend rồi sao chép cả thư mục project cùng artifacts.
+
+### UNKNOWN, lỗi và giới hạn MVP0
+
+- `UNKNOWN` nghĩa là chưa xác định được kết quả thao tác/identity; bấm **Đối soát lần gửi** để đọc
+  lại trạng thái. Không gửi lại run đã dùng submit, kể cả run failed hoặc lỗi HTTP499.
+- Một run active/unresolved khóa run mới. Cấu hình hiện tại cho phép tạo run mới sau khi
+  kiểm account không còn session hoạt động; run UNKNOWN cũ vẫn được giữ và cấm gửi lại.
+  Không sửa DB/counter để vượt gate. Đổi quy tắc bằng config rồi restart nếu cần.
+- Codex job timeout/interrupted không tự replay. Report retry có counter bền vững, mặc định
+  tối đa ba lần; outcome chưa biết cần đối soát. Khi user cho phép sửa report ngoài budget,
+  lưu giới hạn mới riêng cho run cùng record authorization, giữ nguyên số lượt đã tiêu thụ.
+  Report đã lưu và run `COMPLETED` không gọi lại.
+- Budget mỗi run tối đa hai coder calls, một training/submit, 600 giây training và
+  10,000,000 bytes outputs. Thời gian queue/setup/download/report nằm ngoài training timer.
+- MVP0 hiện giữ contract training: metric hữu hạn, epoch telemetry và checkpoint artifact.
+  General implement cho EDA/synthetic/PCA/đọc ảnh là phần mở rộng sau này. GUI chung chỉ
+  hiện status/log/report; không yêu cầu chart hoặc ETA.
+- Nghiệm thu Soil dùng 24 sample/127 ảnh, group split 20 train/4 validation, seed 42 và CNN
+  nhỏ từ đầu. EMD validation cục bộ không phải leaderboard score hay bằng chứng chất lượng
+  nghiên cứu. Phải đọc và duyệt proposal cho idea mới, không dùng số đo của run cũ.
+- Một worker Codex và một account demo; chưa có quản lý nhiều session/account hay compare.
+  Log SSE có cửa sổ đọc hữu hạn; app đối soát với log terminal trước khi hoàn tất collection.
+
+## T09 — Bằng chứng hiện tại, 2026-10-06
+
+**MVP0 đã đạt tám tiêu chí chức năng P0 và CP0-A…D trong scope prototype.** Run mới đi qua
+Library/idea/approval/Codex/code/submit/status/outputs/report/History bằng GUI, Kaggle success
+và app `COMPLETED`. Trong nghiệm thu đã sửa blocker schema của report; user cho phép sửa
+tiếp và lượt report thứ tư thành công. Source workload/data giữ nguyên, coder1/2 và submit1/1.
+
+| Bằng chứng | Kết quả |
+| --- | --- |
+| Proposal được user duyệt | `93d367ebf0d143f6b9fa1b0de54cb812` v1, context SHA `107a43587eeefdbbb1c6a62e2ac896dccafdb342e7a1a402588b64a54f50fdca` |
+| Run mới qua GUI | `f45680b33f3d40c0bdfaa6275e6869d2`; coder1/2, native session `01a111c3-3d01-7291-902a-e4c2d76c6a0f`; preflight PASS |
+| Source do Codex tạo | SHA `d316d0b31a0b2928f0f88aed3a804a3addf468a5159e96ec6e9d3db2945c4100`; không sửa workload/data thủ công |
+| MCP/Kaggle thật | `huynhtrungcuong/ailab-f45680b33f3d40c0bdfaa6275e6869d2`, version1, kernel137345547/script217065827/session355795064; remote COMPLETE, submit1/1 |
+| Dữ liệu/training thật | Mount165files; 24 groups/127 ảnh, train20/108 ảnh, validation4/19 ảnh; seed42/CNN[16,32,64]/3epoch |
+| Measurements | EMD `184.78710864267654 → 109.24989188610095 → 70.26776872201779`; runner elapsed `30.892590729000005` giây |
+| Log live → terminal | RUNNING/session_stream:22 records/cursor1:22; COMPLETE/terminal_rest:21 records/cursor2:21/gap=false. Nguồn replay khác tạo generation mới; terminal được đối soát với runner.log |
+| Outputs | metrics656B, checkpoint100939B, result4587B, runner.log835B; bốn file khớp manifest size/hash |
+| Report | Ba lần ValidationError trước sửa; sau approval bổ sung, lượt4 tạo report đúng schema/facts; `report_attempts=4`, `report_limit=4`, phase COMPLETED/report.md |
+| Restart cuối sau COMPLETED | Toàn bộ snapshot run mới giữ nguyên:28 links HTTP200/hash đúng, report/context/history/cursor/collection state/counters; không replay report/coder/push |
+| Restart khi report bị chặn | Trước approval sửa,27 links/counters/report phase3 giữ nguyên; app không tự vượt giới hạn |
+| Restart với report đã lưu | Run cũ `e2545599…` giữ 24 links HTTP200/hash đúng,21 records/cursor1:21, report/context/history; không replay |
+| Focused checks | 78 backend tests,12 donor/MCP/Windows-worker tests,5 donor runtime fixtures đạt;29 focused backend checks cho report/implementation/handoff và frontend tsc/Vite build đạt; git diff --check đạt |
+
+Lỗi đọc monitor đầu tiên được retry tự động và đã hồi phục; nguyên nhân chi tiết của
+RuntimeError đó chưa được lưu. Ba lỗi report xảy ra trước diagnostics mới, nên không suy
+đoán trường sai cụ thể. Bản sửa đã thêm JSON schema và kiểu từng trường vào report prompt,
+lưu field/type validation với input bị loại, đồng thời giữ error class trong lỗi run.
+Khi hết budget, Run card hiện **Report cần xử lý**, chi tiết hiện counter và lý do dừng;
+không ghi “Chờ outputs” khi phần bị chặn là report. User sau đó duyệt “cứ sửa report tới khi ổn”.
+Đã ghi authorization trong `report-retry-authorization.json`, tăng limit riêng run này từ3 lên4,
+không reset counter hoặc thay budget run khác. Lượt4 qua model thật thành công ngay sau sửa.
+Report đã đọc lại, khớp metric, split/count và refs; lưu facts/hash và AI assistance. Không thêm
+training hoặc submit. Sau restart, GUI History mở lại được run/report và hiện Report4/4.
+
+Evidence local (ignore Git): `.workbench/readiness/t09-live-observations.json`,
+`t09-before-restart.json`, `t09-after-restart.json`, `t09-pending-before-restart.json`,
+`t09-pending-after-restart.json`, `t09-proposal-review.png`, `t09-running-gui.png`,
+`t09-report-blocker-gui.png`, `t09-report-completed-gui.png`,
+`t09-gui-before-restart.json`, `t09-gui-after-restart.json`.
+Run root chứa approved context, source/notebook/checks, collection-manifest, result-facts,
+collection-state và outputs. Regression cases double approval/stale/missing data/wrong session
+và observer restart dùng local fixtures, không tạo thêm GPU run.
+
+Kiểm scope diff xác nhận source stock ngoài `ai_scientist/workbench/` và Codex adapter donor
+không bị rewrite. Mốc mục tiêu dưới8giờ chưa được chứng minh; số tests không là bằng chứng
+đạt mốc thời gian hoặc đạt chất lượng nghiên cứu.
+
+## Nhật ký triển khai T01–T08
+
+Các mục bên dưới ghi trạng thái tại thời điểm từng task được bàn giao; blocker/path/lệnh
+lịch sử không thay thế hướng dẫn hiện hành phía trên hoặc bằng chứng T09.
 
 ## Trạng thái T01 — 2026-10-06
 

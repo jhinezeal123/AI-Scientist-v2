@@ -322,10 +322,38 @@ def test_report_attempt_count_is_durable_and_automatic_retries_are_bounded(tmp_p
                 state_path.write_text(json.dumps(state), encoding='utf-8')
         state = json.loads(state_path.read_text(encoding='utf-8'))
         assert state['phase'] == 'retry_exhausted'
+        assert f['implementation'].detail(f['project'], f['run']['id'])['collection'] == {
+            'phase': 'retry_exhausted', 'report_attempts': MAX_REPORT_ATTEMPTS,
+            'report_limit': MAX_REPORT_ATTEMPTS,
+        }
         assert len(f['report_worker'].calls) == MAX_REPORT_ATTEMPTS
         assert not f['service'].retry_due(f['project'], f['run']['id'])
         await f['service'].collect_and_report(f['project'], f['run']['id'])
         assert len(f['report_worker'].calls) == MAX_REPORT_ATTEMPTS
+        await f['planner'].close(); await f['worker'].close(1)
+    asyncio.run(check())
+
+
+def test_authorized_report_repair_preserves_consumed_attempts_and_run_limit(tmp_path, monkeypatch):
+    f = prepared(tmp_path, monkeypatch)
+    state_path = f['root'] / 'collection-state.json'
+    state_path.write_text(json.dumps({'phase': 'retry_exhausted', 'report_attempts': 3}))
+    assert not f['service'].retry_due(f['project'], f['run']['id'])
+    # Explicit user authorization grants another attempt; the consumed counter stays at three.
+    state_path.write_text(json.dumps({'phase': 'retry_wait', 'report_attempts': 3, 'report_limit': 4}))
+    assert f['service'].retry_due(f['project'], f['run']['id'])
+
+    async def check():
+        result = await f['service'].collect_and_report(f['project'], f['run']['id'])
+        assert result['state'] == 'COMPLETED'
+        state = json.loads(state_path.read_text())
+        assert state['report_attempts'] == 4 and state['report_limit'] == 4
+        assert f['implementation'].detail(f['project'], f['run']['id'])['collection'] == {
+            'phase': 'COMPLETED', 'report_attempts': 4, 'report_limit': 4,
+        }
+        assert len(f['report_worker'].calls) == 1
+        await f['service'].collect_and_report(f['project'], f['run']['id'])
+        assert len(f['report_worker'].calls) == 1
         await f['planner'].close(); await f['worker'].close(1)
     asyncio.run(check())
 

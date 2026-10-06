@@ -385,7 +385,7 @@ class ProjectStore:
 
     def collection_failed(self, project_id, run_id, error_type):
         """Keep a remote success in COLLECTING until outputs and report are durable."""
-        if error_type not in {'ValueError','RuntimeError','TimeoutError','OSError','KeyError','TypeError'}:
+        if error_type not in {'ValueError','ValidationError','RuntimeError','TimeoutError','OSError','KeyError','TypeError'}:
             error_type='Error'
         with self.connection(project_id) as connection:
             connection.execute('BEGIN IMMEDIATE')

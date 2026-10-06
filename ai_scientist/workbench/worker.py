@@ -5,6 +5,7 @@ import inspect
 import json
 from pathlib import Path
 from threading import Event
+from pydantic import ValidationError
 
 from .models import validate_result
 
@@ -46,6 +47,7 @@ class RuntimeWorker:
         self._save({"status": "running", "request_id": request.request_id, "role": request.role})
         self.future = self.executor.submit(self.runtime.run, request, lambda event: None,
                                            self.cancelled.is_set)
+        result = None
         try:
             result = await asyncio.shield(asyncio.wrap_future(self.future))
             payload = validate_result(request.role, result)
@@ -60,7 +62,18 @@ class RuntimeWorker:
             unknown = isinstance(exc, asyncio.CancelledError) or (
                 self.uncertain_error is not None and isinstance(exc, self.uncertain_error))
             status = "unknown" if unknown else "interrupted" if self.closed else "failed"
-            self._save({**self.state, "status": status})
+            failure = {**self.state, "status": status}
+            if isinstance(exc, ValidationError):
+                allowed = ROLE_PAYLOADS[request.role].model_fields
+                failure['validation_errors'] = [
+                    {'field': issue['loc'][0] if issue['loc'] and issue['loc'][0] in allowed else 'payload',
+                     'type': issue['type']}
+                    for issue in exc.errors(include_input=False, include_context=False, include_url=False)[:20]
+                ]
+                session_id = getattr(result, 'session_id', None)
+                if isinstance(session_id, str) and len(session_id) <= 256:
+                    failure['session_id'] = session_id
+            self._save(failure)
             raise
         finally:
             # Retain a running future after caller cancellation: no second admission.

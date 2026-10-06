@@ -150,7 +150,7 @@ class ImplementationService:
                 return
 
     def detail(self, project_id, run_id):
-        from .collection import artifact_paths
+        from .collection import artifact_paths, _collection_state, _report_limit
         run = self.store.run(project_id, run_id)
         root = self.root(project_id, run_id)
         run['artifacts'] = [name for name in ARTIFACT_FILES if (root / name).is_file() and not (root / name).is_symlink()]
@@ -161,6 +161,12 @@ class ImplementationService:
         run['purpose'] = approved['body']['objective']
         run['expected_outputs'] = approved['body']['expected_outputs']
         run['identity'] = json.loads(run.pop('identity_json')) if run['identity_json'] else None
+        collection = _collection_state(root / 'collection-state.json')
+        phase = collection.get('phase')
+        attempts = collection.get('report_attempts')
+        if phase in {'COLLECTING', 'REPORTING', 'COMPLETED', 'retry_wait', 'retry_exhausted',
+                     'report_uncertain', 'report_result_missing', 'report_result_invalid', 'interrupted'} and type(attempts) is int and attempts >= 0:
+            run['collection'] = {'phase': phase, 'report_attempts': attempts, 'report_limit': _report_limit(collection)}
         facts_path = root / 'result-facts.json'
         if facts_path.is_file() and not facts_path.is_symlink() and facts_path.stat().st_size <= 1_000_000:
             try:

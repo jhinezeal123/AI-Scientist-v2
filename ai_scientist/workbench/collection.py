@@ -42,6 +42,14 @@ def _collection_state(path: Path) -> dict:
         return {}
 
 
+def _report_limit(state: dict) -> int:
+    """Default budget; a user-authorized repair can persist a larger limit for one run."""
+    limit = state.get('report_limit', MAX_REPORT_ATTEMPTS)
+    if type(limit) is not int or not MAX_REPORT_ATTEMPTS <= limit <= 100:
+        raise ValueError('Invalid authorized report attempt limit')
+    return limit
+
+
 def _read_json(path: Path, limit=MAX_OUTPUT_BYTES):
     if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(path.parent.resolve()):
         raise ValueError('Required collected evidence file is missing or linked')
@@ -340,8 +348,14 @@ def _report_prompt(facts: dict) -> str:
         'include credentials, URLs, local absolute paths, or new evidence references. evidence_refs must be a subset '
         'of facts.evidence_refs. The runtime expects one outer JSON object with keys text and files. Set files to '
         '{}. Set text to a JSON-encoded report object with keys summary, interpretation, limitations, '
-        'suggested_next, evidence_refs. Do not return the report object directly at the outer level.\n'
-        'VALIDATED FACTS:\n'
+        'suggested_next, evidence_refs. summary and interpretation must each be a plain string. '
+        'limitations, suggested_next and evidence_refs must each be an array of strings, even with one item. '
+        'Do not add keys, nest the report under another key, or put objects/arrays in the two prose fields. '
+        'Do not return the report object directly at the outer level. Follow the exact inner schema below.\n'
+        'REPORT PAYLOAD JSON SCHEMA:\n'
+        + json.dumps(ReportPayload.model_json_schema(), sort_keys=True, separators=(',', ':'))
+        + '\n'
+        + 'VALIDATED FACTS:\n'
         + json.dumps(facts, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     )
 
@@ -446,7 +460,11 @@ class RunResultsService:
             if state.get('phase') in {'report_uncertain', 'retry_exhausted'}:
                 return False
             attempts = state.get('report_attempts', 0)
-            if type(attempts) is not int or attempts < 0 or attempts >= MAX_REPORT_ATTEMPTS:
+            try:
+                limit = _report_limit(state)
+            except ValueError:
+                return False
+            if type(attempts) is not int or attempts < 0 or attempts >= limit:
                 return False
             if self.worker.state.get('status') == 'unknown':
                 return False
@@ -476,11 +494,15 @@ class RunResultsService:
                     elif state.get('phase') == 'REPORTING' and self.worker.state.get('status') == 'unknown':
                         phase = 'report_uncertain'
                     elif (state.get('phase') == 'REPORTING' and type(attempts) is int
-                          and attempts >= MAX_REPORT_ATTEMPTS):
+                          and attempts >= _report_limit(state)):
                         phase = 'retry_exhausted'
                     else:
                         phase = 'retry_wait'
                     state.update({'phase': phase, 'error_type': type(exc).__name__})
+                    if self.worker.state.get('request_id') == state.get('request_id'):
+                        issues = self.worker.state.get('validation_errors')
+                        if issues:
+                            state['validation_errors'] = issues
                     if phase == 'retry_wait':
                         state['retry_after'] = (datetime.now(timezone.utc) + timedelta(seconds=20)).isoformat()
                     else:
@@ -506,6 +528,7 @@ class RunResultsService:
         state_path = root / 'collection-state.json'
         previous_state = await asyncio.to_thread(_collection_state, state_path)
         report_attempts = previous_state.get('report_attempts', 0)
+        report_limit = _report_limit(previous_state)
         if type(report_attempts) is not int or report_attempts < 0:
             raise ValueError('Persisted report attempt counter is invalid')
         previous_request_id = previous_state.get('request_id')
@@ -518,10 +541,10 @@ class RunResultsService:
             raise ReportRecoveryBlocked('report_result_missing')
         if not has_saved_report and self.worker.state.get('status') == 'unknown':
             raise ReportRecoveryBlocked('report_uncertain')
-        if report_attempts >= MAX_REPORT_ATTEMPTS and not has_saved_report:
+        if report_attempts >= report_limit and not has_saved_report:
             raise ReportRecoveryBlocked('retry_exhausted')
         await asyncio.to_thread(write_json, state_path, {
-            'phase': 'COLLECTING', 'report_attempts': report_attempts,
+            'phase': 'COLLECTING', 'report_attempts': report_attempts, 'report_limit': report_limit,
             'identity': {k: pinned[k] for k in IDENTITY},
         })
         response = await self._collect_outputs(root, pinned)
@@ -559,13 +582,13 @@ class RunResultsService:
             except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                 raise ReportRecoveryBlocked('report_result_invalid') from None
         else:
-            if report_attempts >= MAX_REPORT_ATTEMPTS:
+            if report_attempts >= report_limit:
                 raise ReportRecoveryBlocked('retry_exhausted')
             request_id = uuid.uuid4().hex
             report_attempts += 1
             await asyncio.to_thread(write_json, state_path, {
                 'phase': 'REPORTING', 'request_id': request_id, 'facts_sha256': facts_hash,
-                'report_attempts': report_attempts,
+                'report_attempts': report_attempts, 'report_limit': report_limit,
                 'identity': {k: pinned[k] for k in IDENTITY},
             })
             narrative = await self._run_report(request_id, root, facts, report_result_path)
@@ -582,7 +605,7 @@ class RunResultsService:
         await asyncio.to_thread(write_json, state_path, {
             'phase': 'COMPLETED', 'facts_sha256': facts_hash,
             'identity': {k: pinned[k] for k in IDENTITY}, 'report_path': 'report.md',
-            'report_attempts': report_attempts,
+            'report_attempts': report_attempts, 'report_limit': report_limit,
         })
         return {'run_id': run_id, 'state': completed}
 

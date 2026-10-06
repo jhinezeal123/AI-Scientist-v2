@@ -2,6 +2,12 @@
 
 Ngày triển khai: 2026-10-06.
 
+**Bổ sung T09:** run `f45680b33f3d40c0bdfaa6275e6869d2`, exact session355795064,
+đã xác minh live session_stream khi RUNNING:22records/cursor1:22. Terminal REST đối soát
+21records/cursor2:21/gap=false với runner.log; restart giữ log/counter, không push lại.
+Lỗi đọc đầu hồi phục tự động. Các giới hạn “chưa kiểm live” bên dưới là trạng thái lịch sử
+tại lúc bàn giao T07; xem [bằng chứng T09](MVP0_RUN_GUIDE.md#t09--bằng-chứng-hiện-tại-2026-10-06).
+
 **Điều chỉnh theo user:** Run phục vụ general implement: tạo synthetic data, EDA, PCA,
 đọc ảnh và các tác vụ khác. GUI chung chỉ hiển thị trạng thái và log; đã bỏ biểu đồ metric,
 dropdown metric, mẫu epoch và ETA. Telemetry training trong backend là dữ liệu tùy chọn.

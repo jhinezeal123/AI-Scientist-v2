@@ -143,7 +143,7 @@ Chưa cần leaderboard submission, model tốt nhất, nhiều worker, full RAG
 | P0-03 | Sau approval, Codex CLI thật tạo notebook bám proposal và checks cơ bản đạt |
 | P0-04 | Notebook chạy thật qua MCP trên dữ liệu competition, terminal success, exact identity được lưu |
 | P0-05 | GUI nhận delta theo cursor; không mất/nhân đôi dòng, kể cả dòng có nội dung giống nhau; UI không bị block |
-| P0-06 | Outputs/report dựa trên run thật; demo training ghi ít nhất một metric theo step/epoch và vẽ curve |
+| P0-06 | Outputs/report dựa trên run thật; demo training ghi ít nhất một metric theo step/epoch; GUI hiện status/log/report, artifact visualization chỉ khi tác vụ có tạo |
 | P0-07 | Idea/proposal/notebook/run/report cùng project; restart không tự submit trùng |
 | P0-08 | User đi hết flow bằng GUI sau setup, không copy code/test/upload notebook bằng tay |
 
@@ -440,12 +440,30 @@ Không xây SSO enterprise, billing, multi-region hoặc fleet orchestration cho
 | Hạng mục | Trạng thái hiện tại | Bằng chứng |
 | --- | --- | --- |
 | Fork/checkout/branch upstream | Đã chuẩn bị | origin/upstream và branch codex/personal-implementation-agent |
-| MVP 0 | Chưa nghiệm thu | Chưa có golden path Codex → Kaggle từ fork |
+| MVP 0 / T09 | Đạt prototype theo P0-01…08 | GUI → approval → Codex → MCP → Kaggle COMPLETE → outputs/report → History trên run `f45680b3…`. Report schema đã sửa; user duyệt repair, lượt4 thành công, app COMPLETED. Restart giữ28links/report/context/counters, không replay. Mốc mục tiêu dưới8giờ chưa được chứng minh. |
+| CP0-A: readiness + proposal | Đạt | Readiness T01/T06 đúng huynhtrungcuong; Library snapshot và clarification T04; proposal T09 v1 `93d367ebf0d143f6b9fa1b0de54cb812` được user duyệt trước coder. Gate/stale/double approval fixtures đạt. |
 | CP0-B / T06 | Đạt submit, pin identity và runtime mount | Run `e2545599e7e94f66b6fc9f682b23fa72`: HTTP200/version1, kernel137301710/script_version216981117/session355701890, COMPLETE; runtime mount165files và3epochs. Run HTTP499 cũ giữ UNKNOWN. T08 sau đó thu outputs/report cho exact session; xem MVP0_RUN_GUIDE.md và T08 trong IMPLEMENT_MVP0.md. |
-| T07 / P0-05 | Đã triển khai; live khi training còn chưa xác minh | GUI status/log, không bắt buộc chart/ETA. Fresh MCP terminal và SSE của exact session đã kết thúc: 21 records, gap=false. Backend restart/paging giữ cursor1:21, submit1/1. Live SSE của session đang chạy vẫn là giới hạn; chưa đánh dấu P0-05 đầy đủ chỉ từ terminal replay. Xem T07_MONITORING.md. |
-| CP0-C / T08 | Đã thu outputs, report và history cho run thành công có sẵn; giữ scope training ban đầu | Exact-session manifest khớp bốn outputs; run `e2545599e7e94f66b6fc9f682b23fa72` ở `COMPLETED`, submit1/1, coder0/2. Report nêu EMD validation cục bộ, không phải leaderboard score, cùng giới hạn và AI assistance. History nối approved idea/proposal/source snapshot, code, kết quả và links. Tổng report calls trước khi có counter bền vững chưa xác minh. User đã yêu cầu khôi phục T08 training; general implement mở rộng đồng bộ sau MVP0. Xem T08 trong IMPLEMENT_MVP0.md và MVP0_RUN_GUIDE.md. |
+| T07 / P0-05 | Đạt trong scope demo T09 | Run `f45680b3…`: live session_stream khi RUNNING nhận22 records/cursor1:22; terminal đối soát21 records/cursor2:21/gap=false. Lỗi đọc đầu hồi phục tự động; GUI đọc cache và vẫn đổi tab được. Cursor/generation/repeated-line/restart fixtures và restart thật giữ log; không bắt buộc chart/ETA. Xem bằng chứng T09 trong MVP0_RUN_GUIDE.md. |
+| CP0-C / T08 | Đạt, giữ scope training ban đầu | Golden path T09 `f45680b3…`:4outputs đúng manifest/hash,3metric points, terminal gap=false, report đo EMD70.26776872201779/4validationgroups/19ảnh, AI assistance và refs có thật; app COMPLETED. Counter report4 gồm3lỗi và1thành công được user duyệt repair. Run cũ e2545599 cũng COMPLETED; tổng calls trước counter bền vững của run cũ vẫn chưa xác minh. General implement mở rộng sau MVP0. |
+| CP0-D: bàn giao prototype | Đạt | Guide một lệnh/config/GUI/recovery đã cập nhật. 78backend +12donor wrapper/worker +5runtime fixtures và frontend build đạt. Restart sau golden path COMPLETED giữ28artifacts/report/context/log/counters coder1/submit1/report4; GUI History mở lại report đúng run, không replay. |
 | MVP 1–6 / CP-PERSONAL | Chưa nghiệm thu | Chưa có sản phẩm cá nhân đầy đủ |
 | MVP 7 / CP-TEAM | Chưa bắt đầu | Phụ thuộc CP-PERSONAL |
+
+### Bảng tám tiêu chí MVP0 — nghiệm thu T09
+
+Evidence chi tiết, ID/hash/session, test results và đường dẫn local xem
+[MVP0_RUN_GUIDE.md — T09](MVP0_RUN_GUIDE.md#t09--bằng-chứng-hiện-tại-2026-10-06).
+
+| ID | Trạng thái | Bằng chứng thực tế |
+| --- | --- | --- |
+| P0-01 | Đạt | Library đúng project, ba nguồn đã chọn được ghim version/hash trong context `107a4358…`; nguồn/idea/proposal không đổi sau restart. Store/context isolation fixtures đạt. |
+| P0-02 | Đạt | Conversation clarification/câu trả lời/proposal v2 của T04 được user kiểm; T09 v1 có approval riêng trước native coder. Gate stale/double approve/missing refs không gọi model/MCP bằng fixtures. |
+| P0-03 | Đạt | Coder session `01a111c3-3d01-7291-902a-e4c2d76c6a0f`, lượt1/2, source `d316d0b3…`, preflight PASS; source đọc lại khớp CNN/split/metric đã duyệt; workload/data không sửa bằng tay. |
+| P0-04 | Đạt | Run `f45680b33f3d40c0bdfaa6275e6869d2`: submit1/1 qua MCP; owner huynhtrungcuong/kernel137345547/version1/script217065827/session355795064; mount165files,24groups/127ảnh,3epochs, remote COMPLETE. |
+| P0-05 | Đạt cho demo | Live session_stream22records khi RUNNING → terminal_rest21records/generation2/gap=false; paging/repeat/restart không nhân đôi; GUI dùng cache và đổi Library khi công việc nền còn chạy. Repeated content/gap/recovery được kiểm fixtures. |
+| P0-06 | Đạt | EMD184.7871→109.2499→70.2678 và4outputs manifest/hash đúng; facts/report/history có measurement. Lượt report4 sau bản sửa và approval repair thành công; nội dung đọc lại khớp split/count/metric, limitations và refs, không gọi là leaderboard score. |
+| P0-07 | Đạt | Chuỗi idea/proposal/source/notebook/identity/outputs/report của run mới giữ sau restart;28linksHTTP200/hash đúng, counter coder1/submit1/report4 không tăng; collection state/mtime/hash report nguyên vẹn. Run cũ COMPLETED cũng giữ report/history/24links, không replay. |
+| P0-08 | Đạt trong scope prototype | T09 đi Library/idea/approval/code/submit/status/outputs/report/History qua GUI, không copy/upload notebook hoặc sửa workload/data bằng tay. Developer sửa report prompt và phục hồi budget sau user approval; GUI mở lại report sau restart. Guide/config/lock/build đã bàn giao. |
 
 Khi triển khai, cập nhật checkpoint thành đang làm/đạt/bị chặn, kèm run/report/check liên quan
 và phần chưa đạt. Đạt checkpoint nội bộ chưa tự động đạt MVP; mọi tiêu chí của MVP phải có bằng chứng.

@@ -2,7 +2,9 @@
 > [docs/customization/PRODUCT_ROADMAP.md](docs/customization/PRODUCT_ROADMAP.md).
 > Integration plan: [docs/customization/CUSTOMIZATION_PLAN.md](docs/customization/CUSTOMIZATION_PLAN.md).
 > MVP 0 developer plan: [docs/customization/IMPLEMENT_MVP0.md](docs/customization/IMPLEMENT_MVP0.md).
-> The local Codex/Kaggle GUI workflow is planned; its implementation has not been validated yet.
+> Local Codex/Kaggle GUI: [setup and run guide](docs/customization/MVP0_RUN_GUIDE.md).
+> MVP0/T09 has verified the GUI workflow through real Codex code, Kaggle training,
+> validated outputs/report and restart without duplicate submission. See the roadmap acceptance table.
 
 <div align="center">
   <a href="https://github.com/SakanaAI/AI-Scientist_v2/blob/main/docs/logo_v1.jpg">

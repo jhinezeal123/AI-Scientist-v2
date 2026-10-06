@@ -1,6 +1,6 @@
 # IMPLEMENT_MVP0 — kế hoạch triển khai prototype cho dev
 
-Ngày: **2026-10-06** · Trạng thái: **plan, chưa triển khai/kiểm chứng MVP 0**.
+Ngày: **2026-10-06** · Trạng thái: **T01–T09 đã triển khai và nghiệm thu MVP0 trong scope prototype**.
 
 Nguồn yêu cầu: [DESIGN_BRIEF.md](DESIGN_BRIEF.md).
 Checkpoint sản phẩm và các ID nghiệm thu: [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md#4-mvp-0--prototype-lần-sử-dụng-thành-công-đầu-tiên).
@@ -90,7 +90,7 @@ Ghi rõ đường dẫn và revision donor trong config/guide; không dùng đư
 | Donor `AgentRuntime`/`CodexCliRuntime` và parser | Dùng module gốc, không đổi tên hàng loạt | AgentRuntime đã làm trách nhiệm AgentPort |
 | Donor schema `planner/coder/analyst` | Không dùng cho role mới | Contract training cũ là synthetic CPU; không dùng cho competition data |
 | Donor MCP/pool/account registry/proxy | Giữ hiện trạng; thêm wrapper có namespace `workbench_*` | Không viết account manager hay execution platform mới |
-| Frontend package/lock/config, CSS và SVG curve | Copy/adapt phần cần dùng, ghi nguồn | Reuse stack sẵn có, không thêm chart/UI framework |
+| Frontend package/lock/config và CSS | Copy/adapt phần cần dùng, ghi nguồn | Reuse stack sẵn có, không thêm chart/UI framework |
 | Workbench service, project store, notebook builder, GUI | Thêm tại fork | Chỉ các trách nhiệm đang thiếu cho hành trình MVP 0 |
 | `LICENSE`, notices, upstream README phía dưới | Giữ | Ghi attribution khi reuse; report ghi rõ có AI hỗ trợ |
 
@@ -112,7 +112,7 @@ không tiếp tục behavior trên một nền chưa kiểm chứng. Áp dụng 
 | Notebook | **nbformat `>=5.10,<6`**, AST/`compile()` của Python | Build/validate notebook local; train/test thực trên Kaggle |
 | Upstream journal import | `numpy`, `dataclasses-json`, `rich`, `humanize`, `black`, `jsonschema`, `backoff`, `funcy`, `openai`, `anthropic` | Dependency import của lõi stock; không tạo client/provider call |
 | GUI | **React 18.3.1**, **ReactDOM 18.3.1**, **TypeScript 5.6**, **Vite 8.3.1**, plugin React 6.1.1 | Reuse package.json + package-lock.json + tsconfig/Vite config donor; `npm ci`, không tự nâng version |
-| Curves | SVG/polyline sẵn trong donor hoặc bản trích nhỏ | Không Recharts/Plotly để vẽ một loss curve |
+| Visualization | Artifact links khi workload tạo | Theo quyết định user, GUI MVP0 không yêu cầu chart/ETA |
 | Job nền | `ThreadPoolExecutor(max_workers=1)` cho Codex + async collector MCP | Agent call blocking không chiếm event loop; không Celery/Redis |
 | Test | `pytest>=8,<9`, frontend `tsc -b && vite build`, một GUI E2E thật | Chỉ test gate/identity/cursor/store và phần bị sửa |
 
@@ -318,7 +318,7 @@ Destination nằm trong output root job đã cấu hình, không nhận đườn
 Không copy `KaggleNotebookEnv` nguyên khối với launch gate/bundle/checkpoint platform cũ:
 chỉ gọi helper sẵn có từ wrapper, reuse downloader và validation cần cho kết quả.
 
-### 5.5 Log delta, status và ETA
+### 5.5 Log delta, status và telemetry
 
 Một collector mỗi run; GUI polling API local khoảng 2 giây. Collector upstream khoảng 3–5 giây,
 backoff tối đa 30 giây khi lỗi/queue; dừng polling sau terminal + collection xong.
@@ -357,11 +357,11 @@ Nếu transport không cho log đầy đủ trong giới hạn, phải sửa đ�
 | `GET /api/runs/{id}` | Chi tiết proposal/source/checks/identity/metrics/report |
 | `GET /api/runs/{id}/logs?cursor=...` | Delta local; không gọi Kaggle trong route |
 | `POST /api/runs/{id}/reconcile` | Đối soát UNKNOWN chỉ đọc remote, không submit |
-| `GET /api/runs/{id}/artifacts/{name}` | File allowlist trong job root: notebook/source/result/curve/report |
+| `GET /api/runs/{id}/artifacts/{name}` | File allowlist trong job root: notebook/source/result/report và outputs đã xác minh |
 
 UI một trang, bốn khu vực: **Library → Idea/Proposal → Run → History/Report**.
 Hiện câu hỏi, assumption/split/metric/budget trước nút “Duyệt và triển khai”; disable nút khi stale/đang xử lý.
-Run có progress stage, exact Kaggle link, log, curve, ETA nếu đo được, lỗi và mở artifacts/report.
+Run có progress stage, exact Kaggle link, log, lỗi và mở artifacts/report.
 Đã approved thì các bước trong scope chạy tự động; không bắt user approve từng cell/tool.
 Không dựng trang settings/team/sidebar phức tạp. Setup config chỉ một lần; daily workflow qua GUI.
 
@@ -379,7 +379,7 @@ Submit trước **3.75 giờ** để làm collector/report trong lúc Kaggle ch�
 | T04 | 1.50–2.25h | T03 | **CP0-A:** proposal/clarification/approval gate |
 | T05 | 2.25–3.00h | T04 | Source/notebook/checks từ Codex thật |
 | T06 | 3.00–3.75h | T01 spike, T05 | **CP0-B:** submit thật, identity pin |
-| T07 | 3.75–5.00h | T03, T06 | Theo dõi/log/curve nền; Kaggle đang chạy |
+| T07 | 3.75–5.00h | T03, T06 | Theo dõi/status/log nền; Kaggle đang chạy |
 | T08 | 5.00–6.00h | T05–T07 + remote success | **CP0-C:** outputs/report/history |
 | T09 | 6.00–7.75h | T01–T08 | **CP0-D:** E2E/restart/guide; gồm buffer sửa blocker |
 
@@ -450,7 +450,7 @@ không chạy mọi harness/provider test.
    không share tùy ý một sqlite connection qua worker. Không dùng migration framework cho schema đầu tiên.
 2. Resource text/URL có id/version/hash/status. Idea/conversation/proposal/run lưu riêng, linked IDs;
    artifacts bên ngoài DB. Snapshot context bất biến cho proposal/run, không gửi toàn Library vô hạn vào prompt.
-3. Copy package/lock/config frontend donor; tạo App/api nhỏ. Reuse CSS/curve cần dùng, không copy Notion/W&B/team panels.
+3. Copy package/lock/config frontend donor; tạo App/api nhỏ. Reuse CSS cần dùng, không copy Notion/W&B/team panels.
 4. Dev: Vite proxy `/api` tới `127.0.0.1:8000`; bàn giao: FastAPI serve frontend build cùng origin.
    Không CORS wildcard/cloud hosting; không cần thiết kế lại giao diện đầy đủ.
 5. Import nguồn competition đã đọc ở T01 bằng GUI; URL chưa đọc gắn status rõ.
@@ -550,7 +550,7 @@ double click/HTTP retry/restart ở SUBMITTING không phát sinh push thứ hai.
 **Kiểm:** wrapper contract/error/identity mismatch tests và một submit thật của proposal đã duyệt.
 **Đối chiếu:** phần execution của P0-04/P0-07/P0-08; **CP0-B**. Terminal success còn chờ T08.
 
-### T07 — Collector nền, log delta, status và curves
+### T07 — Collector nền, log delta và status
 
 **Điều chỉnh scope theo user:** giao diện Run phục vụ general implement, chỉ hiển thị status/log.
 Đã bỏ curve, metric selector, epoch cards và ETA khỏi GUI chung. Các yêu cầu curve/ETA bên dưới
@@ -558,12 +558,12 @@ không còn là điều kiện nghiệm thu bắt buộc của T07. Telemetry/vi
 tác vụ tạo synthetic data, EDA, PCA hoặc đọc ảnh không bắt buộc phát metric training.
 
 **Cập nhật 2026-10-06:** đã triển khai collector exact identity, SQLite cursor/generation,
-API delta, GUI log/curve/ETA và observer restart. MCP thật của run `e2545599…` trả 21 records,
+API delta, GUI status/log và observer restart. MCP thật của run `e2545599…` trả 21 records,
 3 điểm EMD, terminal COMPLETE; đối chiếu `runner.log` không có gap. Backend restart giữ cursor
 `1:21` và đúng 21 records, không phát sinh submit/coder. Run lỗi `787afc70…` có 77 records,
 terminal ERROR và traceback runtime. Focused fixtures kiểm replay/cursor/gap/identity/restart.
-Chưa quan sát luồng SSE của một session đang training bằng collector mới; kiểm phần live qua
-lượt chạy GUI tiếp theo hoặc T09. Không đánh dấu P0-05 đầy đủ chỉ từ terminal replay.
+Tại thời điểm bàn giao T07 chưa kiểm live khi training. T09 đã kiểm live session_stream
+trên run `f45680b3…` và đối soát terminal; xem bằng chứng T09 bên dưới.
 
 **Review trước T08:** đã sửa observer chết không tự hồi phục, trạng thái COMPLETED bị downgrade khi đọc Kaggle,
 GUI/history giữ trạng thái cũ và telemetry lỗi làm ngăn lưu log. 59 backend/9 donor tests pass, frontend build đạt.
@@ -572,7 +572,7 @@ API paging/repeat/restart giữ cursor1:21, gap=false, submit1/1. Xem [T07_MONIT
 Không có lỗi đã biết chặn chuyển sang T08; live khi notebook đang training vẫn cần xác minh ở lượt tiếp theo/T09.
 
 **Giải quyết:** N04/N08 và phần N09: user thấy run đang làm gì, GUI không đứng, giảm thao tác polling.
-**Bàn giao:** collector một run, API delta/cursor, status/metric/ETA và restart observer.
+**Bàn giao:** collector một run, API delta/cursor, status/log và restart observer.
 
 **Chi tiết cài đặt:**
 
@@ -580,8 +580,8 @@ Không có lỗi đã biết chặn chuyển sang T08; live khi notebook đang t
    Store commit sau từng lần quan sát; GUI chỉ đọc cache. Cấu hình cadence/backoff theo mục 5.5.
 2. Merge records bằng prefix/vị trí, không content dedupe; seq/generation persist.
    Snapshot partial hoặc source gap có trạng thái rõ; đối soát terminal `runner.log`.
-3. Parse telemetry emission của notebook, update points/ETA; SVG curve đơn giản từ metric points.
-   Không có total_steps hoặc mới một mẫu tốc độ thì ETA chưa đủ dữ liệu; không giả ETA.
+3. Parse telemetry emission của notebook và lưu metric points phục vụ facts/report.
+   GUI chung chỉ hiện status/log; không yêu cầu curve hoặc ETA theo quyết định user.
 4. Restart run đã pin resume monitor/collect; run chưa xác minh identity không push/coder lại.
    Provider state không biết/mismatch hiển thị UNKNOWN; network fail không thành training success/failure giả.
 5. Terminal status được xác minh → collector chuyển COLLECTING hoặc FAILED, dừng poll phù hợp.
@@ -589,7 +589,7 @@ Không có lỗi đã biết chặn chuyển sang T08; live khi notebook đang t
 **Nghiệm thu:** khi Codex/Kaggle đang làm việc, GUI vẫn dùng được Library/history;
 poll/reconnect/restart không nhân đôi logs; chuỗi `[A] → [A,A] → [A,A]` hiện đúng hai A;
 delta cursor có paging/generation rõ. Run demo không còn gap chưa đối soát; status đúng exact session;
-training curve có các metric samples thực và ETA chỉ khi đủ dữ liệu.
+telemetry lưu các metric samples thực để đối soát outputs/report.
 **Kiểm:** cursor/prefix/repeated-line/short-replay/reset/observer-restart fixtures + quan sát logs/metric run thật.
 **Đối chiếu:** P0-05, phần monitoring của P0-06/P0-07. Không coi mocked logs là bằng chứng MCP thật.
 
@@ -646,6 +646,33 @@ nhưng không đánh dấu checkpoint đã đạt.
 
 ### T09 — Nghiệm thu qua GUI, restart và bàn giao
 
+**Đã nghiệm thu 2026-10-06:** 78 backend tests (gồm regression tests T09 và report budget repair) đạt;
+12 donor/MCP/Windows-worker tests và 5 runtime fixture tests đều đạt; frontend build đạt.
+Source upstream ngoài `ai_scientist/workbench/` và Codex runtime donor không bị rewrite.
+Restart backend thật giữ nguyên 24 artifact links, 21 records/cursor `1:21`, context/history/report
+và submit của run thành công cũ `e2545599…`. Run đó có source được sửa path trong lúc chẩn đoán,
+nên không dùng thay bằng chứng golden path hoàn toàn qua GUI.
+User đã duyệt proposal T09 v1 `93d367ebf0d143f6b9fa1b0de54cb812` để chạy run mới
+`f45680b33f3d40c0bdfaa6275e6869d2` qua GUI, đúng scope CNN [16,32,64], split20/4/seed42,
+2 coder calls/1 submit/3epochs/600s/10MB. Coder thật lượt1 qua preflight, source hash
+`d316d0b31a0b2928f0f88aed3a804a3addf468a5159e96ec6e9d3db2945c4100`.
+Submit1/1 thành công: owner huynhtrungcuong, version1, kernel137345547,
+script_version217065827/session355795064. Runtime mount165files, split20/4 groups/108+19 ảnh;
+3 epochs EMD184.78710864267654 →109.24989188610095 →70.26776872201779,
+elapsed30.892590729s. Observer tự hồi phục sau lỗi đọc đầu, nhận live session_stream
+22 records/cursor1:22 khi RUNNING; terminal REST đối soát21 records/cursor2:21, gap=false.
+Bốn outputs đã xác minh manifest/hash, chưa sửa source/data bằng tay.
+**Blocker đã sửa:** ba report calls đầu bị `ValidationError`, counter3/phase retry_exhausted;
+run giữ COLLECTING. Đã bổ sung schema/type cụ thể trong prompt, diagnostics
+không chứa inputs và giữ tên ValidationError thay vì Error chung chung.
+Run card/chi tiết đã hiện phase và report counter để phân biệt outputs đã thu với report hết lượt;
+user cho phép sửa tiếp, tăng limit riêng run này lên4 và giữ nguyên3lượt đã dùng.
+Lượt4 tạo report đúng schema/facts, app COMPLETED; mặc định run khác vẫn giới hạn3report calls.
+29 focused checks report/implementation/handoff và toàn bộ78backend tests đạt; frontend build đạt.
+Restart backend thật sau COMPLETED giữ 28 artifact links, report/context/history/log/counters/collection
+state nguyên vẹn, không thêm coder/report/submit. GUI History mở lại đúng report/run đã duyệt;
+đạt P0-01…08/CP0-D. Mốc thời gian dưới8giờ chưa được chứng minh. Xem bằng chứng T09 trong MVP0_RUN_GUIDE.md.
+
 **Giải quyết:** N02/N09: sản phẩm tự dùng được sau setup, có bằng chứng đạt prototype.
 **Bàn giao:** GUI hoàn chỉnh cho scope, `MVP0_RUN_GUIDE.md`, demo artifacts và bảng P0 đạt/chưa đạt.
 
@@ -665,22 +692,23 @@ nhưng không đánh dấu checkpoint đã đạt.
    Dùng 1.75h cuối cho integration/blocker; không mở thêm tính năng khi còn acceptance đỏ.
 
 **Nghiệm thu:** đủ tám P0; user làm được toàn flow sau setup qua GUI, một real Codex→MCP→Kaggle training run thành công,
-report/curve/history mở lại sau restart; không duplicate submit. Guide dùng được từ checkout hiện có,
+report/log/history mở lại sau restart; không duplicate submit. Guide dùng được từ checkout hiện có,
 không cần agent chỉnh source/data bằng tay ngoài các bước setup đã ghi.
 **Kiểm:** một end-to-end thật + restart + focused checks/build; không chạy full upstream GPU/paper suite.
 **Đối chiếu:** P0-01…P0-08; **CP0-D** và bàn giao MVP 0.
 
 ## 7. Lệnh/khởi động dev phải bàn giao
 
-Đây là **giao diện khởi động cần triển khai**, chưa phải lệnh đã chạy thành công hiện tại.
+Entrypoint đã triển khai và chạy trên checkout hiện có. Setup đầy đủ và thao tác GUI xem
+[MVP0_RUN_GUIDE.md](MVP0_RUN_GUIDE.md#khởi-động-từ-checkout-hiện-có).
 
 ```powershell
-# Chạy từ D:/Documents/AI-Scientist-v2 sau khi T01 tạo lock và T09 build GUI.
-.\.venv-mvp0\Scripts\python.exe -m pip install -r requirements-mvp0.lock.txt
-.\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --config .workbench/config.local.json
+# Chạy từ D:/Documents/AI-Scientist-v2 sau setup, với config.local.json và GUI đã build.
+.\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --port 8011
 ```
 
-URL mặc định `http://127.0.0.1:8000`. Entrypoint khởi động backend, MCP stdio và serve GUI build;
+URL của lệnh trên `http://127.0.0.1:8011` (không truyền port thì mặc định 8000).
+Entrypoint khởi động backend, MCP stdio và serve GUI build;
 không yêu cầu user mở thêm MCP terminal mỗi ngày. Trong dev có thể chạy Vite riêng bằng scaffold script.
 `config.local.json` tối thiểu: donor_root, donor_python, codex_executable, codex_model,
 codex_reasoning_effort, kaggle_account_alias, workspace_root. Paths/model lấy từ T01,
@@ -697,7 +725,7 @@ Không dựng receipt/test platform mới. Một run directory và bảng P0 tro
 | Codex role/session metadata + source/notebook/checks | P0-03; runtime thật và implementation đã kiểm cơ bản |
 | MCP launch/inspect identity + terminal observation | P0-04; account/ref/version/session thật, không chỉ notebook validate |
 | Persisted cursor/log + poll/restart test + final log reconciliation | P0-05; delta và không mất/nhân đôi trong scope demo |
-| Exact manifest + result/metrics/report | P0-06; số liệu/curve/report có nguồn |
+| Exact manifest + result/metrics/report | P0-06; số liệu/report có nguồn |
 | DB/history sau restart + unchanged push count | P0-07 |
 | GUI walkthrough + run guide | P0-08 |
 
