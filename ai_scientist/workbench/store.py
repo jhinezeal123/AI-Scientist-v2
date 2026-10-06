@@ -353,6 +353,41 @@ class ProjectStore:
                 raise StoreConflict('Pinned context hash mismatch')
             return {'body': json.loads(row['body_json']), 'snapshot': snapshot, 'context_sha256': row['context_sha256']}
 
+    def reserve_submission(self, project_id, run_id, intent):
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            if row['identity_json']:
+                return False
+            approved = connection.execute('SELECT state FROM proposals WHERE id=?', (row['proposal_id'],)).fetchone()
+            if row['state'] != 'PREFLIGHT' or approved['state'] != 'APPROVED' or row['code_sha256'] != intent['code_sha256']:
+                raise StoreConflict('Submission requires the exact approved preflight bundle')
+            connection.execute("UPDATE runs SET state='SUBMITTING',identity_json=?,error=NULL WHERE id=?", (canonical(intent), run_id))
+            return True
+
+    def submission_observed(self, project_id, run_id, state, identity, error=None):
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT identity_json,state FROM runs WHERE id=?', (run_id,)).fetchone()
+            if row is None or not row['identity_json']:
+                raise StoreConflict('No durable submission intent')
+            previous = json.loads(row['identity_json'])
+            # Intent and resolved identifiers are immutable once recorded.
+            for key in ('account','username','kernel_ref','notebook_sha256','submitted_source_sha256','code_sha256','context_sha256','version','kernel_id','script_version_id','session_id'):
+                if previous.get(key) is not None and identity.get(key) != previous[key]:
+                    raise StoreConflict('Pinned submission identity mismatch: ' + key)
+            # A later monitoring/reconcile read cannot undo locally collected results.
+            if row['state']=='COMPLETED':return 'COMPLETED'
+            connection.execute('UPDATE runs SET state=?,identity_json=?,error=? WHERE id=?', (state, canonical(identity), error, run_id))
+            return state
+
+
+    def recover_submission(self):
+        for project in self.list_projects():
+            with self.connection(project['id']) as connection:
+                connection.execute("UPDATE runs SET state='UNKNOWN',error='Submission interrupted by restart; reconcile using read-only history, never push again' WHERE state='SUBMITTING'")
 
     def reserve_implementation(self, project_id, run_id, request_id, *, repair=False):
         with self.connection(project_id) as connection:
@@ -395,3 +430,19 @@ class ProjectStore:
             with self.connection(project['id']) as connection:
                 connection.execute("UPDATE implementation_attempts SET state='FAILED',error='Interrupted by restart; attempt remains consumed' WHERE state='RUNNING'")
                 connection.execute("UPDATE runs SET state='FAILED',error='Implementation interrupted by restart; retry explicitly within remaining coder budget' WHERE state='IMPLEMENTING'")
+
+    def record_preflight_review(self, project_id, run_id, checks, node):
+        # Rechecking saved source consumes no additional coder call and never changes scope.
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            run = connection.execute('SELECT state,code_sha256 FROM runs WHERE id=?', (run_id,)).fetchone()
+            if run is None:
+                raise KeyError('Run not found in this project')
+            if run['state'] not in {'PREFLIGHT', 'FAILED'} or checks['code_sha256'] != run['code_sha256']:
+                raise StoreConflict('Only the exact saved implementation can be reviewed before submission')
+            attempt = connection.execute('SELECT MAX(attempt) FROM implementation_attempts WHERE run_id=?', (run_id,)).fetchone()[0]
+            error = None if checks['pass'] else '; '.join(checks['errors'])[:1000]
+            connection.execute('UPDATE implementation_attempts SET state=?,checks_json=?,node_json=?,error=? WHERE run_id=? AND attempt=?',
+                               ('COMPLETE' if checks['pass'] else 'FAILED', canonical(checks), canonical(node), error, run_id, attempt))
+            connection.execute('UPDATE runs SET state=?,error=?,node_id=?,node_json=? WHERE id=?',
+                               ('PREFLIGHT' if checks['pass'] else 'FAILED', error, node['id'], canonical(node), run_id))

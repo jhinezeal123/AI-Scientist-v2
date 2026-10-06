@@ -13,7 +13,10 @@ from .store import StoreConflict
 
 
 BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'payload.json', 'checks.json')
-ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json',
+ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
+                  'submission-intent.json', 'launch-readiness.json', 'remote-identity.json',
+                  'save-receipt.json', 'launch-diagnostic.json',
+                  'submit-bundle/notebook.ipynb', 'submit-bundle/kernel-metadata.json', 'submit-bundle/bundle-manifest.json',
                   *(f'attempts/{attempt}/{name}' for attempt in (1, 2) for name in (*BUNDLE_FILES, 'source/workload.py')))
 
 

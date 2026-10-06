@@ -164,6 +164,10 @@ export default function App() {
         });}}/></div>}
         {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} openRunRequest={openRunRequest} busy={busy || planning || implementing} onStart={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/implement`, 'POST');setRevision(n => n+1);setNotice('Đã gửi yêu cầu tạo implementation. Chưa submit hoặc training.');});
+        }} onSubmit={async id => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/submit`, 'POST');setRevision(n => n+1);setNotice('Đã lưu yêu cầu gửi notebook. App sẽ xác minh đúng version và session qua MCP.');});
+        }} onReconcile={async id => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/reconcile`, 'POST');setRevision(n => n+1);setNotice('Đã đối soát trạng thái qua MCP; không gửi notebook lần nữa.');});
         }}/>} 
         {tab === 'History' && <section className="panel"><h2>Lịch sử đã lưu</h2><p>{ideas.length} idea · {history.proposals.length} proposal · {history.runs.length} lần chạy</p>
           {ideas.map(idea => <article className="resource" key={idea.id}><p className="source-meta">Idea · {idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}

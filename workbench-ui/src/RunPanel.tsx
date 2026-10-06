@@ -8,10 +8,10 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, runs, openRunRequest, busy, onStart}: {
+export default function RunPanel({projectId, runs, openRunRequest, busy, onStart, onSubmit, onReconcile}: {
   projectId:string;runs:History['runs'];busy:boolean;onStart:(id:string)=>Promise<void>;
   openRunRequest:{id:string;nonce:number}|null;
-}) {
+  onSubmit:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>}) {
   const [details,setDetails] = useState<RunDetail[]>([]);
   const [error,setError] = useState('');
   const [selection,setSelection] = useState<{projectId:string;id:string}|null>(null);
@@ -68,7 +68,17 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
       {!run.identity && (run.state === 'APPROVED' || run.state === 'FAILED') && <button className="primary"
         disabled={busy || run.attempts.length >= run.coder_budget}
         onClick={() => void onStart(run.id)}>{run.state === 'FAILED' ? 'Tiếp tục trong ngân sách còn lại' : 'Tạo code và notebook bằng Codex'}</button>}
-      <p className="muted">Coder: {run.attempts.length}/{run.coder_budget} lượt đã cấp.</p>
+      <p className="muted">Coder: {run.attempts.length}/{run.coder_budget} lượt đã cấp · Submit: {run.identity?.submit_attempts || 0}/1.</p>
+      {run.state === 'SUBMITTING' && <p role="status">Đang gửi notebook qua MCP và xác minh phiên chạy…</p>}
+      {run.ready && <button className="primary" disabled={busy} onClick={() => void onSubmit(run.id)}>Gửi notebook và chạy trên Kaggle</button>}
+      {run.identity && <div className="context"><h3>Notebook trên Kaggle</h3>
+        <a href={`https://www.kaggle.com/code/${run.identity.kernel_ref}${run.identity.script_version_id ? `?scriptVersionId=${run.identity.script_version_id}` : ''}`} target="_blank" rel="noreferrer">{run.identity.kernel_ref} ↗</a>
+        <p>Account: {run.identity.username} · Version: {run.identity.version ?? 'chưa xác minh'}</p>
+        <code className="source-id">Kernel: {run.identity.kernel_id ?? '?'} · Session: {run.identity.session_id ?? '?'} · Script version: {run.identity.script_version_id ?? '?'}</code>
+        {run.identity.status && <p>Trạng thái Kaggle: {run.identity.status}</p>}
+        {run.state === 'UNKNOWN' && <p>Chưa biết chắc kết quả gửi. Đối soát chỉ đọc notebook đã gửi; không tạo lần gửi mới.</p>}
+        <button disabled={busy || run.state === 'SUBMITTING'} onClick={() => void onReconcile(run.id)}>{run.state === 'UNKNOWN' ? 'Đối soát lần gửi' : 'Cập nhật trạng thái từ Kaggle'}</button>
+      </div>}
       <div className="context"><h3>Mục tiêu</h3><p>{run.purpose}</p><code className="source-id">Proposal {run.proposal_id} · v{run.proposal_version}</code>
         {!!run.expected_outputs?.length && <p className="muted">Đầu ra đã duyệt: {run.expected_outputs.join(' · ')}</p>}
       </div>
@@ -80,7 +90,7 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
           {attempt.checks.errors.map(item => <p role="alert" key={item}>{item}</p>)}</>}
         {attempt.error && <p>{attempt.error}</p>}
       </div>)}
-      {run.ready && <p className="alert">Notebook đã qua preflight; mount và model cần được xác nhận khi chạy thật.</p>}
+      {run.ready && <p className="alert">Notebook đã qua preflight. Nút gửi dùng đúng proposal đã duyệt, tối đa một lần submit; mount và model cần được xác nhận khi chạy thật.</p>}
       {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
       {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><div className="stack">{run.artifacts.map(name =>
         <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}</div></>}

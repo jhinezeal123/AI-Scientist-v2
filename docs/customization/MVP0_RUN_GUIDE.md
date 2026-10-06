@@ -240,3 +240,103 @@ npm run build
 - Chưa có `result.json` hoặc measurements thật; file checkpoint sẽ được tạo sau training, không phải trong T05. Source bật deterministic algorithms; T06 cần kiểm cấu hình CUDA/cuBLAS phù hợp trước launch, cùng package/mount/runtime, không suy diễn execution success từ preflight.
 
 **Trạng thái T05:** **đã nghiệm thu qua thao tác GUI của user và artifact Codex thật.** Run cũ vẫn FAILED, history/counter giữ nguyên; blocker checkpoint của run cũ được giải quyết bằng proposal/run mới có user approval. Trạng thái submit/readiness tiếp theo nằm ở phần T06 bên dưới.
+
+## T06 — Gửi notebook qua MCP và pin identity
+
+**Trạng thái mới nhất 2026-10-06: T06/CP0-B đạt nghiệm thu.** Run xác minh
+`e2545599e7e94f66b6fc9f682b23fa72` đã COMPLETE, đúng account `huynhtrungcuong`, version1,
+kernel137301710/script_version216981117/session355701890. Log runtime xác minh mount
+`/kaggle/input/competitions/soil-grain-size-from-photos` có165files, đủ3epochs và completion marker;
+EMD cuối82.4352. GUI Run → **Cập nhật trạng thái từ Kaggle** hiện REMOTE_SUCCEEDED.
+Hai run bổ sung được user cấp allowance riêng; mỗi run đúng một SaveKernel, không reset/run lại intent UNKNOWN cũ.
+Xem [T06_DEBUG.md](T06_DEBUG.md) cho bản sửa parser ref, mount và cấu hình reconnect.
+Ở thời điểm review T06, T08 chưa hoàn tất. Cập nhật 2026-10-06: T08 sau đó đã thu bốn output và report
+cho exact session này; xem mục T08 bên dưới. Structured SSE khi notebook còn đang training vẫn chưa xác minh.
+Backend dùng CLI npm thay executable desktop theo hash để tránh mất path khi app cập nhật.
+Phần bên dưới mô tả luồng dùng và lịch sử lần gửi ban đầu; HTTP499 cũ không phải trạng thái của run xác minh mới.
+
+T06 thêm **Run đã PASS → kiểm readiness đúng account → gửi notebook → lưu version/session → mở Kaggle**.
+Backend dùng MCP stdio donor cho tất cả thao tác Kaggle; không đưa credential vào config, source hoặc prompt.
+
+### Cách dùng GUI
+
+**Nhiều run trong project:** lịch sử được giữ nguyên. Run remote đã kết thúc không khóa duyệt proposal mới.
+User đã chọn `allow_new_run_after_idle_check=true`: UNKNOWN cũ chỉ cho phép tạo run mới sau khi MCP
+xác minh đúng account và không còn session đang hoạt động. App lưu evidence đọc khi duyệt và kiểm lại
+trước submit. Không reset counter, xóa UNKNOWN hay gửi lại notebook cũ. Mất kết nối/identity không xác minh
+được thì giữ chặn. Một run local đang chuẩn bị hoặc remote đang chạy vẫn khóa lượt mới.
+
+1. Chạy backend bằng lệnh trong phần T05, mở `http://127.0.0.1:8011/` → project → **Run**.
+2. Với một run PREFLIGHT mới chưa có intent, nút **Gửi notebook và chạy trên Kaggle** kiểm account/token/cookie,
+   rules đã được chấp nhận, quyền tham gia/xem, notebook support, file access, GPU quota, zero active sessions
+   và ref mới chưa tồn tại. App không tự tham gia competition hoặc chấp nhận rules.
+3. App lưu intent SUBMITTING trong SQLite trước đúng một MCP `push_notebook`. GUI hiện submit 1/1;
+   nút gửi biến mất. Có thể chuyển Library/History trong lúc chờ.
+4. Khi xác minh được identity, GUI hiện account/ref/version/kernel/session/script_version và link đúng script version.
+   Nút **Cập nhật trạng thái từ Kaggle** chỉ inspect exact identity đã pin. Remote success là COLLECTING,
+   chưa app COMPLETED; collection/report thuộc T08. T07 tự theo dõi nền bằng identity đã pin.
+5. Nếu UNKNOWN, dùng **Đối soát lần gửi**. Đây là thao tác chỉ đọc, không retry push.
+   Khi save thiếu version, donor chỉ nhận notebook ref UUID của intent, version1 và source SHA256 trùng notebook
+   đã gửi, rồi xác minh exact version history. Không tìm đúng evidence thì giữ UNKNOWN và giữ gate.
+6. Reload/restart giữ intent/counter/identity. SUBMITTING bị ngắt chuyển UNKNOWN; app không tự gọi push hoặc coder.
+   Không reset counter hoặc đổi account để vượt intent. Với chính sách idle-check được user chọn,
+   app có thể cho run mới sau xác minh Kaggle không còn phiên đang chạy; UNKNOWN cũ giữ nguyên.
+
+### Triển khai và artifacts
+
+- Ba wrapper additive: `workbench_inspect_run`, `workbench_logs_snapshot`, `workbench_collect_outputs`.
+  Thêm `workbench_launch_readiness` và `workbench_reconcile_run` để không đưa logic credential vào app.
+  Chữ ký/return shape các tool cũ giữ nguyên; SDK MCP vẫn `kagglesdk==0.1.37`, không bỏ guard.
+- Donor cần các file mới `mvp0_mcp_tools.py`, `mvp0-workspace.json` cùng import registration trong `mcp_server.py`.
+  Workspace collection config không chứa credential, chỉ cho phép `.workbench/projects/<project>/runs/<run>`.
+  Collection còn được kiểm đúng run UUID, exact identity/success trước và sau download, path/size/hash và tối đa10MB.
+  Tại review T06 chưa có outputs thật; T08 sau đó đã thu bốn outputs của run xác minh này và đối chiếu hash với manifest.
+- Startup tự mở donor `proxy.py` ẩn nếu port80 chưa có listener, dùng executable/cwd trong config;
+  đóng proxy do app tạo khi app đóng, giữ proxy có sẵn. Proxy donor chuyển Bearer token đã chọn qua đúng account,
+  không fallback account khác. Readiness introspection dùng SDK qua proxy có sẵn vì đường api.kaggle.com trực tiếp
+  báo lỗi trong probe; original donor SDK helper/runtime vẫn nguyên bản.
+- Run root có `launch-readiness.json`, `submission-intent.json`, `remote-identity.json` khi pin được,
+  `save-receipt.json` cho các lần gửi sau bản sửa diagnostic và `launch-diagnostic.json` của lần thực tế này.
+  `submit-bundle/` giữ notebook/metadata/context/payload/checks/source cùng manifest bytes đã gửi;
+  tất cả hash nguồn T05 được kiểm trước khi build. Source/config/snapshot giữ nguyên.
+- Submit bundle cập nhật runner cố định: cấu hình `CUBLAS_WORKSPACE_CONFIG=:4096:8` trước torch/CUDA,
+  ghi `AILAB_MOUNT` sau khi đọc mount thật. Metadata title bằng slug để provider không đổi ref vì title normalization.
+  Không gọi Codex lần nữa, không đổi model/split/metric/ngân sách.
+- API thêm POST `/api/projects/{project}/runs/{run}/submit` và `/reconcile`. Request không nhận account,
+  code hoặc đường dẫn từ browser. Double click/HTTP retry/cancellation/restart không tạo push thứ hai.
+
+### Bằng chứng và blocker — 2026-10-06
+
+- GUI thật đã gửi run `30af70766f794db2992219c330db4e97`, proposal `46509c7b6a4d422397f3ef86dfb8de34` v1.
+  Source SHA256 vẫn `e16c10ef306ae631c21820e75a21d59d6fd27c38d80341e45ffd633f38b665fe`, coder1/2;
+  submit notebook SHA256 `40ff81f7883500d523214f1ce9205973477262cb3d1d4ef3c244da2dea21b9f9`.
+- Live readiness account alias `jhin_access_token.txt`/username `huynhtrungcuong`: token active đúng owner,
+  cookie đúng owner, canView/canParticipate/hasAcceptedRules true, userHasEntered/hasScripts true,
+  có data files, GPU30h/TPU20h, zero active sessions; expected new notebook ref trả404 trước gửi.
+  Quyền sử dụng competition đã được xác minh; mount vẫn cần evidence runtime.
+- Donor proxy ghi đúng **một** POST SaveKernel bằng token account này, HTTP499 lúc14:35:55 VN.
+  Authenticated exact view của ref sau đó HTTP404; GUI reconcile qua MCP vẫn UNKNOWN.
+  Không biết nguyên nhân chi tiết HTTP499: bản nhận acknowledgment ban đầu chưa lưu response body;
+  không dựng lại response hoặc coi499/404 là bằng chứng training success/definitively not submitted.
+  Đã bổ sung safe bounded acknowledgment receipt cho code hiện tại, không chứa raw token/cookie/body.
+- **Chưa có version/kernel/session/script_version pin hoặc runtime mount/metrics**; không gọi push lại,
+  không tăng ngân sách hoặc thay dataset. Không đánh dấu T06/CP0-B/P0-04 đã đạt.
+- Focused workbench tests kiểm idempotent submit, restart tại SUBMITTING, timeout/missing acknowledgment/mismatch,
+  read-only reconciliation, wrong account/hash rejection và bounded/redacted receipt. Donor focused contracts kiểm
+  registration/signature, exact-session mismatch, incomplete/wrong-account collection gate và legacy push shape.
+  **34 workbench tests + 4 donor tests đạt**, frontend build thành công. Bằng chứng fixtures chỉ chứng minh các gate này.
+- Restart backend thật trên8011 đã tự mở proxy donor ởport80; reload GUI giữ UNKNOWN, cùng identity intent/code hash,
+  coder1/2 và submit1/1. Hai HTTP submit lặp trả `already_submitted: true`, không cấp push mới.
+  Evidence `.workbench/readiness/T06-restart-check.json`, ảnh `.workbench/readiness/T06-run-status.png`.
+
+**Trạng thái tại lần gửi đầu:** nghiệm thu real launch bị chặn bởi provider499 và thiếu exact identity.
+Run xác minh mới ở đầu mục này đã giải quyết nghiệm thu T06; run đầu vẫn UNKNOWN để giữ lịch sử.
+Run giữ UNKNOWN/submit1/1 sau restart, không có outputs/report và không tự chuyển T07.
+
+### Debug T06 theo yêu cầu user
+
+Xem [T06_DEBUG.md](T06_DEBUG.md): HTTP499 được quan sát ở upstream SaveKernel, chưa có execution để quy lỗi cho workload.
+Đã sửa mất thông báo upload/reconcile và mismatch CRLF-file-hash với LF-text-hash do donor đọc trên Windows.
+Intent giữ hash artifact gốc và bổ sung `submitted_source_sha256` đã kiểm trên frozen file;
+notebook mới ghi LF. Proxy startup giữ log tại `.workbench/logs/kaggle-proxy.log`.
+36 workbench tests + 5 donor tests đạt. Reconcile thật sau sửa vẫn UNKNOWN/submit1/1; không có submit mới.

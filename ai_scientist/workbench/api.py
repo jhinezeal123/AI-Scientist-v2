@@ -163,6 +163,14 @@ def library_router(store, workspace_root):
         return call(request.app.state.implementation.detail, project_id, run_id)
 
 
+    @router.post('/projects/{project_id}/runs/{run_id}/submit', status_code=202)
+    async def submit(project_id: str, run_id: str, request: Request):
+        return await async_call(request.app.state.submission.start, project_id, run_id)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/reconcile')
+    async def reconcile(project_id: str, run_id: str, request: Request):
+        return await async_call(request.app.state.submission.reconcile, project_id, run_id)
+
     @router.get('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}')
     def artifact(project_id: str, run_id: str, name: str, request: Request):
         from fastapi.responses import FileResponse

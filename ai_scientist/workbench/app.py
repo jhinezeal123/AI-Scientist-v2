@@ -8,6 +8,7 @@ from .api import library_router
 from .store import ProjectStore
 from .service import PlanningService
 from .implementation import ImplementationService
+from .submission import SubmissionService
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -20,6 +21,7 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
         app.state.runtime = loaded
         store.recover_planning()
         store.recover_implementation()
+        store.recover_submission()
         service = PlanningService(store, loaded, worker, config.workspace_root)
         app.state.service = service
         app.state.implementation = ImplementationService(service, config)
@@ -27,9 +29,13 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
             async with mcp_connection(config) as (session, names):
                 app.state.mcp = session
                 app.state.mcp_tools = names
+                app.state.submission = SubmissionService(app.state.implementation, config, session)
+                if getattr(config, 'allow_new_run_after_idle_check', False):
+                    service.idle_check = app.state.submission.check_idle
                 try:
                     yield
                 finally:
+                    await app.state.submission.close()
                     await service.close()
                     await worker.close(config.shutdown_seconds)
         finally:
