@@ -9,6 +9,7 @@ from .store import ProjectStore
 from .service import PlanningService
 from .implementation import ImplementationService
 from .submission import SubmissionService
+from .monitor import RunMonitor
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -32,9 +33,12 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 app.state.submission = SubmissionService(app.state.implementation, config, session)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.submission.check_idle
+                app.state.monitor = RunMonitor(app.state.submission)
+                app.state.monitor.start()
                 try:
                     yield
                 finally:
+                    await app.state.monitor.close()
                     await app.state.submission.close()
                     await service.close()
                     await worker.close(config.shutdown_seconds)

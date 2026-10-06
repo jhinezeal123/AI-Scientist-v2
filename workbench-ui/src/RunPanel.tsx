@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useState} from 'react';
 import {api, History} from './api';
+import RunMonitorPanel from './RunMonitorPanel';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_budget:number;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
@@ -82,6 +83,7 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
       <div className="context"><h3>Mục tiêu</h3><p>{run.purpose}</p><code className="source-id">Proposal {run.proposal_id} · v{run.proposal_version}</code>
         {!!run.expected_outputs?.length && <p className="muted">Đầu ra đã duyệt: {run.expected_outputs.join(' · ')}</p>}
       </div>
+      {run.identity?.session_id && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved}/>}
       {run.attempts.map(attempt => <div className="context" key={attempt.attempt}>
         <h3>Bản code {attempt.attempt} · {attempt.state}</h3>
         {attempt.session_id && <code className="source-id">Codex session {attempt.session_id}</code>}

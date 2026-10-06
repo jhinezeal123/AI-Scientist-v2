@@ -340,3 +340,11 @@ Xem [T06_DEBUG.md](T06_DEBUG.md): HTTP499 được quan sát ở upstream SaveKe
 Intent giữ hash artifact gốc và bổ sung `submitted_source_sha256` đã kiểm trên frozen file;
 notebook mới ghi LF. Proxy startup giữ log tại `.workbench/logs/kaggle-proxy.log`.
 36 workbench tests + 5 donor tests đạt. Reconcile thật sau sửa vẫn UNKNOWN/submit1/1; không có submit mới.
+
+## T07 — Theo dõi nền và log
+
+Đã triển khai. Xem [T07_MONITORING.md](T07_MONITORING.md) cho cách kiểm bằng GUI,
+bằng chứng terminal/restart và giới hạn live SSE. Review trước T08: 59 backend tests và 9 donor tests pass;
+frontend build đạt. Đã kiểm endpoint SSE của exact session đã kết thúc; live training còn kiểm ở lượt tiếp theo/T09.
+Mở **Run → e2545599 → Theo dõi Kaggle** để xem trạng thái và 21 log records.
+Theo yêu cầu user, GUI chung đã bỏ biểu đồ metric/epoch và ETA để phục vụ general implement.

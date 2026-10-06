@@ -65,6 +65,19 @@ export default function App() {
     return () => window.clearInterval(timer);
   },[planning,implementing,projectId]);
 
+  useEffect(() => {
+    if (!projectId || !history.runs.length)return;
+    let cancelled=false;let inFlight=false;
+    const timer=window.setInterval(() => {
+      if (inFlight)return;
+      inFlight=true;
+      api<History>(`/projects/${projectId}/history`).then(latest => {
+        if (!cancelled)setHistory(old => JSON.stringify(old)===JSON.stringify(latest) ? old : latest);
+      }).catch(() => { /* Run log polling shows read failures; retain the last history snapshot. */ })
+        .finally(() => {inFlight=false;});
+    },2000);
+    return () => {cancelled=true;window.clearInterval(timer);};
+  },[projectId,history.runs.length]);
 
   async function action(work: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');

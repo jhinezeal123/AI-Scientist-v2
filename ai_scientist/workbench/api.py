@@ -162,6 +162,9 @@ def library_router(store, workspace_root):
     def run_detail(project_id: str, run_id: str, request: Request):
         return call(request.app.state.implementation.detail, project_id, run_id)
 
+    @router.get('/projects/{project_id}/runs/{run_id}/logs')
+    def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):
+        return call(request.app.state.monitor.cache.delta, project_id, run_id, cursor, limit)
 
     @router.post('/projects/{project_id}/runs/{run_id}/submit', status_code=202)
     async def submit(project_id: str, run_id: str, request: Request):
