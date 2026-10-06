@@ -16,6 +16,8 @@ BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'paylo
 ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
                   'submission-intent.json', 'launch-readiness.json', 'remote-identity.json',
                   'save-receipt.json', 'launch-diagnostic.json',
+                  'collection-manifest.json', 'result-facts.json', 'report.md',
+                  'output/result.json', 'output/metrics.json', 'output/runner.log',
                   'submit-bundle/notebook.ipynb', 'submit-bundle/kernel-metadata.json', 'submit-bundle/bundle-manifest.json',
                   *(f'attempts/{attempt}/{name}' for attempt in (1, 2) for name in (*BUNDLE_FILES, 'source/workload.py')))
 
@@ -148,15 +150,55 @@ class ImplementationService:
                 return
 
     def detail(self, project_id, run_id):
+        from .collection import artifact_paths
         run = self.store.run(project_id, run_id)
         root = self.root(project_id, run_id)
         run['artifacts'] = [name for name in ARTIFACT_FILES if (root / name).is_file() and not (root / name).is_symlink()]
+        run['artifacts'] = sorted(set(run['artifacts']) | set(artifact_paths(root)))
         run['ready'] = run['state'] == 'PREFLIGHT' and bool(run['attempts']) and bool(run['attempts'][-1]['checks'] and run['attempts'][-1]['checks']['pass'])
         run['coder_budget'] = self.store.implementation_snapshot(project_id, run_id, read_only=True)['body']['budget']['coder_calls']
         approved = self.store.implementation_snapshot(project_id, run_id, read_only=True)
         run['purpose'] = approved['body']['objective']
         run['expected_outputs'] = approved['body']['expected_outputs']
         run['identity'] = json.loads(run.pop('identity_json')) if run['identity_json'] else None
+        facts_path = root / 'result-facts.json'
+        if facts_path.is_file() and not facts_path.is_symlink() and facts_path.stat().st_size <= 1_000_000:
+            try:
+                facts = json.loads(facts_path.read_text(encoding='utf-8'))
+                metric = facts.get('metric')
+                if isinstance(metric, dict):
+                    run['result_metric'] = {key: metric[key] for key in ('name', 'direction', 'final_value', 'best_value') if key in metric}
+            except (OSError, ValueError, TypeError):
+                pass
+        report = root / 'report.md'
+        if run.get('report_path') == 'report.md' and report.is_file() and not report.is_symlink() and report.stat().st_size <= 100_000:
+            run['report_preview'] = report.read_text(encoding='utf-8')
         # The journal node is persisted in SQLite, while UI detail loads source through allowlisted files.
         run.pop('node_json', None)
         return run
+
+    def history(self, project_id):
+        history = self.store.history(project_id)
+        for item in history['runs']:
+            detail = self.detail(project_id, item['id'])
+            approved = self.store.implementation_snapshot(project_id, item['id'], read_only=True)
+            snapshot = approved['snapshot']
+            body = approved['body']
+            selected_refs = set(body.get('data_refs', []))
+            item['purpose'] = detail.get('purpose')
+            item['result_metric'] = detail.get('result_metric')
+            # History describes the approved inputs as they were pinned at approval time.
+            # Current idea/resource rows may be edited or removed later.
+            item['idea_id'] = snapshot['idea']['id']
+            item['idea_text'] = snapshot['idea']['text']
+            item['proposal_objective'] = body['objective']
+            item['proposal_version'] = detail.get('proposal_version')
+            item['context_sha256'] = approved['context_sha256']
+            item['source_refs'] = [
+                {key: resource[key] for key in ('id', 'title', 'kind', 'version', 'content_sha256')}
+                for resource in snapshot['resources'] if resource['id'] in selected_refs
+            ]
+            item['code_sha256'] = detail.get('code_sha256')
+            item['artifacts'] = detail.get('artifacts', [])
+            item['report_available'] = detail.get('report_path') == 'report.md'
+        return history

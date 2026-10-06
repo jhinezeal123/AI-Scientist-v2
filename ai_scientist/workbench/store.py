@@ -383,6 +383,46 @@ class ProjectStore:
             connection.execute('UPDATE runs SET state=?,identity_json=?,error=? WHERE id=?', (state, canonical(identity), error, run_id))
             return state
 
+    def collection_failed(self, project_id, run_id, error_type):
+        """Keep a remote success in COLLECTING until outputs and report are durable."""
+        if error_type not in {'ValueError','RuntimeError','TimeoutError','OSError','KeyError','TypeError'}:
+            error_type='Error'
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row=connection.execute('SELECT state,identity_json FROM runs WHERE id=?',(run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            if row['state']=='COMPLETED':
+                return 'COMPLETED'
+            if row['state'] not in {'COLLECTING','REMOTE_SUCCEEDED'} or not row['identity_json']:
+                return row['state']
+            message=f'Exact Kaggle success is still awaiting validated outputs/report ({error_type}); no resubmit was performed.'
+            connection.execute('UPDATE runs SET error=? WHERE id=?',(message,run_id))
+            return row['state']
+
+    def complete_collected_run(self, project_id, run_id, identity, node_id, node, report_path):
+        """Atomically expose COMPLETED only after files and the report were persisted."""
+        if report_path != 'report.md':
+            raise ValueError('Run report path must be the validated report artifact')
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row=connection.execute('SELECT state,identity_json FROM runs WHERE id=?',(run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            if row['state']=='COMPLETED':
+                if connection.execute('SELECT report_path FROM runs WHERE id=?',(run_id,)).fetchone()[0] != report_path:
+                    raise StoreConflict('Completed run report path changed')
+                return 'COMPLETED'
+            if row['state'] not in {'COLLECTING','REMOTE_SUCCEEDED'} or not row['identity_json']:
+                raise StoreConflict('Validated output collection requires a terminal-success run')
+            previous=json.loads(row['identity_json'])
+            for key in ('account','username','kernel_ref','version','kernel_id','script_version_id','session_id',
+                        'code_sha256','context_sha256'):
+                if previous.get(key) is not None and identity.get(key)!=previous[key]:
+                    raise StoreConflict('Pinned collection identity mismatch: '+key)
+            connection.execute('UPDATE runs SET state=\'COMPLETED\',node_id=?,node_json=?,identity_json=?,report_path=?,error=NULL WHERE id=?',
+                               (node_id,canonical(node),canonical(identity),report_path,run_id))
+            return 'COMPLETED'
 
     def recover_submission(self):
         for project in self.list_projects():

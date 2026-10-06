@@ -1,6 +1,7 @@
 """One blocking runtime job off the event loop, with cancellation on shutdown."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import inspect
 import json
 from pathlib import Path
 from threading import Event
@@ -30,7 +31,7 @@ class RuntimeWorker:
         temporary.replace(self.state_path)
         self.state = state
 
-    async def run(self, request):
+    async def run(self, request, *, on_result=None):
         if self.future is not None and self.future.done():
             self.future = None
         if self.closed or self.future is not None:
@@ -48,6 +49,10 @@ class RuntimeWorker:
         try:
             result = await asyncio.shield(asyncio.wrap_future(self.future))
             payload = validate_result(request.role, result)
+            if on_result is not None:
+                persisted = on_result(payload)
+                if inspect.isawaitable(persisted):
+                    await persisted
             self._save({**self.state, "status": self.state["status"] if self.closed else "completed"})
             return result, payload
         except BaseException as exc:

@@ -79,9 +79,11 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
         {run.identity.status && <p>Trạng thái Kaggle: {run.identity.status}</p>}
         {run.state === 'UNKNOWN' && <p>Chưa biết chắc kết quả gửi. Đối soát chỉ đọc notebook đã gửi; không tạo lần gửi mới.</p>}
         <button disabled={busy || run.state === 'SUBMITTING'} onClick={() => void onReconcile(run.id)}>{run.state === 'UNKNOWN' ? 'Đối soát lần gửi' : 'Cập nhật trạng thái từ Kaggle'}</button>
+        {(['REMOTE_SUCCEEDED','COLLECTING'].includes(observations[run.id] || run.state)) && <p role="status">Kaggle đã hoàn tất. Workbench đang xác minh outputs và tạo report.</p>}
       </div>}
       <div className="context"><h3>Mục tiêu</h3><p>{run.purpose}</p><code className="source-id">Proposal {run.proposal_id} · v{run.proposal_version}</code>
         {!!run.expected_outputs?.length && <p className="muted">Đầu ra đã duyệt: {run.expected_outputs.join(' · ')}</p>}
+        {run.result_metric && <p>Kết quả đo được: {run.result_metric.name} · {run.result_metric.direction} · cuối {run.result_metric.final_value} · tốt nhất {run.result_metric.best_value}</p>}
       </div>
       {run.identity?.session_id && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved}/>}
       {run.attempts.map(attempt => <div className="context" key={attempt.attempt}>
@@ -96,6 +98,8 @@ export default function RunPanel({projectId, runs, openRunRequest, busy, onStart
       {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
       {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><div className="stack">{run.artifacts.map(name =>
         <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}</div></>}
+      {run.report_path === 'report.md' && <><h3>Report</h3><a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>
+        {run.report_preview && <pre className="report-preview">{run.report_preview}</pre>}</>}
     </article>)}
   </section>;
 }

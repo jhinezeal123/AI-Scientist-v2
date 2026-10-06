@@ -348,3 +348,28 @@ bằng chứng terminal/restart và giới hạn live SSE. Review trước T08: 
 frontend build đạt. Đã kiểm endpoint SSE của exact session đã kết thúc; live training còn kiểm ở lượt tiếp theo/T09.
 Mở **Run → e2545599 → Theo dõi Kaggle** để xem trạng thái và 21 log records.
 Theo yêu cầu user, GUI chung đã bỏ biểu đồ metric/epoch và ETA để phục vụ general implement.
+
+## T08 — Thu outputs, report và History
+
+**Phạm vi hiện hành:** theo quyết định user ngày 2026-10-06, giữ T08 training như bản ban đầu.
+General implement là phần mở rộng sau MVP0, cần sửa đồng bộ proposal/execution/results.
+Lần khôi phục không chạy lại test suite, gọi report mới hay submit Kaggle.
+
+Đã triển khai và kiểm chứng bằng run có sẵn `e2545599e7e94f66b6fc9f682b23fa72`; không gửi lại notebook hoặc chạy training.
+App chỉ đánh dấu `COMPLETED` sau khi exact-session manifest, `result.json`, `metrics.json`, runner log,
+report và journal đã được xác thực/lưu. Bốn output khớp size/SHA trong manifest. Run giữ coder `0/2`, submit `1/1`.
+Report ghi EMD validation cục bộ (không phải leaderboard score), kết quả đo, giới hạn bốn mẫu validation và AI assistance.
+
+**Mở kết quả trong GUI:** mở project → **History**; trong thẻ run đã hoàn tất, chọn **Mở chi tiết run**.
+History hiện idea/proposal đã duyệt, nguồn và hash từ snapshot được pin, code hash, metric và artifact links.
+Run panel hiện report preview và links tới `report.md`, `result-facts.json`, `output/result.json`,
+`output/metrics.json`, `output/runner.log`, checkpoint, source và notebook. `Mở report` trả Markdown;
+API cục bộ cho report và facts đã được kiểm HTTP 200. Files nằm trong
+`.workbench/projects/d062f7ee5f5a48f68442ed951d879275/runs/e2545599e7e94f66b6fc9f682b23fa72/`.
+
+**Giới hạn và recovery:** T07 đã xác minh terminal/SSE trên exact session đã kết thúc; live SSE khi training
+vẫn chưa được xác minh. Một report call thật ban đầu trả `ValidationError`, sau đó report được lưu thành công.
+State của lần chạy đó không lưu counter/request ID bền vững: có bằng chứng ít nhất một lỗi và một thành công,
+nhưng tổng số lần gọi trước khi counter bền vững chưa xác minh. Counter cap ba lần, UNKNOWN không tự retry,
+payload đã lưu được render lại mà không gọi Codex; run `COMPLETED` không bị replay sau restart.
+Xem thêm [T07_MONITORING.md](T07_MONITORING.md) và [IMPLEMENT_MVP0.md](IMPLEMENT_MVP0.md#t08--thu-outputs-report-c%C3%B3-ngu%E1%BB%93n-v%C3%A0-history).

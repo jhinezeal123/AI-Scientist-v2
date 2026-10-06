@@ -185,7 +185,22 @@ export default function App() {
         {tab === 'History' && <section className="panel"><h2>Lịch sử đã lưu</h2><p>{ideas.length} idea · {history.proposals.length} proposal · {history.runs.length} lần chạy</p>
           {ideas.map(idea => <article className="resource" key={idea.id}><p className="source-meta">Idea · {idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}
           {history.proposals.map(proposal => <article className="resource" key={proposal.id}><p>Proposal v{proposal.version} · {proposal.state}</p><code className="source-id">{proposal.id}</code></article>)}
-          {history.runs.map(run => <article className="resource" key={run.id}><p>Run · {run.state}</p><code className="source-id">{run.id}</code></article>)}
+          {history.runs.map(run => <article className="resource" key={run.id}><p>Run · {run.state}</p><p>{run.purpose}</p>
+            <code className="source-id">{run.id} · idea {run.idea_id || '—'} · proposal {run.proposal_id} v{run.proposal_version ?? '—'}</code>
+            {run.idea_text && <><p>Ý tưởng đã duyệt</p><pre>{run.idea_text}</pre></>}
+            {run.source_refs?.length ? <div><p>Nguồn đã ghim trong proposal</p>{run.source_refs.map(source =>
+              <code className="source-id" key={source.id}>{source.title} · {source.kind} · {source.id} · v{source.version} · SHA256 {source.content_sha256}</code>)}</div> : null}
+            {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
+            {run.context_sha256 && <code className="source-id">Context SHA256 {run.context_sha256}</code>}
+            {run.result_metric && <p>{run.result_metric.name} · {run.result_metric.direction} · {run.result_metric.final_value}</p>}
+            <div className="stack">
+              <button onClick={() => {setOpenRunRequest(current => ({id:run.id,nonce:(current?.nonce || 0)+1}));setTab('Run');}}>Mở chi tiết run</button>
+              {(['source/workload.py','notebook.ipynb','result-facts.json','output/result.json','output/metrics.json','output/runner.log'] as const)
+                .filter(name => run.artifacts?.includes(name)).map(name =>
+                  <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}
+              {run.report_available && <a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>}
+            </div>
+          </article>)}
           {!ideas.length && !history.proposals.length && <p className="empty">Chưa có lịch sử trong project này.</p>}</section>}
       </>}
     </main>

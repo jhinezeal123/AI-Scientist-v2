@@ -1,6 +1,9 @@
+"""Compose the local GUI, project store, shared Codex worker and MCP lifetime."""
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+
 from .kaggle import connect_mcp
 from .runtime import load_runtime
 from .worker import RuntimeWorker
@@ -10,6 +13,7 @@ from .service import PlanningService
 from .implementation import ImplementationService
 from .submission import SubmissionService
 from .monitor import RunMonitor
+from .collection import RunResultsService
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -31,9 +35,10 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 app.state.mcp = session
                 app.state.mcp_tools = names
                 app.state.submission = SubmissionService(app.state.implementation, config, session)
+                app.state.results = RunResultsService(app.state.submission, worker, loaded)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.submission.check_idle
-                app.state.monitor = RunMonitor(app.state.submission)
+                app.state.monitor = RunMonitor(app.state.submission, app.state.results)
                 app.state.monitor.start()
                 try:
                     yield

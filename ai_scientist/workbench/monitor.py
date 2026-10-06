@@ -13,8 +13,9 @@ class IdentityObservationError(ValueError):
 
 
 class RunMonitor:
-    def __init__(self, submission):
+    def __init__(self, submission, results=None):
         self.submission=submission;self.store=submission.store
+        self.results=results
         self.cache=MonitorStore(self.store);self.tasks={};self.closed=False;self.discovery=None
 
     def start(self):self.discovery=asyncio.create_task(self._discover())
@@ -46,6 +47,9 @@ class RunMonitor:
                 if not all(field in identity for field in IDENTITY):continue
                 cached=await asyncio.to_thread(self.cache.delta,*key)
                 if cached['terminal']:
+                    if (self.results is not None and run['state'] in {'COLLECTING','REMOTE_SUCCEEDED'}
+                            and self.results.retry_due(*key)):
+                        self.tasks[key]=asyncio.create_task(self._collect_completed(*key))
                     continue
                 self.tasks[key]=asyncio.create_task(self._watch(*key,identity))
 
@@ -81,6 +85,8 @@ class RunMonitor:
                         approved['body']['metric']['name'],approved['body']['metric']['direction'])
                 cached=await asyncio.to_thread(self.cache.delta,project_id,run_id)
                 if cached['terminal']:
+                    if self.results is not None and state=='COLLECTING':
+                        await self._collect_completed(project_id,run_id)
                     return
                 delay=4 if status in {'RUNNING'} else min(30,delay*2)
             except asyncio.CancelledError:raise
@@ -93,6 +99,12 @@ class RunMonitor:
                 delay=min(30,delay*2)
             await asyncio.sleep(delay)
 
+    async def _collect_completed(self, project_id, run_id):
+        if self.results is None or self.closed:
+            return
+        if not self.results.retry_due(project_id,run_id):
+            return
+        await self.results.collect_and_report(project_id,run_id)
 
     async def close(self):
         self.closed=True
