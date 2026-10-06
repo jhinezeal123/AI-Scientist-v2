@@ -1,3 +1,9 @@
+> **Personal customization fork:** product checkpoints and acceptance criteria are in
+> [docs/customization/PRODUCT_ROADMAP.md](docs/customization/PRODUCT_ROADMAP.md).
+> Integration plan: [docs/customization/CUSTOMIZATION_PLAN.md](docs/customization/CUSTOMIZATION_PLAN.md).
+> MVP 0 developer plan: [docs/customization/IMPLEMENT_MVP0.md](docs/customization/IMPLEMENT_MVP0.md).
+> The local Codex/Kaggle GUI workflow is planned; its implementation has not been validated yet.
+
 <div align="center">
   <a href="https://github.com/SakanaAI/AI-Scientist_v2/blob/main/docs/logo_v1.jpg">
     <img src="docs/logo_v1.png" width="215" alt="AI Scientist v2 Logo" />
