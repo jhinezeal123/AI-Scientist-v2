@@ -59,6 +59,39 @@ class PlanPayload(StrictModel):
         return self
 
 
+class ProposalBudget(StrictModel):
+    coder_calls: int = Field(ge=1, le=2)
+    training_attempts: int = Field(ge=1, le=1)
+    training_seconds: int = Field(ge=1, le=600)
+    output_bytes: int = Field(ge=1, le=10_000_000)
+
+
+class ProposalSplit(StrictModel):
+    method: str = Field(min_length=1)
+    group_key: str = Field(min_length=1)
+    subset: str = Field(min_length=1)
+    seed: int = Field(ge=0, le=2_147_483_647)
+
+
+class ProposalMetric(StrictModel):
+    name: str = Field(min_length=1)
+    direction: Literal["minimize", "maximize"]
+    definition: str = Field(min_length=1)
+
+
+class ReadyProposal(StrictModel):
+    needs_clarification: Literal[False]
+    questions: list[str] = Field(max_length=0)
+    paraphrase: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    data_refs: list[str] = Field(min_length=1)
+    split: ProposalSplit
+    metric: ProposalMetric
+    implementation_steps: list[str] = Field(min_length=1)
+    budget: ProposalBudget
+    expected_outputs: list[str] = Field(min_length=1)
+
+
 class CodePayload(StrictModel):
     source: str = Field(min_length=1)
     config: dict[str, JsonValue]

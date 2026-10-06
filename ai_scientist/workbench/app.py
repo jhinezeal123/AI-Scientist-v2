@@ -6,6 +6,7 @@ from .runtime import load_runtime
 from .worker import RuntimeWorker
 from .api import library_router
 from .store import ProjectStore
+from .service import PlanningService
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -16,6 +17,9 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                                uncertain_error=getattr(loaded, "uncertain_error", None))
         app.state.worker = worker
         app.state.runtime = loaded
+        store.recover_planning()
+        service = PlanningService(store, loaded, worker, config.workspace_root)
+        app.state.service = service
         try:
             async with mcp_connection(config) as (session, names):
                 app.state.mcp = session
@@ -23,9 +27,11 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 try:
                     yield
                 finally:
+                    await service.close()
                     await worker.close(config.shutdown_seconds)
         finally:
             if not worker.closed:
+                await service.close()
                 await worker.close(config.shutdown_seconds)
 
     app = FastAPI(title="AI Scientist Workbench", lifespan=lifespan)

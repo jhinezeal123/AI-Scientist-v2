@@ -170,6 +170,41 @@ class ProjectStore:
                 raise ValueError("Selected context exceeds 100 KB; select fewer or shorter sources")
             return {"snapshot": context, "context_sha256": digest(serialized)}
 
+    def save_proposal(self, project_id, idea_id, body, context):
+        snapshot = context["snapshot"]
+        if snapshot["project_id"] != project_id or snapshot["idea"]["id"] != idea_id:
+            raise ValueError("Context does not belong to this project/idea")
+        serialized = canonical(snapshot)
+        if digest(serialized) != context["context_sha256"]:
+            raise ValueError("Context hash mismatch")
+        proposal_id = uuid.uuid4().hex
+        with self.connection(project_id) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._check_context(connection, snapshot)
+            version = connection.execute("SELECT COALESCE(MAX(version),0)+1 FROM proposals WHERE idea_id=?",
+                                         (idea_id,)).fetchone()[0]
+            state = "NEEDS_CLARIFICATION" if body.get("needs_clarification") else "AWAITING_APPROVAL"
+            connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
+            connection.execute("INSERT INTO proposals VALUES(?,?,?,?,?,?,?,NULL)",
+                               (proposal_id, idea_id, version, canonical(body), serialized, context["context_sha256"], state))
+            row = connection.execute("SELECT conversation_json FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            conversation = json.loads(row[0])
+            conversation.append({"role": "assistant", "proposal_id": proposal_id, "version": version, "body": body})
+            connection.execute("UPDATE ideas SET state=?,error=NULL,conversation_json=? WHERE id=?",
+                               (state, canonical(conversation), idea_id))
+        return proposal_id
+
+    @staticmethod
+    def _check_context(connection, snapshot):
+        idea = connection.execute("SELECT text,conversation_json FROM ideas WHERE id=?", (snapshot["idea"]["id"],)).fetchone()
+        # Assistant proposal messages do not change the human request context.
+        human = lambda messages: [message for message in messages if message.get("role") == "user"]
+        if idea is None or idea["text"] != snapshot["idea"]["text"] or human(json.loads(idea["conversation_json"])) != human(snapshot["idea"]["conversation"]):
+            raise StoreConflict("Idea or answers changed; create a new proposal")
+        for source in snapshot["resources"]:
+            current = connection.execute("SELECT version,content_sha256 FROM resources WHERE id=?", (source["id"],)).fetchone()
+            if current is None or current["version"] != source["version"] or current["content_sha256"] != source["content_sha256"]:
+                raise StoreConflict("Source changed; create a new proposal")
 
     def idea(self, project_id, idea_id):
         item = next((item for item in self.ideas(project_id) if item["id"] == idea_id), None)
@@ -177,6 +212,44 @@ class ProjectStore:
             raise KeyError("Idea not found in this project")
         return item
 
+    def reserve_plan(self, project_id, idea_id):
+        with self.connection(project_id) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT state FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            if row is None:
+                raise KeyError("Idea not found in this project")
+            if row["state"] in {"PLANNING", "APPROVED"}:
+                raise StoreConflict("Idea is planning or already approved; create a new idea for changed scope")
+            connection.execute("UPDATE ideas SET state='PLANNING',error=NULL WHERE id=?", (idea_id,))
+
+    def plan_failed(self, project_id, idea_id, error):
+        with self.connection(project_id) as connection:
+            connection.execute("UPDATE ideas SET state='FAILED',error=? WHERE id=? AND state='PLANNING'", (error[:1000], idea_id))
+
+    def recover_planning(self):
+        for project in self.list_projects():
+            with self.connection(project["id"]) as connection:
+                connection.execute("UPDATE ideas SET state='FAILED',error='Planning interrupted by restart; retry explicitly' WHERE state='PLANNING'")
+
+    def answer(self, project_id, idea_id, proposal_id, version, text):
+        if not text.strip():
+            raise ValueError("Answer must contain text")
+        with self.connection(project_id) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            proposal = connection.execute("SELECT * FROM proposals WHERE id=? AND idea_id=?", (proposal_id, idea_id)).fetchone()
+            if proposal is None:
+                raise KeyError("Proposal not found in this project/idea")
+            latest = connection.execute("SELECT MAX(version) FROM proposals WHERE idea_id=?", (idea_id,)).fetchone()[0]
+            if proposal["version"] != version or version != latest or proposal["state"] != "NEEDS_CLARIFICATION":
+                raise StoreConflict("Clarification is stale or not waiting for an answer")
+            idea = connection.execute("SELECT state,conversation_json FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            if idea["state"] == "PLANNING":
+                raise StoreConflict("Wait for the current planner")
+            conversation = json.loads(idea["conversation_json"])
+            conversation.append({"role": "user", "text": text, "reply_to": proposal_id})
+            connection.execute("UPDATE ideas SET conversation_json=?,state='DRAFT',error=NULL WHERE id=?", (canonical(conversation), idea_id))
+            connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
+        return self.idea(project_id, idea_id)
 
     def update_idea(self, project_id, idea_id, text, expected_text):
         if not text.strip():
@@ -192,6 +265,61 @@ class ProjectStore:
             connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
         return self.idea(project_id, idea_id)
 
+    def proposals(self, project_id, idea_id=None):
+        with self.connection(project_id) as connection:
+            rows = connection.execute("SELECT * FROM proposals" + (" WHERE idea_id=?" if idea_id else "") + " ORDER BY rowid DESC", (idea_id,) if idea_id else ())
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["body"] = json.loads(item.pop("body_json"))
+                item["context_snapshot"] = json.loads(item.pop("context_snapshot_json"))
+                result.append(item)
+            return result
+
+    def approve_proposal(self, project_id, proposal_id, version, context_sha256, idle_unknown_ids=()):
+        from .models import ReadyProposal
+        with self.connection(project_id) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            proposal = connection.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
+            if proposal is None:
+                raise KeyError("Proposal not found in this project")
+            if proposal["version"] != version or proposal["context_sha256"] != context_sha256:
+                raise StoreConflict("Approval version/hash is stale")
+            intent_key = proposal_id + ":" + str(version)
+            existing = connection.execute("SELECT * FROM runs WHERE intent_key=?", (intent_key,)).fetchone()
+            if existing is not None and proposal["state"] == "APPROVED":
+                return dict(existing)
+            latest = connection.execute("SELECT MAX(version) FROM proposals WHERE idea_id=?", (proposal["idea_id"],)).fetchone()[0]
+            idea_state = connection.execute("SELECT state FROM ideas WHERE id=?", (proposal["idea_id"],)).fetchone()[0]
+            if proposal["state"] != "AWAITING_APPROVAL" or latest != version or idea_state == "PLANNING":
+                raise StoreConflict("Proposal is not current and awaiting approval")
+            self._check_context(connection, json.loads(proposal["context_snapshot_json"]))
+            body = ReadyProposal.model_validate_json(proposal["body_json"])
+            snapshot = json.loads(proposal["context_snapshot_json"])
+            sources = {source["id"]: source for source in snapshot["resources"]}
+            if any(ref not in sources or sources[ref]["status"] == "reference_only" for ref in body.data_refs):
+                raise StoreConflict("Proposal cites unread or unselected source IDs; clarify before approval")
+            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('COMPLETED','FAILED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
+            blocking = next((row for row in candidates if not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
+            if blocking:
+                raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) đang chặn lượt mới. Run đã kết thúc trên Kaggle không chặn duyệt proposal.")
+            run_id = uuid.uuid4().hex
+            artifact_dir = "runs/" + run_id
+            connection.execute("INSERT INTO runs(id,proposal_id,state,intent_key,artifact_dir) VALUES(?,?,'APPROVED',?,?)",
+                               (run_id, proposal_id, intent_key, artifact_dir))
+            connection.execute("UPDATE proposals SET state='APPROVED',approved_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), proposal_id))
+            connection.execute("UPDATE ideas SET state='APPROVED' WHERE id=?", (proposal["idea_id"],))
+            return dict(connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
+
+    def approved_context(self, project_id, run_id):
+        # The future coder must use this gate, never a client-supplied proposal body.
+        with self.connection(project_id) as connection:
+            row = connection.execute("SELECT runs.state,proposals.state AS proposal_state,proposals.body_json,proposals.context_snapshot_json,proposals.context_sha256 FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError("Run not found in this project")
+            if row["proposal_state"] != "APPROVED" or row["state"] != "APPROVED":
+                raise StoreConflict("Implementation requires an approved run")
+            return {"body": json.loads(row["body_json"]), "snapshot": json.loads(row["context_snapshot_json"]), "context_sha256": row["context_sha256"]}
 
     def history(self, project_id):
         with self.connection(project_id) as connection:

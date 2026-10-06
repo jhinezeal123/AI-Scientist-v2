@@ -1,5 +1,6 @@
 import {FormEvent, useEffect, useState} from 'react';
-import {api, Context, History, Idea, Project, Resource} from './api';
+import {api, Context, History, Idea, Project, Resource, Proposal} from './api';
+import ProposalPanel from './ProposalPanel';
 
 const blank = {kind: 'text' as Resource['kind'], title: '', url: '', content: ''};
 const statusText = (status: string) => status === 'reference_only' ? 'Chỉ có liên kết · chưa đọc' : 'Có nội dung được cung cấp';
@@ -12,6 +13,7 @@ export default function App() {
   const [resources, setResources] = useState<Resource[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [history, setHistory] = useState<History>({proposals: [], runs: []});
+  const [proposals,setProposals] = useState<Proposal[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [ideaId, setIdeaId] = useState('');
   const [ideaText, setIdeaText] = useState('');
@@ -35,7 +37,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('workbench.project', projectId);
     setSelected([]); setContext(null); setIdeaId(''); setEditing(null); setForm(blank);
-    setIdeaText(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setHistory({proposals: [], runs: []});
+    setIdeaText(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
   }, [projectId]);
 
   useEffect(() => {
@@ -43,17 +45,17 @@ export default function App() {
     let cancelled = false;
     setLoading(true);
     Promise.all([api<Resource[]>(`/projects/${projectId}/resources`),
-      api<Idea[]>(`/projects/${projectId}/ideas`), api<History>(`/projects/${projectId}/history`)])
-      .then(([r, i, h]) => {
+      api<Idea[]>(`/projects/${projectId}/ideas`), api<History>(`/projects/${projectId}/history`),api<Proposal[]>(`/projects/${projectId}/proposals`)])
+      .then(([r, i, h, p]) => {
         if (cancelled) return;
-        setResources(r); setIdeas(i); setHistory(h);
+        setResources(r); setIdeas(i); setHistory(h); setProposals(p);
         setIdeaId(current => i.some(idea => idea.id === current) ? current : i[0]?.id || '');
       }).catch(e => {if (!cancelled) setError(e.message);})
       .finally(() => {if (!cancelled) setLoading(false);});
     return () => {cancelled = true;};
   }, [projectId, revision]);
 
-  const planning = false;
+  const planning = ideas.some(idea => idea.state === 'PLANNING');
   const implementing = false;
   useEffect(() => {
     if (!planning && !implementing) return;
@@ -130,7 +132,7 @@ export default function App() {
               <div className="actions"><button className="primary" disabled={busy || loading}>Lưu nguồn</button>{editing && <button type="button" onClick={() => {setEditing(null);setForm(blank);}}>Hủy sửa</button>}</div>
             </form></section>
         </div>}
-        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp rồi chọn nguồn để xem context.</p>
+        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Code và training chỉ thực hiện sau approval.</p>
           <form className="stack" onSubmit={event => {event.preventDefault(); void action(async () => {
             const path = `/projects/${projectId}/ideas` + (editingIdea ? `/${editingIdea.id}` : '');
             const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {text: ideaText,...(editingIdea ? {expected_text:editingIdea.text} : {})});
@@ -138,12 +140,26 @@ export default function App() {
           });}}><label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || loading || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');}}>Hủy sửa idea</button>}</div></form>
           <h2 className="section-heading">Bản nháp đã lưu</h2>{!ideas.length && <p className="empty">Chưa có idea.</p>}
           {ideas.map(idea => <article className="resource" key={idea.id}><div className="panel-head"><p className="source-meta">{idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><button disabled={busy || idea.state === 'PLANNING' || idea.state === 'APPROVED'} onClick={() => {setEditingIdea(idea);setIdeaText(idea.text);}}>Sửa idea</button></div><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}
-        </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn idea và nguồn của project để xem context.</p>
+        </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn idea và đúng nguồn của project. Xem trước không gọi Codex; bấm lập proposal để gọi Codex thật.</p>
           <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => {setIdeaId(e.target.value);setContext(null);}}><option value="">Chọn idea</option>{ideas.map(idea => <option key={idea.id} value={idea.id}>{idea.text.slice(0,70)}</option>)}</select></label>
             {resources.map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || loading || !ideaId || !selected.length} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
+            <button className="primary" disabled={busy || loading || planning || !ideaId || !selected.length || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
+              await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
+            })}>Lập proposal bằng Codex</button>
           </div>{context && <div className="context"><h3>Context snapshot</h3><code className="source-id">SHA256 {context.context_sha256}</code>{context.snapshot.resources.map(resource => <div className="context-source" key={resource.id}><strong>{resource.title}</strong><small>v{resource.version} · {statusText(resource.status)}</small><code className="source-id">{resource.id}</code></div>)}<details><summary>Xem toàn bộ context</summary><pre>{JSON.stringify(context.snapshot,null,2)}</pre></details></div>}
-        </section></div>}
+        </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={ideas.find(i => i.id === ideaId)} proposals={proposals} resources={resources} busy={busy || loading || planning} onAnswer={async (proposal,text) => {
+          let saved = false;
+          await action(async () => {await api(`/projects/${projectId}/ideas/${ideaId}/answer`,'POST',{proposal_id:proposal.id,version:proposal.version,text});setRevision(n => n+1);setNotice(`Đã lưu câu trả lời. Bấm “Tiếp tục lập proposal v${proposal.version + 1}” để Codex tiếp tục.`);saved = true;});
+          if (!saved) throw new Error('Answer not saved');
+        }} onContinue={async proposal => {await action(async () => {
+          const resourceIds = proposal.context_snapshot.resources.map(source => source.id);
+          await api(`/projects/${projectId}/plan`,'POST',{idea_id:proposal.idea_id,resource_ids:resourceIds});
+          setSelected(resourceIds);setContext(null);setRevision(n => n+1);
+          setNotice(`Đã gửi câu trả lời và nguồn của v${proposal.version} cho Codex để lập proposal v${proposal.version + 1}.`);
+        });}} onApprove={async proposal => {await action(async () => {
+          const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
+        });}}/></div>}
 
         {tab === 'History' && <section className="panel"><h2>Lịch sử đã lưu</h2><p>{ideas.length} idea · {history.proposals.length} proposal · {history.runs.length} lần chạy</p>
           {ideas.map(idea => <article className="resource" key={idea.id}><p className="source-meta">Idea · {idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}

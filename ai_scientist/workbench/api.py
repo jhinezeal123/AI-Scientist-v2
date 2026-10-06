@@ -46,6 +46,17 @@ class IdeaUpdate(IdeaInput):
     expected_text: str = Field(max_length=20_000)
 
 
+class AnswerInput(StrictModel):
+    proposal_id: str
+    version: int = Field(ge=1)
+    text: str = Field(min_length=1, max_length=20_000)
+
+
+class ApprovalInput(StrictModel):
+    version: int = Field(ge=1)
+    context_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 def library_router(store, workspace_root):
     router = APIRouter(prefix="/api")
 
@@ -119,6 +130,21 @@ def library_router(store, workspace_root):
     def update_idea(project_id: str, idea_id: str, body: IdeaUpdate):
         return call(store.update_idea, project_id, idea_id, body.text, body.expected_text)
 
+    @router.post("/projects/{project_id}/plan", status_code=202)
+    async def plan(project_id: str, body: ContextInput, request: Request):
+        return await async_call(request.app.state.service.start, project_id, body.idea_id, body.resource_ids)
+
+    @router.post("/projects/{project_id}/ideas/{idea_id}/answer")
+    async def answer(project_id: str, idea_id: str, body: AnswerInput, request: Request):
+        return await async_call(request.app.state.service.answer, project_id, idea_id, body.proposal_id, body.version, body.text)
+
+    @router.get("/projects/{project_id}/proposals")
+    def proposals(project_id: str, idea_id: str | None = None):
+        return call(store.proposals, project_id, idea_id)
+
+    @router.post("/projects/{project_id}/proposals/{proposal_id}/approve")
+    async def approve(project_id: str, proposal_id: str, body: ApprovalInput, request: Request):
+        return await async_call(request.app.state.service.approve, project_id, proposal_id, body.version, body.context_sha256)
 
     @router.post("/projects/{project_id}/context")
     def context(project_id: str, body: ContextInput):
