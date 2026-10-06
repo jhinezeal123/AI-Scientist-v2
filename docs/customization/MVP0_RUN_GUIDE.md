@@ -62,7 +62,8 @@ config validation từ chối path không tồn tại trước khi mở app.
 5. Khi run hiện **Sẵn sàng gửi** (`PREFLIGHT` đạt), bấm **Gửi notebook và chạy trên Kaggle**
    một lần. App kiểm account/rules/data/quota, lưu submit
    intent và ghim owner/ref/kernel/version/script version/session. Không tự gửi leaderboard.
-6. Giữ tab **Run** để xem status và log; các tab Library/History vẫn dùng được trong lúc chờ.
+6. Giữ tab **Run** để xem status, log và loss/metric nếu notebook phát telemetry;
+   các tab Library/History vẫn dùng được trong lúc chờ.
    Log dùng cursor được lưu ở backend. Sau exact-session success, app tải outputs, kiểm
    manifest/hash và kết quả, gọi Codex viết report, rồi mới ghi `COMPLETED`.
 7. **History → Mở chi tiết run:** xem snapshot idea/proposal/source đã duyệt, report preview,
@@ -95,8 +96,8 @@ Muốn sao lưu project, dừng backend rồi sao chép cả thư mục project 
 - Budget mỗi run tối đa hai coder calls, một training/submit, 600 giây training và
   10,000,000 bytes outputs. Thời gian queue/setup/download/report nằm ngoài training timer.
 - MVP0 hiện giữ contract training: metric hữu hạn, epoch telemetry và checkpoint artifact.
-  General implement cho EDA/synthetic/PCA/đọc ảnh là phần mở rộng sau này. GUI chung chỉ
-  hiện status/log/report; không yêu cầu chart hoặc ETA.
+  General implement cho EDA/synthetic/PCA/đọc ảnh là phần mở rộng sau này. GUI hiện
+  status/log/report và biểu đồ loss/metric khi có telemetry; chưa hiển thị ETA.
 - Nghiệm thu Soil dùng 24 sample/127 ảnh, group split 20 train/4 validation, seed 42 và CNN
   nhỏ từ đầu. EMD validation cục bộ không phải leaderboard score hay bằng chứng chất lượng
   nghiên cứu. Phải đọc và duyệt proposal cho idea mới, không dùng số đo của run cũ.
@@ -502,7 +503,9 @@ notebook mới ghi LF. Proxy startup giữ log tại `.workbench/logs/kaggle-pro
 bằng chứng terminal/restart và giới hạn live SSE. Review trước T08: 59 backend tests và 9 donor tests pass;
 frontend build đạt. Đã kiểm endpoint SSE của exact session đã kết thúc; live training còn kiểm ở lượt tiếp theo/T09.
 Mở **Run → e2545599 → Theo dõi Kaggle** để xem trạng thái và 21 log records.
-Theo yêu cầu user, GUI chung đã bỏ biểu đồ metric/epoch và ETA để phục vụ general implement.
+Theo yêu cầu user mới nhất, đã khôi phục biểu đồ loss/metric, chọn metric và bảng số liệu
+từng step trong chi tiết run. Mặc định chọn `training_loss`; phần này chỉ hiện khi có telemetry.
+Thẻ run nhỏ gọn giữ nguyên; GUI chưa hiển thị ETA.
 
 ## T08 — Thu outputs, report và History
 

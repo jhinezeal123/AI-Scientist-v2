@@ -112,7 +112,7 @@ không tiếp tục behavior trên một nền chưa kiểm chứng. Áp dụng 
 | Notebook | **nbformat `>=5.10,<6`**, AST/`compile()` của Python | Build/validate notebook local; train/test thực trên Kaggle |
 | Upstream journal import | `numpy`, `dataclasses-json`, `rich`, `humanize`, `black`, `jsonschema`, `backoff`, `funcy`, `openai`, `anthropic` | Dependency import của lõi stock; không tạo client/provider call |
 | GUI | **React 18.3.1**, **ReactDOM 18.3.1**, **TypeScript 5.6**, **Vite 8.3.1**, plugin React 6.1.1 | Reuse package.json + package-lock.json + tsconfig/Vite config donor; `npm ci`, không tự nâng version |
-| Visualization | Artifact links khi workload tạo | Theo quyết định user, GUI MVP0 không yêu cầu chart/ETA |
+| Visualization | Biểu đồ loss/metric từ telemetry và artifact links khi workload tạo | Theo quyết định user mới nhất, hiển thị chart khi có telemetry; GUI chưa hiển thị ETA |
 | Job nền | `ThreadPoolExecutor(max_workers=1)` cho Codex + async collector MCP | Agent call blocking không chiếm event loop; không Celery/Redis |
 | Test | `pytest>=8,<9`, frontend `tsc -b && vite build`, một GUI E2E thật | Chỉ test gate/identity/cursor/store và phần bị sửa |
 
@@ -597,8 +597,7 @@ telemetry lưu các metric samples thực để đối soát outputs/report.
 
 **Quyết định phạm vi 2026-10-06:** theo yêu cầu user, đã khôi phục T08 về hợp đồng training
 ban đầu. General implement được để thành phần mở rộng sau MVP0, làm đồng bộ proposal,
-execution và results; chưa triển khai phân loại run theo purpose. GUI monitoring T07 vẫn chỉ status/log,
-không khôi phục biểu đồ hoặc ETA đã bỏ trước đó.
+execution và results; chưa triển khai phân loại run theo purpose.
 
 **Cập nhật 2026-10-06:** T08 đã triển khai collection từ terminal cache khi app khởi động lại,
 MCP exact-session manifest verification, đối soát result/metrics/runner log, report Codex có facts cố định,
