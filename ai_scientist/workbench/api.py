@@ -154,5 +154,25 @@ def library_router(store, workspace_root):
     def history(project_id: str, request: Request):
         return call(store.history, project_id)
 
+    @router.post('/projects/{project_id}/runs/{run_id}/implement', status_code=202)
+    async def implement(project_id: str, run_id: str, request: Request):
+        return await async_call(request.app.state.implementation.start, project_id, run_id)
+
+    @router.get('/projects/{project_id}/runs/{run_id}')
+    def run_detail(project_id: str, run_id: str, request: Request):
+        return call(request.app.state.implementation.detail, project_id, run_id)
+
+
+    @router.get('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}')
+    def artifact(project_id: str, run_id: str, name: str, request: Request):
+        from fastapi.responses import FileResponse
+        detail = call(request.app.state.implementation.detail, project_id, run_id)
+        if name not in detail['artifacts']:
+            raise HTTPException(404, 'Artifact not found')
+        root = call(request.app.state.implementation.root, project_id, run_id)
+        path = root / name
+        if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            raise HTTPException(404, 'Artifact not found')
+        return FileResponse(path, filename=path.name)
 
     return router

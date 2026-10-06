@@ -7,6 +7,7 @@ from .worker import RuntimeWorker
 from .api import library_router
 from .store import ProjectStore
 from .service import PlanningService
+from .implementation import ImplementationService
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -18,8 +19,10 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
         app.state.worker = worker
         app.state.runtime = loaded
         store.recover_planning()
+        store.recover_implementation()
         service = PlanningService(store, loaded, worker, config.workspace_root)
         app.state.service = service
+        app.state.implementation = ImplementationService(service, config)
         try:
             async with mcp_connection(config) as (session, names):
                 app.state.mcp = session

@@ -1,6 +1,7 @@
 import {FormEvent, useEffect, useState} from 'react';
 import {api, Context, History, Idea, Project, Resource, Proposal} from './api';
 import ProposalPanel from './ProposalPanel';
+import RunPanel from './RunPanel';
 
 const blank = {kind: 'text' as Resource['kind'], title: '', url: '', content: ''};
 const statusText = (status: string) => status === 'reference_only' ? 'Chỉ có liên kết · chưa đọc' : 'Có nội dung được cung cấp';
@@ -26,6 +27,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
+  const [openRunRequest, setOpenRunRequest] = useState<{id:string;nonce:number}|null>(null);
 
   useEffect(() => {
     api<Project[]>('/projects').then(items => {
@@ -56,7 +58,7 @@ export default function App() {
   }, [projectId, revision]);
 
   const planning = ideas.some(idea => idea.state === 'PLANNING');
-  const implementing = false;
+  const implementing = history.runs.some(run => ['IMPLEMENTING','SUBMITTING'].includes(run.state));
   useEffect(() => {
     if (!planning && !implementing) return;
     const timer = window.setInterval(() => setRevision(n => n+1),1500);
@@ -160,7 +162,9 @@ export default function App() {
         });}} onApprove={async proposal => {await action(async () => {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
-
+        {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} openRunRequest={openRunRequest} busy={busy || planning || implementing} onStart={async id => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/implement`, 'POST');setRevision(n => n+1);setNotice('Đã gửi yêu cầu tạo implementation. Chưa submit hoặc training.');});
+        }}/>} 
         {tab === 'History' && <section className="panel"><h2>Lịch sử đã lưu</h2><p>{ideas.length} idea · {history.proposals.length} proposal · {history.runs.length} lần chạy</p>
           {ideas.map(idea => <article className="resource" key={idea.id}><p className="source-meta">Idea · {idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}
           {history.proposals.map(proposal => <article className="resource" key={proposal.id}><p>Proposal v{proposal.version} · {proposal.state}</p><code className="source-id">{proposal.id}</code></article>)}

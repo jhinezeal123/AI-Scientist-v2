@@ -182,3 +182,61 @@ Mở `http://127.0.0.1:8011/`, chọn **Soil Grain Size MVP0 → Idea**. Phiên 
 - User đã bấm duyệt proposal v2; kiểm DB xác nhận `APPROVED` lúc `2026-10-06T06:15:10.520355+00:00` (13:15:10 giờ Việt Nam), context hash giữ nguyên. History có đúng một run `2d1cb7e9cd8b4a058e3efa1bcd6e9630`, state `APPROVED`, chưa có node/report hoặc kết quả thực thi. `runs: []` ở bằng chứng trên là trạng thái trước approval.
 
 **Trạng thái:** T04 đã nghiệm thu, gồm baseline thật được user duyệt. **Chưa đánh dấu CP0-A hoàn thành**, vì readiness attach/mount T01 còn blocker. Implementation được bổ sung ở T05 bên dưới; chưa training.
+
+## T05 — Code, notebook và preflight sau approval
+
+T05 thêm hành trình **Run đã duyệt → Codex tạo source → app build notebook → preflight → mở artifacts**. Proposal/context lấy từ snapshot đã pin trong DB, không nhận body do client gửi và không đổi theo Library hiện tại. T05 không gọi push/train hoặc tải dataset về máy local.
+
+### Sử dụng và kiểm thử GUI
+
+Config thêm `kaggle_username` là username đã xác minh (`huynhtrungcuong` trong example), dùng làm owner của metadata; đây không phải credential. Alias MCP vẫn là `jhin_access_token.txt`; T06 phải đối chiếu owner này với account thật trước submit.
+
+```powershell
+& .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --config config-mvp0.example.json --port 8011
+```
+
+1. Mở `http://127.0.0.1:8011/` → **Soil Grain Size MVP0 → Run**.
+2. Với run `APPROVED`, bấm **Tạo code và notebook bằng Codex**. GUI chuyển `IMPLEMENTING`, hiện số lượt coder đã cấp; có thể chuyển tab trong lúc chờ.
+3. Thành công: run giữ state `PREFLIGHT`, hiện **PASS** và các link source/notebook/context/metadata/checks/journal/manifest. Đây là notebook chuẩn bị cho T06, chưa phải remote run thành công.
+4. Preflight fail: app cho đúng một lần sửa nếu còn ngân sách proposal, lưu code node child nối parent. Vẫn fail thì `FAILED`; GUI hiện lỗi và artifacts từng attempt. Không đổi split/metric để pass, không tự tăng coder budget.
+5. Runtime bị ngắt hoặc lỗi: attempt đã cấp vẫn tiêu ngân sách. Chỉ chủ động bấm **Tiếp tục trong ngân sách còn lại** nếu còn lượt và đã đối soát worker `unknown`; restart không tự gọi coder hay submit. Bản đã PASS không cho tạo lại bằng cùng run.
+6. Reload/restart để kiểm run, code hash, attempts và artifacts còn nguyên. Không tự chạy notebook local để kiểm training; execution/mount thuộc T06.
+
+### Artifacts và kiểm tra
+
+Run root: `.workbench/projects/<project_id>/runs/<run_id>/`. Bản PASS có `source/workload.py`, `payload.json`, `context.json`, `notebook.ipynb`, `kernel-metadata.json`, `checks.json`, `journal.json`, `bundle-manifest.json`; bản từng lượt nằm trong `attempts/1` và `attempts/2`. DB bổ sung bảng `implementation_attempts` cho counter/request/session/node/checks; dùng Node/Journal upstream nguyên bản. `exp_results_dir` của Node chưa điền ở T05 vì chưa có kết quả execution.
+
+- Preflight chỉ `ast.parse`/`compile`, kiểm `run(context, emit)`, telemetry call, config/seed/bounds, nbformat/cell syntax và metadata. Không import/thực thi source Codex trong backend.
+- Proposal yêu cầu checkpoint thì preflight kiểm có lời gọi serialization; đây là kiểm tra tối thiểu, không chứng minh checkpoint hợp lệ. Review source vẫn bắt buộc. Review lại source đã lưu không tiêu thêm coder call, không sửa source hay snapshot.
+- Metadata private, Internet tắt, GPU bật/TPU tắt, slug `ailab-<run_id>`, `competition_sources` lấy từ các URL Kaggle trong snapshot đã duyệt. Mount `/kaggle/input/soil-grain-size-from-photos` vẫn là expectation, chưa quan sát runtime.
+- Notebook dùng runner cố định, output `/kaggle/working/ailab_bundle/output`, tee stdout/stderr vào `runner.log`, ghi metric từng epoch và kiểm measurement hữu hạn/split evidence/artifact paths/output budget trước ghi `result.json`. Wall-clock watchdog chỉ chạy trong kernel remote, không retry training.
+- Code SHA256 tính trên UTF-8 source giữ newline LF; manifest hash các file bundle để T06 đối chiếu trước submit. Code/config/metadata được lưu; chưa có measurements/report thật.
+- Nếu prompt code/sửa vượt giới hạn argv Windows, app lưu nguyên request vào `coding-request.txt` trong attempt directory và chỉ cho Codex đọc file này bằng thao tác read-only. Không rút bớt snapshot hoặc sửa adapter donor.
+- Static checks không chứng minh model đúng, không leak hoặc package/mount khả dụng. Phải review source khớp proposal và quan sát execution thật T06/T08.
+
+Focused checks và build:
+
+```powershell
+& .\.venv-mvp0\Scripts\python.exe -m pytest tests\workbench -q
+# Trong workbench-ui:
+npm run build
+```
+
+### Bằng chứng và blocker T05 — 2026-10-06
+
+- GUI thật đã gọi `mvp0_code` cho run `2d1cb7e9cd8b4a058e3efa1bcd6e9630`. Lượt 1 timeout 300 giây trước khi trả source, vẫn tiêu một lượt. Lượt 2 dùng timeout 600 giây cho sinh code (không đổi training budget); Codex session `01a10fe7-70d7-7f82-9c52-efc4d096ae8c` đã trả source/config thật. **2/2 coder calls đã dùng**, không tự cấp lượt thứ ba.
+- Source SHA256 `8ad5e7fb1f5d88b9cc3da28c3326a14cb4c1fee000b345251633c7c84e563299`. Notebook nbformat/cell syntax, metadata private/competition_sources, entrypoint, config bounds/seed và telemetry runner đạt kiểm tra local. Metadata owner `huynhtrungcuong`, slug duy nhất `ailab-2d1cb7e9cd8b4a058e3efa1bcd6e9630`.
+- Review source thấy 24 labels/127 ảnh thật; filename boundary matching duy nhất, split 20/4 theo mẫu seed42, mean photo predictions trước EMD theo mẫu, clip/cummax/last100, CNN scratch/MAE/3 epochs/deadline và output bound. Chưa thực thi source này ở local/Kaggle; không khẳng định accuracy hoặc execution success.
+- **Blocker:** source tạo `validation_report.json` nhưng không lưu checkpoint trong expected outputs của proposal v2. Prompt coder ban đầu đã coi checkpoint là tùy chọn; đây là lỗi app và đã sửa prompt cùng checkpoint preflight guard. Recheck source nguyên bản không gọi coder, ghi `scope-review.json`, cập nhật checks/Node và run thành **FAILED** để chặn submit. Không sửa source, proposal/version/hash hoặc reset counter để bỏ qua lỗi.
+- Sau restart, run FAILED, cùng code hash/Node/session/2 attempts và artifacts còn nguyên. Không tạo `result.json`/`metrics.json` đo được; không gọi MCP push/train. T01 mount blocker vẫn giữ nguyên.
+- 25 focused test workbench đạt (15 T02–T04 + 10 T05), frontend build đạt. Checks gồm bounded repair/child Node, budget/restart, ownership/double click, source/config/notebook/metadata, telemetry finite/failed output, Windows request-file fallback, active-run admission và exact-hash review chặn submit. Ảnh bàn giao: `.workbench/readiness/T05-run-review.jpg`, `.workbench/readiness/T05-run-summary.jpg`.
+
+### User tự kiểm thử thành công — 2026-10-06
+
+- User tạo idea mới `916d5c40ac5040c29fe18be8eaa0a143` với prompt đầy đủ, chọn nguồn và duyệt proposal `46509c7b6a4d422397f3ef86dfb8de34` v1 lúc 14:03:30 giờ Việt Nam. Proposal mới ghi rõ checkpoint; không dựa vào context của idea cũ.
+- User gọi tạo code từ GUI. Run mới `30af70766f794db2992219c330db4e97` ở **PREFLIGHT**, checks **PASS**, error null, dùng **1/2 coder calls**. Codex session `01a11006-7e47-7242-b829-dd0f70238d21`; Node `3c7e16ac15e74f068d0ef56ee89d89b2` được lưu.
+- Source SHA256 `e16c10ef306ae631c21820e75a21d59d6fd27c38d80341e45ffd633f38b665fe`. Đối chiếu toàn manifest, hash source file và nbformat thành công. Metadata private/Internet tắt/GPU bật, owner `huynhtrungcuong`, competition source đúng và slug `ailab-30af70766f794db2992219c330db4e97`.
+- Review source: đủ 24 mẫu/127 ảnh, boundary matching duy nhất, sorted sample_ids + NumPy default_rng seed42 đúng proposal mới, 20/4 nhóm disjoint; CNN scratch, MAE, 3 epoch, mean ảnh theo mẫu và EMD đúng công thức; có `torch.save` cho `soil_cnn_checkpoint.pt` trong output_dir và khai báo artifact tương đối.
+- Chưa có `result.json` hoặc measurements thật; file checkpoint sẽ được tạo sau training, không phải trong T05. Source bật deterministic algorithms; T06 cần kiểm cấu hình CUDA/cuBLAS phù hợp trước launch, cùng package/mount/runtime, không suy diễn execution success từ preflight.
+
+**Trạng thái T05:** **đã nghiệm thu qua thao tác GUI của user và artifact Codex thật.** Run cũ vẫn FAILED, history/counter giữ nguyên; blocker checkpoint của run cũ được giải quyết bằng proposal/run mới có user approval. Trạng thái submit/readiness tiếp theo nằm ở phần T06 bên dưới.

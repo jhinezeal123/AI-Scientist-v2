@@ -327,3 +327,71 @@ class ProjectStore:
                 "SELECT id,idea_id,version,state,context_sha256,approved_at FROM proposals ORDER BY rowid DESC")],
                 "runs": [dict(row) for row in connection.execute(
                 "SELECT id,proposal_id,node_id,state,artifact_dir,error,report_path FROM runs ORDER BY rowid DESC")]}
+
+    def run(self, project_id, run_id):
+        with self.connection(project_id) as connection:
+            row = connection.execute('SELECT runs.*, proposals.version AS proposal_version FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            item = dict(row)
+            attempts = [dict(a) for a in connection.execute('SELECT * FROM implementation_attempts WHERE run_id=? ORDER BY attempt', (run_id,))]
+            for attempt in attempts:
+                attempt['node'] = json.loads(attempt.pop('node_json')) if attempt['node_json'] else None
+                attempt['checks'] = json.loads(attempt.pop('checks_json')) if attempt['checks_json'] else None
+            item['attempts'] = attempts
+            return item
+
+    def implementation_snapshot(self, project_id, run_id, *, read_only=False):
+        with self.connection(project_id) as connection:
+            row = connection.execute('SELECT runs.state,proposals.state AS proposal_state,proposals.body_json,proposals.context_snapshot_json,proposals.context_sha256 FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            if row['proposal_state'] != 'APPROVED' or (not read_only and row['state'] not in {'APPROVED', 'FAILED', 'IMPLEMENTING', 'PREFLIGHT'}):
+                raise StoreConflict('Implementation requires an approved proposal and eligible run')
+            snapshot = json.loads(row['context_snapshot_json'])
+            if digest(canonical(snapshot)) != row['context_sha256']:
+                raise StoreConflict('Pinned context hash mismatch')
+            return {'body': json.loads(row['body_json']), 'snapshot': snapshot, 'context_sha256': row['context_sha256']}
+
+
+    def reserve_implementation(self, project_id, run_id, request_id, *, repair=False):
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT runs.state,proposals.state AS proposal_state,proposals.body_json FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            states = {'IMPLEMENTING'} if repair else {'APPROVED', 'FAILED'}
+            if row['proposal_state'] != 'APPROVED' or row['state'] not in states:
+                raise StoreConflict('Run is not eligible for a coder call')
+            attempts = connection.execute('SELECT attempt,state,checks_json FROM implementation_attempts WHERE run_id=? ORDER BY attempt', (run_id,)).fetchall()
+            budget = json.loads(row['body_json'])['budget']['coder_calls']
+            if len(attempts) >= budget or any(a['state'] == 'RUNNING' for a in attempts) or any(a['checks_json'] and json.loads(a['checks_json'])['pass'] for a in attempts):
+                raise StoreConflict('Coder budget exhausted, already active, or preflight already passed')
+            attempt = len(attempts) + 1
+            connection.execute("INSERT INTO implementation_attempts(run_id,attempt,request_id,state) VALUES(?,?,?,'RUNNING')", (run_id, attempt, request_id))
+            connection.execute("UPDATE runs SET state='IMPLEMENTING',error=NULL WHERE id=?", (run_id,))
+            return attempt
+
+    def finish_implementation_attempt(self, project_id, run_id, attempt, node, checks, session_id=None, error=None):
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            cursor = connection.execute("UPDATE implementation_attempts SET state=?,node_json=?,checks_json=?,session_id=?,error=? WHERE run_id=? AND attempt=? AND state='RUNNING'",
+                                       ('COMPLETE' if checks and checks['pass'] else 'FAILED', canonical(node) if node else None,
+                                        canonical(checks) if checks else None, session_id, error, run_id, attempt))
+            if cursor.rowcount != 1:
+                raise StoreConflict('Coder attempt is no longer current')
+            if node:
+                connection.execute('UPDATE runs SET node_id=?,node_json=?,code_sha256=? WHERE id=?',
+                                   (node['id'], canonical(node), checks['code_sha256'] if checks else None, run_id))
+            if checks and checks['pass']:
+                connection.execute("UPDATE runs SET state='PREFLIGHT',error=NULL WHERE id=?", (run_id,))
+
+    def implementation_failed(self, project_id, run_id, error):
+        with self.connection(project_id) as connection:
+            connection.execute("UPDATE runs SET state='FAILED',error=? WHERE id=? AND state IN ('IMPLEMENTING','PREFLIGHT')", (error[:1000], run_id))
+
+    def recover_implementation(self):
+        for project in self.list_projects():
+            with self.connection(project['id']) as connection:
+                connection.execute("UPDATE implementation_attempts SET state='FAILED',error='Interrupted by restart; attempt remains consumed' WHERE state='RUNNING'")
+                connection.execute("UPDATE runs SET state='FAILED',error='Implementation interrupted by restart; retry explicitly within remaining coder budget' WHERE state='IMPLEMENTING'")

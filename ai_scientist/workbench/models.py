@@ -99,6 +99,14 @@ class CodePayload(StrictModel):
     checks_explained: list[str]
 
 
+class WorkloadConfig(StrictModel):
+    seed: int = Field(ge=0, le=2_147_483_647)
+    max_epochs: int = Field(ge=1, le=100)
+    training_seconds: int = Field(ge=1, le=600)
+    output_bytes: int = Field(ge=1, le=10_000_000)
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class ReportPayload(StrictModel):
     summary: str
     interpretation: str
