@@ -34,7 +34,7 @@ trạng thái và log; thẻ run nhỏ gọn giữ nguyên. ETA chưa hiển th�
 4. Click **Run 787afc70**: terminal ERROR, không có metric training; log có traceback
    `Runtime contract must provide exactly one input mount.`
 5. Với một run mới được duyệt qua pipeline, sau submit mở card: log tự cập nhật, không cần bấm
-   cập nhật trạng thái. Có thể chuyển Library/History khi collector vẫn chạy nền.
+   cập nhật trạng thái. Có thể chuyển Library/Idea khi collector vẫn chạy nền.
 6. Mất kết nối hiện lỗi đọc; nguồn log bị cắt hiện gap rõ ràng. Không coi các trạng thái này
    là tác vụ thành công.
 

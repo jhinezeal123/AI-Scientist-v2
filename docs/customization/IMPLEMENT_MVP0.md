@@ -359,7 +359,8 @@ Nếu transport không cho log đầy đủ trong giới hạn, phải sửa đ�
 | `POST /api/runs/{id}/reconcile` | Đối soát UNKNOWN chỉ đọc remote, không submit |
 | `GET /api/runs/{id}/artifacts/{name}` | File allowlist trong job root: notebook/source/result/report và outputs đã xác minh |
 
-UI một trang, bốn khu vực: **Library → Idea/Proposal → Run → History/Report**.
+UI một trang, ba khu vực: **Library → Idea/Proposal → Run**.
+Theo yêu cầu user sau T09, bỏ tab History; kết quả, log, artifacts và report xem trong chi tiết run.
 Hiện câu hỏi, assumption/split/metric/budget trước nút “Duyệt và triển khai”; disable nút khi stale/đang xử lý.
 Run có progress stage, exact Kaggle link, log, lỗi và mở artifacts/report.
 Đã approved thì các bước trong scope chạy tự động; không bắt user approve từng cell/tool.
@@ -605,7 +606,7 @@ journal integration và artifact links trong Run/History. Run `e2545599e7e94f66b
 đã được thu và hoàn tất: 4 artifact outputs, report/facts lưu dưới run root, primary EMD đo được lần lượt
 194.10373890251748, 105.20358728202889 và 82.43520124919444; database ghi `COMPLETED`, submit 1/1,
 coder 0/2. API mở được `report.md` (HTTP 200, `text/markdown`) và UI preview hiện measurement, refs cùng output links.
-Trong GUI mở **History → Mở chi tiết run** hoặc chọn run ở **Run** để xem preview; link `report.md`,
+Trong GUI chọn card ở **Run** để xem preview; link `report.md`,
 `result-facts.json` và output artifacts mở qua artifact API trong run root.
 Một lần gọi report thật đầu trả `ValidationError`, run vẫn `COLLECTING`; report thật sau đó được lưu và run hoàn tất.
 Runtime/collection state cũ không lưu bộ đếm report nên tổng số lần gọi trước counter bền vững chưa xác minh.

@@ -2,6 +2,9 @@
 
 ## Khởi động từ checkout hiện có
 
+GUI hiện có ba tab: **Library**, **Idea**, **Run**. Theo yêu cầu user, đã bỏ tab History;
+chọn card trong Run để xem log, kết quả, report và artifacts của lần chạy đã lưu.
+
 Chạy PowerShell tại `D:\Documents\AI-Scientist-v2`:
 
 ```powershell
@@ -63,10 +66,10 @@ config validation từ chối path không tồn tại trước khi mở app.
    một lần. App kiểm account/rules/data/quota, lưu submit
    intent và ghim owner/ref/kernel/version/script version/session. Không tự gửi leaderboard.
 6. Giữ tab **Run** để xem status, log và loss/metric nếu notebook phát telemetry;
-   các tab Library/History vẫn dùng được trong lúc chờ.
+   các tab Library/Idea vẫn dùng được trong lúc chờ.
    Log dùng cursor được lưu ở backend. Sau exact-session success, app tải outputs, kiểm
    manifest/hash và kết quả, gọi Codex viết report, rồi mới ghi `COMPLETED`.
-7. **History → Mở chi tiết run:** xem snapshot idea/proposal/source đã duyệt, report preview,
+7. **Run → chọn card:** xem proposal đã duyệt, kết quả, report preview,
    notebook/source, facts và output links. Mở lại sau restart vẫn giữ cùng run và kết quả.
 
 ### Dữ liệu lưu ở đâu
@@ -265,7 +268,8 @@ Mở `http://127.0.0.1:8000/`. Phiên preview dùng khi bàn giao T03 đang ở 
 2. **Library:** thêm text/URL/dataset reference; sửa nguồn sẽ tăng version. Nút **Nhập nguồn T01** nhập 4 trang competition đã đọc và 1 reference schema/access. Các bản đọc từ 2026-10-06 không tự refresh từ Internet. Chỉ URL, không text → `reference_only`/“chưa đọc”; có text → `provided_text`, không khẳng định app đã fetch URL.
 3. **Idea:** nhập và lưu bản nháp, chọn idea đã lưu và các checkbox nguồn, bấm **Xem context đã chọn**. UI hiện source ID/version/status cùng context hash và nội dung. Preview không gọi Codex; lựa chọn checkbox chưa được lưu thành proposal. T04 sẽ freeze snapshot trong proposal.
 4. **Run:** hiện các run đã lưu; hiện chưa có training run.
-5. **History:** xem proposal/run của đúng project. Khi bàn giao T03, project Soil chưa có idea; T04 đã thêm idea QA và proposal chờ user duyệt. Project `T03 QA — kiểm tra lưu dữ liệu` chứa dữ liệu test có nhãn QA, không dùng cho proposal training.
+5. Xem proposal ở **Idea**, lần chạy đã lưu ở **Run**; tab History của bản T03 đã được bỏ.
+   Project `T03 QA — kiểm tra lưu dữ liệu` chứa dữ liệu test có nhãn QA, không dùng cho proposal training.
 
 ### Persistence và giới hạn
 
@@ -427,7 +431,7 @@ trước submit. Không reset counter, xóa UNKNOWN hay gửi lại notebook cũ
    rules đã được chấp nhận, quyền tham gia/xem, notebook support, file access, GPU quota, zero active sessions
    và ref mới chưa tồn tại. App không tự tham gia competition hoặc chấp nhận rules.
 3. App lưu intent SUBMITTING trong SQLite trước đúng một MCP `push_notebook`. GUI hiện submit 1/1;
-   nút gửi biến mất. Có thể chuyển Library/History trong lúc chờ.
+   nút gửi biến mất. Có thể chuyển Library/Idea trong lúc chờ.
 4. Khi xác minh được identity, GUI hiện account/ref/version/kernel/session/script_version và link đúng script version.
    Nút **Cập nhật trạng thái từ Kaggle** chỉ inspect exact identity đã pin. Remote success là COLLECTING,
    chưa app COMPLETED; collection/report thuộc T08. T07 tự theo dõi nền bằng identity đã pin.
@@ -518,8 +522,8 @@ App chỉ đánh dấu `COMPLETED` sau khi exact-session manifest, `result.json`
 report và journal đã được xác thực/lưu. Bốn output khớp size/SHA trong manifest. Run giữ coder `0/2`, submit `1/1`.
 Report ghi EMD validation cục bộ (không phải leaderboard score), kết quả đo, giới hạn bốn mẫu validation và AI assistance.
 
-**Mở kết quả trong GUI:** mở project → **History**; trong thẻ run đã hoàn tất, chọn **Mở chi tiết run**.
-History hiện idea/proposal đã duyệt, nguồn và hash từ snapshot được pin, code hash, metric và artifact links.
+**Mở kết quả trong GUI:** mở project → **Run** → chọn card của run đã hoàn tất.
+Chi tiết run hiện proposal đã duyệt, code hash, metric, report và artifact links.
 Run panel hiện report preview và links tới `report.md`, `result-facts.json`, `output/result.json`,
 `output/metrics.json`, `output/runner.log`, checkpoint, source và notebook. `Mở report` trả Markdown;
 API cục bộ cho report và facts đã được kiểm HTTP 200. Files nằm trong

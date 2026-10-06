@@ -27,7 +27,6 @@ export default function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
-  const [openRunRequest, setOpenRunRequest] = useState<{id:string;nonce:number}|null>(null);
 
   useEffect(() => {
     api<Project[]>('/projects').then(items => {
@@ -113,11 +112,11 @@ export default function App() {
       </select></label>
       <form className="new-project" onSubmit={createProject}><label>Tên project mới<input value={projectName} required maxLength={120} onChange={e => setProjectName(e.target.value)}/></label>
         <button disabled={busy || !projectName.trim()}>Tạo project</button></form>
-      <nav aria-label="Workbench">{['Library', 'Idea', 'Run', 'History'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
+      <nav aria-label="Workbench">{['Library', 'Idea', 'Run'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
       <div className="rail-footer">Một project · nguồn riêng biệt<br/>Dữ liệu được lưu trên máy này.</div>
     </aside>
     <main>
-      <header><div><span className="eyebrow">{project?.name || 'BẮT ĐẦU'}</span><h1>{tab === 'Library' ? 'Nguồn cho project' : tab === 'Idea' ? 'Ý tưởng triển khai' : tab === 'Run' ? 'Theo dõi lần chạy' : 'Lịch sử project'}</h1></div>
+      <header><div><span className="eyebrow">{project?.name || 'BẮT ĐẦU'}</span><h1>{tab === 'Library' ? 'Nguồn cho project' : tab === 'Idea' ? 'Ý tưởng triển khai' : 'Theo dõi lần chạy'}</h1></div>
         {project && <span className="mono project-id">{project.id.slice(0,8)}</span>}</header>
       {error && <div role="alert" className="alert error">{error}<button aria-label="Đóng lỗi" onClick={() => setError('')}>×</button></div>}
       {notice && <div role="status" className="alert">{notice}</div>}
@@ -175,33 +174,13 @@ export default function App() {
         });}} onApprove={async proposal => {await action(async () => {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
-        {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} openRunRequest={openRunRequest} busy={busy || planning || implementing} onStart={async id => {
+        {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} busy={busy || planning || implementing} onStart={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/implement`, 'POST');setRevision(n => n+1);setNotice('Đã gửi yêu cầu tạo implementation. Chưa submit hoặc training.');});
         }} onSubmit={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/submit`, 'POST');setRevision(n => n+1);setNotice('Đã lưu yêu cầu gửi notebook. App sẽ xác minh đúng version và session qua MCP.');});
         }} onReconcile={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/reconcile`, 'POST');setRevision(n => n+1);setNotice('Đã đối soát trạng thái qua MCP; không gửi notebook lần nữa.');});
         }}/>} 
-        {tab === 'History' && <section className="panel"><h2>Lịch sử đã lưu</h2><p>{ideas.length} idea · {history.proposals.length} proposal · {history.runs.length} lần chạy</p>
-          {ideas.map(idea => <article className="resource" key={idea.id}><p className="source-meta">Idea · {idea.state} · {new Date(idea.created_at).toLocaleString('vi-VN')}</p><pre>{idea.text}</pre><code className="source-id">{idea.id}</code></article>)}
-          {history.proposals.map(proposal => <article className="resource" key={proposal.id}><p>Proposal v{proposal.version} · {proposal.state}</p><code className="source-id">{proposal.id}</code></article>)}
-          {history.runs.map(run => <article className="resource" key={run.id}><p>Run · {run.state}</p><p>{run.purpose}</p>
-            <code className="source-id">{run.id} · idea {run.idea_id || '—'} · proposal {run.proposal_id} v{run.proposal_version ?? '—'}</code>
-            {run.idea_text && <><p>Ý tưởng đã duyệt</p><pre>{run.idea_text}</pre></>}
-            {run.source_refs?.length ? <div><p>Nguồn đã ghim trong proposal</p>{run.source_refs.map(source =>
-              <code className="source-id" key={source.id}>{source.title} · {source.kind} · {source.id} · v{source.version} · SHA256 {source.content_sha256}</code>)}</div> : null}
-            {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
-            {run.context_sha256 && <code className="source-id">Context SHA256 {run.context_sha256}</code>}
-            {run.result_metric && <p>{run.result_metric.name} · {run.result_metric.direction} · {run.result_metric.final_value}</p>}
-            <div className="stack">
-              <button onClick={() => {setOpenRunRequest(current => ({id:run.id,nonce:(current?.nonce || 0)+1}));setTab('Run');}}>Mở chi tiết run</button>
-              {(['source/workload.py','notebook.ipynb','result-facts.json','output/result.json','output/metrics.json','output/runner.log'] as const)
-                .filter(name => run.artifacts?.includes(name)).map(name =>
-                  <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}
-              {run.report_available && <a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>}
-            </div>
-          </article>)}
-          {!ideas.length && !history.proposals.length && <p className="empty">Chưa có lịch sử trong project này.</p>}</section>}
       </>}
     </main>
   </div>;

@@ -10,17 +10,12 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, runs, openRunRequest, busy, onStart, onSubmit, onReconcile}: {
+export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onReconcile}: {
   projectId:string;runs:History['runs'];busy:boolean;onStart:(id:string)=>Promise<void>;
-  openRunRequest:{id:string;nonce:number}|null;
   onSubmit:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>}) {
   const [details,setDetails] = useState<RunDetail[]>([]);
   const [error,setError] = useState('');
   const [selection,setSelection] = useState<{projectId:string;id:string}|null>(null);
-  useEffect(() => {
-    if (openRunRequest && runs.some(run => run.id === openRunRequest.id))
-      setSelection({projectId,id:openRunRequest.id});
-  },[openRunRequest,projectId]);
   const selectedId = selection?.projectId === projectId && runs.some(run => run.id === selection.id)
     ? selection.id : null;
   const [observations,setObservations] = useState<Record<string,string>>({});
