@@ -22,6 +22,11 @@ Code và submit đã gộp vào một thao tác. Agent có thể khảo sát mou
 trước khi viết code. Agent không nhận Kaggle MCP, token account hoặc khóa SSH.
 Model/reasoning lấy từ config hiện có; không cài Codex trong Kaggle.
 
+Prompt Working được cấu hình trong `ai_scientist/workbench/system_prompt/`.
+`aliases.json` trỏ các alias `working.agent`, `working.instructions`, `working.task`
+tới file Markdown gốc. Sửa file có hiệu lực ở lượt Working tiếp theo, không cần
+restart. Xem [cách cấu hình prompt](../../ai_scientist/workbench/system_prompt/README.md).
+
 Không giới hạn tổng số lượt do user yêu cầu. Bấm lặp cùng run không tạo thêm notebook;
 mỗi lượt mới có ID riêng. Agent có thể kiểm tra, chạy, debug và sửa trong cùng phiên
 để hoàn thành mục tiêu đã duyệt. Các giới hạn user yêu cầu trong proposal vẫn áp dụng.

@@ -113,6 +113,11 @@ class WorkingService:
             if self.planner.worker.closed or self.planner.worker.state.get('status') == 'unknown':
                 raise StoreConflict('Agent worker chưa xác nhận kết thúc lượt trước')
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
+            # Validate editable prompt files before opening a paid Kaggle session.
+            task_prompt = load_prompt('working.task')
+            load_prompt('working.instructions')
+            load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent',
+                        task_prompt=task_prompt)
             for project in await asyncio.to_thread(self.store.list_projects):
                 for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
                     if item['id'] == run_id:
