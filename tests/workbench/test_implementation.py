@@ -100,17 +100,22 @@ def test_gate_bundle_and_no_source_execution(tmp_path):
         assert manifest['source/workload.py']==detail['code_sha256']
         node=json.loads((root/'journal.json').read_text())['nodes'][0]
         assert store.run(project,run['id'])['node_id']==node['id']
-        with pytest.raises(StoreConflict):
-            await service.start(project,run['id'])
+        await service.start(project,run['id'])
+        await planner.task
+        assert len(runtime.calls) == 2
+        assert service.detail(project,run['id'])['ready']
         await planner.close(); await worker.close(1)
     asyncio.run(check())
 
 
-def test_one_repair_child_node_and_exhausted_budget(tmp_path):
+def test_user_requested_repair_has_no_automatic_retry_or_total_quota(tmp_path):
     for name, all_bad in [('repair',False),('fail',True)]:
         runtime=Runtime(bad_first=True,all_bad=all_bad)
         store,project,run,worker,planner,service=setup(tmp_path/name,runtime)
         async def check():
+            await service.start(project,run['id']); await planner.task
+            assert len(runtime.calls) == 1
+            assert service.detail(project,run['id'])['state'] == 'FAILED'
             await service.start(project,run['id']); await planner.task
             detail=service.detail(project,run['id'])
             assert len(runtime.calls)==2 and len(detail['attempts'])==2
@@ -118,9 +123,10 @@ def test_one_repair_child_node_and_exhausted_budget(tmp_path):
             assert detail['state']==('FAILED' if all_bad else 'PREFLIGHT')
             journal=restore_journal(json.loads((service.root(project,run['id'])/'journal.json').read_text()))
             assert journal.nodes[1].parent is journal.nodes[0]
-            assert 'REPAIR WITHIN THE SAME APPROVED SCOPE' in runtime.calls[1].prompt
-            with pytest.raises(StoreConflict):
-                await service.start(project,run['id'])
+            assert 'USER-REQUESTED REVISION WITHIN THE SAME APPROVED SCOPE' in runtime.calls[1].prompt
+            await service.start(project,run['id']); await planner.task
+            assert len(runtime.calls) == 3
+            assert len(service.detail(project,run['id'])['attempts']) == 3
             await planner.close();await worker.close(1)
         asyncio.run(check())
 
@@ -155,8 +161,9 @@ def test_restart_keeps_coder_attempt_consumed_and_no_replay(tmp_path):
     assert not runtime.calls
     assert reloaded.reserve_implementation(project,run['id'],'last-request')==2
     reloaded.recover_implementation()
-    with pytest.raises(StoreConflict):
-        reloaded.reserve_implementation(project,run['id'],'third-request')
+    assert not runtime.calls
+    assert reloaded.reserve_implementation(project,run['id'],'third-request') == 3
+    assert reloaded.run(project,run['id'])['attempts'][0]['state'] == 'FAILED'
     asyncio.run(worker.close(1))
 
 

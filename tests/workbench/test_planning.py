@@ -142,8 +142,11 @@ def test_idea_edit_and_restart_do_not_replay(tmp_path):
 
 def test_budget_contract_and_incomplete_clarification():
     assert PlanPayload.model_validate({"needs_clarification": True, "questions": ["model?"], "paraphrase": "idea"}).objective is None
+    legacy = ready("source")
+    legacy["budget"]["training_attempts"] = 2
+    assert ReadyProposal.model_validate(legacy).budget.training_attempts == 2
     invalid = ready("source")
-    invalid["budget"]["training_attempts"] = 2
+    invalid["budget"]["training_seconds"] = 601
     with pytest.raises(ValueError):
         ReadyProposal.model_validate(invalid)
 
