@@ -122,8 +122,10 @@ kiểm path và schema ngay trên filesystem thật. Notebook format do bootstra
 
 [Hướng dẫn và lệnh](D:/Documents/AI-Scientist-v2/tools/kaggle_tailcat/README.md)
 
-Source: [controller](D:/Documents/AI-Scientist-v2/tools/kaggle_tailcat/poc.py),
-[bootstrap](D:/Documents/AI-Scientist-v2/tools/kaggle_tailcat/bootstrap.py).
+Source của thử nghiệm được lưu tại commit `07618bb`. Sau refactor, implementation nằm ở
+[controller](D:/Documents/kaggle_token/interface_ai_scientist/session.py) và
+[bootstrap](D:/Documents/kaggle_token/interface_ai_scientist/bootstrap.py);
+`tools/kaggle_tailcat/poc.py` chỉ còn launcher tương thích. Refactor chưa submit lượt mới.
 
 Bằng chứng local của lượt thực tế:
 [probe](D:/Documents/AI-Scientist-v2/.workbench/tailcat-poc/c818c3fb260a4edd936c1dae783088b9/probe-evidence.json),
