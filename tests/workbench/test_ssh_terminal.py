@@ -2,6 +2,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -130,6 +131,8 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
     assert arguments[0] == str(executable) and '--ignore-user-config' in arguments
     assert arguments[arguments.index('--sandbox') + 1] == 'workspace-write'
     assert 'sandbox_workspace_write.network_access=true' in arguments
+    if os.name == 'nt':
+        assert 'windows.sandbox="elevated"' in arguments
     assert set(schemas[0]['required']) == set(payload)
     assert schemas[0]['additionalProperties'] is False
     assert 'Use tools to read working-request.json' in arguments[-1]

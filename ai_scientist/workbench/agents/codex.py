@@ -196,6 +196,10 @@ class CodexCliRuntime:
         if request.role == 'mvp0_working':
             args.extend(['--ignore-user-config', '--config', 'approval_policy="never"',
                          '--config', 'sandbox_workspace_write.network_access=true'])
+            if os.name == 'nt':
+                # Ignoring user config also removes its native Windows sandbox
+                # setting. Select the existing sandbox explicitly for tool use.
+                args.extend(['--config', 'windows.sandbox="elevated"'])
         if schema_path is not None:args.extend(["--output-schema",str(schema_path)])
         args.append(prompt)
         options = {"start_new_session": os.name != "nt"}
