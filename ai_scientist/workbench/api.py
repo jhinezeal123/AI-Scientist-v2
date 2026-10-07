@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field, field_validator
 
 from .models import StrictModel
+from .log_window import read_log_window
 from .resources import readiness_sources
 from .store import StoreConflict
 
@@ -202,6 +203,16 @@ def library_router(store, workspace_root):
         if call(request.app.state.working.record, project_id, run_id):
             return call(request.app.state.working.records.logs, project_id, run_id, cursor, limit)
         return call(request.app.state.logs.delta, project_id, run_id, cursor, limit)
+
+    @router.get('/projects/{project_id}/runs/{run_id}/log-window')
+    def log_window(project_id: str, run_id: str, request: Request, offset: int = 0,
+                   limit: int = 80, generation: int | None = None):
+        record = call(request.app.state.working.record, project_id, run_id)
+        reader = request.app.state.working.records.logs if record else request.app.state.logs.delta
+        status = call(reader, project_id, run_id, None, 1)
+        status['entries'] = []
+        window = call(read_log_window, store, project_id, run_id, status['generation'], offset, limit, generation)
+        return {**status, **window}
 
     @router.post('/projects/{project_id}/runs/{run_id}/submit', status_code=202)
     async def submit(project_id: str, run_id: str, request: Request):

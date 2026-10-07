@@ -31,7 +31,13 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 .run-detail .panel-head h3{margin-bottom:0}
 .run-detail>h3{margin-top:28px}
 .run-detail .live-log>summary{font-size:17px;font-weight:650}
-.live-log pre{max-height:360px;margin-bottom:0}.live-log span[data-stream='stderr']{color:#f08f83}
+.log-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:14px 0 10px}
+.log-toolbar .actions{gap:6px}.log-toolbar button{font-size:12px;padding:6px 10px}
+.log-viewport{height:360px;overflow:auto;overscroll-behavior:contain;background:var(--panel2);border:1px solid var(--line);border-radius:5px;position:relative;font:12px/22px 'Geist Mono',Consolas,monospace}
+.log-viewport:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.log-spacer{position:relative;min-width:100%}.log-window{position:absolute;left:0;min-width:100%;width:max-content;padding:0 14px}
+.log-line{height:22px;white-space:pre}.log-line[data-stream='stderr']{color:#f08f83}.log-empty{padding:0 14px}
+@media(max-width:650px){.log-viewport{height:320px}}
 .training-metrics{margin:20px 0;padding:16px;border:1px solid var(--line);border-radius:5px;background:var(--panel2)}
 .training-metrics>label{margin-top:14px}.training-metrics select{background:var(--panel);min-width:0}
 .metric-latest{display:flex;align-items:baseline;flex-wrap:wrap;gap:12px;margin:16px 0 8px}.metric-latest strong{font:22px 'Geist Mono',monospace;color:var(--mint)}

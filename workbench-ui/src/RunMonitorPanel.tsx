@@ -1,9 +1,9 @@
 import {useEffect,useState} from 'react';
 import {api} from './api';
-import RunLogView from './RunLogView';
+import RunLogView, {LogMetadata} from './RunLogView';
 
 type MetricPoint={step:number;elapsed_seconds:number;total_steps:number;metrics:Record<string,number>};
-type Delta={run_state:string;generation:number;entries:{seq:number;text:string;stream:string}[];next_cursor:string;
+type Delta=LogMetadata & {run_state:string;next_cursor:string;
   has_more:boolean;reset:boolean;gap:boolean;terminal:boolean;
   error:string|null;telemetry_error:string|null;points:MetricPoint[];primary_metric:string|null;direction:string|null;
   observation:{identity:{status:string};observed_at:string;source:string;complete:boolean}|null};
@@ -40,29 +40,17 @@ function MetricCurve({points,metric}:{points:MetricPoint[];metric:string}) {
 
 export default function RunMonitorPanel({projectId,runId,onObserved,working=false}:{projectId:string;runId:string;onObserved:(state:string)=>void;working?:boolean}) {
   const [data,setData]=useState<Delta|null>(null);
-  const [entries,setEntries]=useState<Delta['entries']>([]);
   const [error,setError]=useState('');
   const [selectedMetric,setSelectedMetric]=useState('');
   useEffect(() => {
-    let cancelled=false;let cursor:string|undefined;let generation:number|undefined;let timer:number;
-    setData(null);setEntries([]);setError('');setSelectedMetric('');
+    let cancelled=false;let timer:number;
+    setData(null);setError('');setSelectedMetric('');
     async function poll() {
       try {
-        let page:Delta;
-        do {
-          page=await api<Delta>(`/projects/${projectId}/runs/${runId}/logs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
-          if (cancelled)return;
-          const changed=generation!==undefined && generation!==page.generation;
-          generation=page.generation;cursor=page.next_cursor;
-          const received=page;
-          setEntries(old => {
-            const base=changed || received.reset ? [] : old;
-            const last=base.length ? base[base.length-1].seq : 0;
-            return [...base,...received.entries.filter(entry => entry.seq>last)];
-          });
-          setData(page);setError('');
-          onObserved(page.run_state);
-        } while (page.has_more);
+        const page=await api<Delta>(`/projects/${projectId}/runs/${runId}/log-window?limit=0`);
+        if (cancelled)return;
+        setData(page);setError('');
+        onObserved(page.run_state);
         if (!page.terminal)timer=window.setTimeout(poll,2000);
       } catch(e) {
         if (!cancelled) {setError(e instanceof Error ? e.message : String(e));timer=window.setTimeout(poll,2000);}
@@ -101,6 +89,6 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
             <td>{point.elapsed_seconds.toFixed(1)}</td><td>{metricValue(point.metrics[metric])}</td></tr>)}</tbody>
         </table></div></details>
     </section>}
-    <RunLogView entries={entries} generation={data?.generation || 1}/>
+    <RunLogView projectId={projectId} runId={runId} metadata={data}/>
   </div>;
 }

@@ -12,6 +12,12 @@
 6. Khi cần, bấm **Dừng Working**. Khi lượt kết thúc, bấm **Tạo lượt Working mới**
    để dùng cùng proposal và tham khảo source/log/summary cũ. Lượt mới chỉ chạy khi bấm Working.
 
+**Log Working** nằm trong một khung có thanh cuộn. Cuộn để đọc các đoạn khác hoặc
+bấm **Đầu log** / **Cuối log**. Trang chỉ tải từng cửa sổ tối đa 80 dòng, giữ tối đa
+480 dòng trong cache và dựng các dòng quanh vị trí đang xem. Khi đang ở cuối log,
+khung theo các dòng mới; cuộn lên để đọc lịch sử sẽ giữ vị trí. Thu gọn rồi mở lại
+giữ vị trí cuộn. Toàn bộ lịch sử vẫn được lưu trong SQLite.
+
 Code và submit đã gộp vào một thao tác. Agent có thể khảo sát mount và packages thật
 trước khi viết code. Agent không nhận Kaggle MCP, token account hoặc khóa SSH.
 Model/reasoning lấy từ config hiện có; không cài Codex trong Kaggle.
