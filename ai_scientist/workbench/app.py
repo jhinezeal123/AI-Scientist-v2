@@ -37,7 +37,8 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 app.state.mcp_tools = names
                 app.state.submission = SubmissionService(app.state.implementation, config, session)
                 app.state.results = RunResultsService(app.state.submission, worker, loaded)
-                app.state.working = WorkingService(service, config, app.state.implementation, session)
+                app.state.view = app.state.implementation.view
+                app.state.working = WorkingService(service, config, app.state.view, session, legacy_retry=app.state.implementation.retry)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.working.check_idle
                 app.state.monitor = RunMonitor(app.state.submission, app.state.results)

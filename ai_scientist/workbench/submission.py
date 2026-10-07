@@ -7,6 +7,7 @@ from pathlib import Path
 from .bundle import build_bundle, competition_slug
 from .implementation import BUNDLE_FILES
 from .models import CodePayload
+from .kaggle import decode_result
 from .store import StoreConflict, canonical
 
 
@@ -42,27 +43,6 @@ def save_receipt(response):
     return receipt
 
 
-def decode_result(result):
-    if getattr(result, 'isError', False):
-        # MCP errors may include provider details; keep credentials/raw errors out of app evidence.
-        raise RuntimeError('MCP operation failed; outcome must be reconciled')
-    structured = getattr(result, 'structuredContent', None)
-    if isinstance(structured, dict):
-        # FastMCP wraps primitive string returns; legacy tools return JSON strings.
-        if set(structured) == {'result'} and isinstance(structured['result'], str):
-            structured = json.loads(structured['result'])
-        if isinstance(structured, dict):
-            return structured
-    content = getattr(result, 'content', [])
-    texts = [item.text for item in content if getattr(item, 'type', None) == 'text']
-    if len(texts) != 1:
-        raise ValueError('Expected one structured MCP response')
-    value = json.loads(texts[0])
-    if isinstance(value, str):
-        value = json.loads(value)
-    if not isinstance(value, dict):
-        raise ValueError('Expected MCP object response')
-    return value
 
 
 def saved_version(response, expected_ref):

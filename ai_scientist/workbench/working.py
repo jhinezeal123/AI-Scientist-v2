@@ -11,7 +11,7 @@ import time
 from .journal import Journal, Node, journal_snapshot
 from .ssh_terminal import AgentTerminalBridge, DonorSession, collect_files
 from .store import StoreConflict
-from .submission import decode_result
+from .kaggle import decode_result
 from .working_store import WorkingStore, TERMINAL
 
 ACCELERATORS = {'cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'}
@@ -37,8 +37,9 @@ def sources(approved):
 
 
 class WorkingService:
-    def __init__(self, planner, config, implementation, mcp, *, donor=None, stop_seconds=120, poll_seconds=3):
-        self.planner, self.config, self.implementation, self.mcp = planner, config, implementation, mcp
+    def __init__(self, planner, config, view, mcp, *, legacy_retry=None, donor=None, stop_seconds=120, poll_seconds=3):
+        self.planner, self.config, self.view, self.mcp = planner, config, view, mcp
+        self.legacy_retry = legacy_retry or getattr(view, 'retry', None)
         self.store = planner.store
         self.records = WorkingStore(self.store)
         self.donor = donor or DonorSession(config)
@@ -100,7 +101,7 @@ class WorkingService:
                     if item['state'] not in allowed:
                         raise StoreConflict('Một Run khác đang hoạt động')
             await self.check_idle()
-            root = self.implementation.root(project_id, run_id)
+            root = self.view.root(project_id, run_id)
             root.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(self.records.reserve, project_id, run_id, accelerator, ttl)
             key = (project_id, run_id)
@@ -146,10 +147,10 @@ class WorkingService:
                     'The backend collects source/output files, creates report.md from your summary plus verified evidence, and stops Kaggle. You must not claim Kaggle has stopped.',
                     'Return WorkingPayload JSON with succeeded:boolean, summary:string in Vietnamese, limitations:list[string], output_files:list[string] with relative names such as output/test.csv. List only files you actually created.',
                 ]}
-        feedback = self.implementation.root(*key) / 'retry-feedback.json'
+        feedback = self.view.root(*key) / 'retry-feedback.json'
         if feedback.is_file() and not feedback.is_symlink():
             data['previous_working'] = json.loads(feedback.read_text(encoding='utf-8'))
-        source = self.implementation.root(*key) / 'source/workload.py'
+        source = self.view.root(*key) / 'source/workload.py'
         if source.is_file() and not source.is_symlink() and source.stat().st_size <= 1_000_000:
             data['previous_source'] = source.read_text(encoding='utf-8')
         (workdir / 'working-request.json').write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -160,7 +161,7 @@ class WorkingService:
 
     async def _work(self, key, approved, accelerator, ttl):
         project_id, run_id = key
-        root = self.implementation.root(*key)
+        root = self.view.root(*key)
         terminal, gateway = None, None
         outcome = 'FAILED'
         no_submit = False
@@ -275,7 +276,7 @@ class WorkingService:
                 error='Chưa xác nhận Kaggle đã dừng. Backend giữ Run ở trạng thái đang dừng; không đánh dấu hoàn tất.')
             return
         record = self.record(*key)
-        root = self.implementation.root(*key)
+        root = self.view.root(*key)
         (root / 'working-stop.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
         summary = record['summary'] or {'summary': 'User dừng Working trước khi agent hoàn thành.', 'limitations': []}
         outcome = record['outcome'] or 'FAILED'
@@ -325,7 +326,7 @@ class WorkingService:
                     self.tasks[key] = asyncio.create_task(self._recover_stop(key))
 
     def detail(self, project_id, run_id):
-        detail = self.implementation.detail(project_id, run_id)
+        detail = self.view.detail(project_id, run_id)
         record = self.record(project_id, run_id)
         detail['execution_mode'] = 'ssh' if record or not detail['identity'] else 'legacy'
         if record:
@@ -335,7 +336,7 @@ class WorkingService:
             detail['working']['summary'] = record['summary']
             detail['can_retry'] = record['stop_confirmed']
             detail['coder_calls'] = record['agent_called']
-            root = self.implementation.root(project_id, run_id)
+            root = self.view.root(project_id, run_id)
             for name in ('working-manifest.json', 'working-stop.json', 'report.md'):
                 if (root / name).is_file() and not (root / name).is_symlink():
                     detail['artifacts'].append(name)
@@ -347,7 +348,7 @@ class WorkingService:
         return detail
 
     def history(self, project_id):
-        history = self.implementation.history(project_id)
+        history = self.view.history(project_id)
         for run in history['runs']:
             detail = self.detail(project_id, run['id'])
             run.update(execution_mode=detail['execution_mode'], working=detail.get('working'),
@@ -357,7 +358,7 @@ class WorkingService:
     async def retry(self, project_id, parent_run_id, request_id):
         record = self.record(project_id, parent_run_id)
         if record is None:
-            return await self.implementation.retry(project_id, parent_run_id, request_id)
+            return await self.legacy_retry(project_id, parent_run_id, request_id)
         async with self.planner.lock:
             existing = self.store.retry_run(project_id, parent_run_id, request_id)
             if existing:
@@ -377,11 +378,11 @@ class WorkingService:
                 await self.check_idle()
             run, created = self.store.reserve_retry(project_id, parent_run_id, request_id, tuple(unknown_ids))
             if created:
-                root = self.implementation.root(project_id, run['id'])
+                root = self.view.root(project_id, run['id'])
                 root.mkdir(parents=True, exist_ok=True)
                 feedback = {'parent_run_id': parent_run_id, 'summary': record['summary'],
                             'log_tail': self.store.retry_feedback(project_id, parent_run_id)}
-                previous_root = self.implementation.root(project_id, parent_run_id)
+                previous_root = self.view.root(project_id, parent_run_id)
                 previous_sources = {}
                 for item in (record['manifest'] or {}).get('files', []):
                     path = previous_root / item['path']

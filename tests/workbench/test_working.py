@@ -198,7 +198,7 @@ def test_stop_proof_gates_completion_retry_and_restart(tmp_path):
             await service.start(project, run)
         await service.close(1)
         donor.confirm.set()
-        restored = WorkingService(planner, service.config, service.implementation, mcp, donor=donor, poll_seconds=.01)
+        restored = WorkingService(planner, service.config, service.view, mcp, donor=donor, poll_seconds=.01)
         await restored.recover()
         await restored.tasks[project, run]
         assert store.run(project, run)['state'] == 'COMPLETED'

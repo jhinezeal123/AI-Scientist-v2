@@ -1,6 +1,7 @@
 """One stdio MCP session for the app lifetime; no SDK or account credentials."""
 from contextlib import asynccontextmanager
 import asyncio
+import json
 import socket
 import subprocess
 
@@ -49,3 +50,26 @@ async def connect_mcp(config):
         if proxy and proxy.returncode is None:
             proxy.terminate()
             await proxy.wait()
+
+
+def decode_result(result):
+    if getattr(result, 'isError', False):
+        # MCP errors may include provider details; keep credentials/raw errors out of app evidence.
+        raise RuntimeError('MCP operation failed; outcome must be reconciled')
+    structured = getattr(result, 'structuredContent', None)
+    if isinstance(structured, dict):
+        # FastMCP wraps primitive string returns; legacy tools return JSON strings.
+        if set(structured) == {'result'} and isinstance(structured['result'], str):
+            structured = json.loads(structured['result'])
+        if isinstance(structured, dict):
+            return structured
+    content = getattr(result, 'content', [])
+    texts = [item.text for item in content if getattr(item, 'type', None) == 'text']
+    if len(texts) != 1:
+        raise ValueError('Expected one structured MCP response')
+    value = json.loads(texts[0])
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        raise ValueError('Expected MCP object response')
+    return value

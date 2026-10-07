@@ -25,7 +25,7 @@ class RunView:
         return root
 
     def detail(self, project_id, run_id):
-        from .collection import artifact_paths, _collection_state, _report_limit
+        from .saved_artifacts import artifact_paths, _collection_state, _report_limit
         run = self.store.run(project_id, run_id)
         root = self.root(project_id, run_id)
         names = (*ARTIFACT_FILES, *(f"attempts/{attempt['attempt']}/{name}" for attempt in run['attempts'] for name in (*BUNDLE_FILES, 'source/workload.py')))
