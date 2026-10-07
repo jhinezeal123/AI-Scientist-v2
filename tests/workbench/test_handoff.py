@@ -78,7 +78,7 @@ def test_submit_handoff_restores_fixed_context_without_changing_coder_source(tmp
     asyncio.run(check())
 
 
-def test_missing_or_unselected_data_is_rejected_before_any_agent_or_push(tmp_path):
+def test_unselected_data_is_rejected_and_empty_context_is_allowed(tmp_path):
     runtime = FakeRuntime()
     calls = []
     class NoWorkMCP:
@@ -95,8 +95,8 @@ def test_missing_or_unselected_data_is_rejected_before_any_agent_or_push(tmp_pat
         base = '/api/projects/' + project
         idea = client.post(base + '/ideas', json={'text': 'Fixture idea'}).json()
         body = {'idea_id': idea['id'], 'resource_ids': []}
-        assert client.post(base + '/plan', json=body).status_code == 422
-        assert client.post(base + '/context', json=body).status_code == 422
+        response = client.post(base + '/context', json=body)
+        assert response.status_code == 200 and response.json()['snapshot']['resources'] == []
         body['resource_ids'] = ['missing-source']
         assert client.post(base + '/plan', json=body).status_code == 404
         assert client.post(base + '/context', json=body).status_code == 404

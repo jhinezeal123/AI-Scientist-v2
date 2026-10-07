@@ -1,4 +1,4 @@
-"""Coordinate clarification/proposal jobs. Implementation is gated for T05."""
+"""Coordinate clarification and approval for user-directed remote work."""
 import asyncio
 import json
 import os
@@ -7,7 +7,7 @@ import subprocess
 import uuid
 from pydantic import ValidationError
 
-from .models import ReadyProposal
+from .models import WorkingProposal
 from .prompts import planning_prompt
 from .store import StoreConflict
 
@@ -43,10 +43,11 @@ class PlanningService:
             _, payload = await self.worker.run(request)
             body = payload.model_dump(exclude_none=True)
             if not payload.needs_clarification:
-                ready = ReadyProposal.model_validate(body)
+                ready = WorkingProposal.model_validate(body)
                 allowed = {source["id"] for source in context["snapshot"]["resources"]}
                 if any(ref not in allowed for ref in ready.data_refs):
                     raise ValueError("Planner cited a source outside the selected context")
+                body = ready.model_dump(exclude_none=True)
             await asyncio.to_thread(self.store.save_proposal, project_id, idea_id, body, context)
         except asyncio.CancelledError:
             await asyncio.to_thread(self.store.plan_failed, project_id, idea_id, "Planning interrupted; retry explicitly")

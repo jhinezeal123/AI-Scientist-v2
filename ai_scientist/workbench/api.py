@@ -1,4 +1,4 @@
-"""Library, approval, implementation and durable MCP submission endpoints."""
+"""Library, approval and remote Working endpoints."""
 from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field, field_validator
@@ -40,7 +40,7 @@ class IdeaInput(StrictModel):
 
 class ContextInput(StrictModel):
     idea_id: str
-    resource_ids: list[str] = Field(min_length=1, max_length=30)
+    resource_ids: list[str] = Field(default_factory=list, max_length=30)
 
 
 class IdeaUpdate(IdeaInput):
@@ -173,15 +173,13 @@ def library_router(store, workspace_root):
 
     @router.get("/projects/{project_id}/history")
     def history(project_id: str, request: Request):
-        implementation = getattr(request.app.state, 'working', None) or getattr(request.app.state, 'implementation', None)
-        operation = implementation.history if implementation else store.history
-        return call(operation, project_id)
+        working = getattr(request.app.state, 'working', None)
+        return call(working.history if working else store.history, project_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/implement', status_code=202)
     async def implement(project_id: str, run_id: str, request: Request):
-        if call(request.app.state.working.record, project_id, run_id):
-            raise HTTPException(409, 'Run này dùng Working; tạo lượt mới sau khi Kaggle đã dừng')
-        return await async_call(request.app.state.implementation.start, project_id, run_id)
+        call(store.run, project_id, run_id)
+        raise HTTPException(410, 'Luồng code riêng đã ngừng sử dụng. Bắt đầu Working trong tab Run.')
 
     @router.post('/projects/{project_id}/runs/{run_id}/working', status_code=202)
     async def working(project_id: str, run_id: str, body: WorkingInput, request: Request):
@@ -203,19 +201,16 @@ def library_router(store, workspace_root):
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):
         if call(request.app.state.working.record, project_id, run_id):
             return call(request.app.state.working.records.logs, project_id, run_id, cursor, limit)
-        return call(request.app.state.monitor.cache.delta, project_id, run_id, cursor, limit)
+        return call(request.app.state.logs.delta, project_id, run_id, cursor, limit)
 
     @router.post('/projects/{project_id}/runs/{run_id}/submit', status_code=202)
     async def submit(project_id: str, run_id: str, request: Request):
-        if call(request.app.state.working.record, project_id, run_id):
-            raise HTTPException(409, 'Working đã mở phiên Kaggle; không submit lại notebook này')
-        return await async_call(request.app.state.submission.start, project_id, run_id)
+        call(store.run, project_id, run_id)
+        raise HTTPException(410, 'Luồng submit riêng đã ngừng sử dụng. Bắt đầu Working trong tab Run.')
 
     @router.post('/projects/{project_id}/runs/{run_id}/reconcile')
     async def reconcile(project_id: str, run_id: str, request: Request):
-        if call(request.app.state.working.record, project_id, run_id):
-            return await async_call(request.app.state.working.stop, project_id, run_id)
-        return await async_call(request.app.state.submission.reconcile, project_id, run_id)
+        return await async_call(request.app.state.working.reconcile, project_id, run_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}')
     def artifact(project_id: str, run_id: str, name: str, request: Request):
@@ -223,7 +218,7 @@ def library_router(store, workspace_root):
         detail = call(request.app.state.working.detail, project_id, run_id)
         if name not in detail['artifacts']:
             raise HTTPException(404, 'Artifact not found')
-        root = call(request.app.state.implementation.root, project_id, run_id)
+        root = call(request.app.state.view.root, project_id, run_id)
         path = root / name
         if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
             raise HTTPException(404, 'Artifact not found')

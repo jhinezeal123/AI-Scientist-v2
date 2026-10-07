@@ -58,9 +58,32 @@ class PlanPayload(StrictModel):
         if self.needs_clarification:
             if not self.questions or any(not question.strip() for question in self.questions):
                 raise ValueError("Clarification must contain concrete questions")
-        elif self.questions or any(getattr(self, name) is None for name in (
-                "objective", "data_refs", "split", "metric", "implementation_steps", "budget", "expected_outputs")):
-            raise ValueError("A ready proposal must provide all fields and no pending questions")
+        elif self.questions or not self.objective or not self.implementation_steps:
+            raise ValueError("A ready proposal must provide an objective, steps and no pending questions")
+        return self
+
+
+class WorkingProposal(StrictModel):
+    """Approved scope for any remote task; training details are optional context."""
+    needs_clarification: Literal[False]
+    questions: list[str] = Field(default_factory=list, max_length=0)
+    paraphrase: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    implementation_steps: list[str] = Field(min_length=1)
+    data_refs: list[str] = Field(default_factory=list)
+    expected_outputs: list[str] = Field(default_factory=list)
+    split: str | dict[str, JsonValue] | None = None
+    metric: str | dict[str, JsonValue] | None = None
+    budget: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def user_constraints(self):
+        for key in ('training_seconds', 'execution_seconds', 'output_bytes'):
+            value = self.budget.get(key)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"{key} must be a positive integer when supplied")
+        if not self.objective.strip() or any(not step.strip() for step in self.implementation_steps):
+            raise ValueError("Objective and steps must contain text")
         return self
 
 

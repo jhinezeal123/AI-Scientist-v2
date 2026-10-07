@@ -167,7 +167,7 @@ def test_restart_keeps_coder_attempt_consumed_and_no_replay(tmp_path):
     asyncio.run(worker.close(1))
 
 
-def test_http_ownership_duplicate_and_no_mcp(tmp_path):
+def test_retired_http_execution_preserves_ownership_and_saved_artifacts(tmp_path):
     store=ProjectStore(tmp_path/'.workbench/projects');project,run=approved_run(store)
     other=store.create_project('other')['id']; runtime=Runtime()
     class MCP:
@@ -178,18 +178,18 @@ def test_http_ownership_duplicate_and_no_mcp(tmp_path):
         yield MCP(),[]
     app=create_app(SimpleNamespace(workspace_root=tmp_path,shutdown_seconds=1,kaggle_username='verified-user'),
                    bindings=SimpleNamespace(runtime=runtime,request_type=request_type),mcp_connection=mcp)
+    root=tmp_path/'.workbench/projects'/project/'runs'/run['id']
+    root.mkdir(parents=True)
+    (root/'notebook.ipynb').write_text('{"cells": []}',encoding='utf-8')
     with TestClient(app) as client:
         assert client.post(f'/api/projects/{other}/runs/{run["id"]}/implement').status_code==404
         response=client.post(f'/api/projects/{project}/runs/{run["id"]}/implement')
-        assert response.status_code==202
-        # The same request never starts a second coder, regardless of timing.
-        assert client.post(f'/api/projects/{project}/runs/{run["id"]}/implement').status_code==409
-        import time
-        for _ in range(100):
-            detail=client.get(f'/api/projects/{project}/runs/{run["id"]}').json()
-            if detail['state']!='IMPLEMENTING':break
-            time.sleep(.01)
-        assert detail['ready'] and len(runtime.calls)==1
+        assert response.status_code==410
+        assert client.post(f'/api/projects/{project}/runs/{run["id"]}/implement').status_code==410
+        assert client.post(f'/api/projects/{project}/runs/{run["id"]}/submit').status_code==410
+        detail=client.get(f'/api/projects/{project}/runs/{run["id"]}').json()
+        assert detail['state']=='APPROVED' and len(runtime.calls)==0
+        assert not any(hasattr(app.state,name) for name in ('implementation','submission','monitor','results'))
         assert client.get('/health').status_code==200
         assert client.get(f'/api/projects/{project}/runs/{run["id"]}/artifacts/notebook.ipynb').status_code==200
         assert client.get(f'/api/projects/{other}/runs/{run["id"]}/artifacts/notebook.ipynb').status_code==404

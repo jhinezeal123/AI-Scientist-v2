@@ -14,7 +14,7 @@ async def smoke(app, config):
         prompt = json.dumps({"needs_clarification": False, "questions": [],
             "paraphrase": "runtime readiness", "objective": "Confirm JSON transport only",
             "data_refs": [], "split": "not applicable", "metric": "not applicable",
-            "implementation_steps": [], "budget": {}, "expected_outputs": []})
+            "implementation_steps": ["Confirm JSON transport"], "budget": {}, "expected_outputs": []})
         request = app.state.runtime.request_type(uuid.uuid4().hex, "mvp0_plan",
             "Return this exact JSON as role result text. No tools or files: " + prompt,
             config.workspace_root, timeout_seconds=120)

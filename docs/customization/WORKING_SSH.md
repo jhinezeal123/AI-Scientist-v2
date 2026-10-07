@@ -2,7 +2,7 @@
 
 ## Luồng sử dụng
 
-1. Lưu nguồn và idea, lập proposal và duyệt như trước.
+1. Lưu idea, chọn nguồn nếu cần, lập proposal và duyệt.
 2. Trong **Run**, chọn card của lượt đã duyệt.
 3. Chọn CPU, GPU **T4 x2**, hoặc TPU; chọn thời gian tối đa của phiên.
 4. Bấm **Bắt đầu Working**. Backend mở notebook bootstrap riêng tư bằng
@@ -17,8 +17,25 @@ trước khi viết code. Agent không nhận Kaggle MCP, token account hoặc k
 Model/reasoning lấy từ config hiện có; không cài Codex trong Kaggle.
 
 Không giới hạn tổng số lượt do user yêu cầu. Bấm lặp cùng run không tạo thêm notebook;
-mỗi lượt mới có ID riêng. Mỗi lượt thực hiện workload được duyệt, với thời gian/dung lượng
-trong proposal. Agent báo lỗi để user quyết định lượt tiếp theo; không tự chạy lại workload.
+mỗi lượt mới có ID riêng. Agent có thể kiểm tra, chạy, debug và sửa trong cùng phiên
+để hoàn thành mục tiêu đã duyệt. Các giới hạn user yêu cầu trong proposal vẫn áp dụng.
+
+## Proposal và các gate đã gỡ
+
+Proposal dùng `WorkingProposal`: cần mục tiêu và bước thực hiện, không bắt buộc dataset,
+split, seed, metric hay budget training. Idea tạo dữ liệu synthetic có thể không chọn nguồn.
+URL chưa đọc được lưu đúng trạng thái `reference_only`; agent kiểm tra nội dung/mount trong
+Working, không coi URL là dữ liệu đã xác minh.
+
+Luồng Working không gọi preflight/bundle validator cũ. Code không cần chữ ký `run/emit`,
+notebook template, `checkpoint`, `metrics.json` hoặc `result.json`. Các tác vụ được lưu
+file phù hợp mục đích trong `source/` và `output/`.
+
+Không áp trần mặc định 600 giây hoặc 10 MB trong proposal/thu file. `budget.output_bytes`
+và giới hạn thời gian chỉ áp dụng khi được yêu cầu rõ trong proposal. Thời gian phiên và
+thời gian lượt agent vẫn cấu hình riêng để backend dừng công việc đúng hạn. Kênh truyền
+file vẫn kiểm tra đường dẫn, số file (tối đa 200), kích thước và hash; file lớn được truyền
+theo từng phần. Không cần các artifact đặc thù training để ghi thành công.
 
 ## Trạng thái và điều kiện kết thúc
 
@@ -44,8 +61,11 @@ Restart backend chỉ phục hồi việc dừng/đối soát; không replay age
 Donor ghi cancel intent và khóa admission theo session ID để một yêu cầu startup
 đến trễ không submit sau khi backend đã xác nhận request chưa được gửi.
 
-Run cũ vẫn xem được log, artifacts và report. Các endpoint notebook cũ còn phục vụ
-khả năng tương thích; GUI dùng Working cho những run chưa có phiên Kaggle cũ.
+Run cũ vẫn xem được log, artifacts và report. Các endpoint `/implement` và `/submit`
+trả HTTP 410, hướng dẫn dùng Working; backend không khởi tạo executor, monitor hay
+reporter training cũ. Các module/schema cũ còn trong repo cho dữ liệu và kiểm thử lịch sử,
+không tham gia luồng đang chạy. Tạo lượt mới từ run cũ chỉ tham khảo source/log, không
+build hoặc kiểm lại bundle cũ. Đối soát run cũ chỉ đọc trạng thái bằng token.
 UNKNOWN cũ được kiểm tra bằng token đối với notebook reference đã lưu, không cần cookie.
 Đây là kiểm tra các notebook Workbench đã biết, không phải kiểm kê mọi phiên ngoài Workbench.
 
@@ -77,16 +97,17 @@ Giữ `.workbench/config.local.json` hiện có. Các giá trị bổ sung mặc
 ```
 
 `working_seconds` là thời gian tối đa cho lượt Codex; TTL là thời gian bootstrap,
-bao gồm khởi động và làm việc. Training/output vẫn theo proposal đã duyệt.
+bao gồm khởi động và làm việc. Giới hạn user ghi rõ trong proposal vẫn được áp dụng;
+proposal không còn các trần training/output mặc định của MVP0 cũ.
 CLI được tìm lại khi đường dẫn cũ không còn tồn tại sau cập nhật: PATH, rồi bản
 desktop hiện có. Backend không tự đổi model hoặc đăng nhập account khác.
 
 ## Bằng chứng kiểm thử
 
 - Bộ kiểm thử Workbench, bao gồm luồng Working qua gateway HTTP thật với terminal
-  fixture: **95 passed**.
+  fixture: **101 passed**; tập kiểm thử Working tổng quát sau bổ sung: **8 passed**.
 - Kiểm thử donor cho request ID, cancellation, Bash thật ở local, cwd/exports/env,
-  redaction, timeout, tương thích các tool cũ và proxy không replay submit: **16 passed**.
+  redaction, timeout, file trên 10 MB, tương thích các tool cũ và proxy không replay submit: **17 passed**.
 - Frontend TypeScript/Vite build thành công.
 - Theo phạm vi user đã duyệt, **chưa tạo phiên Kaggle mới để nghiệm thu tích hợp này**.
   Các fixture không chứng minh độ trễ mạng, cấp phát GPU/TPU hay khả năng của agent trên dữ liệu thật.

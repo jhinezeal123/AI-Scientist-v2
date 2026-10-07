@@ -199,9 +199,11 @@ class AgentTerminalBridge:
         self.access.unlink(missing_ok=True)
 
 
-def collect_files(terminal, root, limit):
+def collect_files(terminal, root, limit=None):
     """Copy only source/output files over the existing SSH connection and verify hashes."""
     import hashlib
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError('Output budget must be a positive integer when supplied')
     root = Path(root).resolve()
     manifest = terminal.request('manifest', limit=limit)
     files = manifest['files']
@@ -218,7 +220,7 @@ def collect_files(terminal, root, limit):
             raise ValueError('Unsafe SSH artifact path or size')
         seen.add(name)
         total += size
-        if total > limit:
+        if limit is not None and total > limit:
             raise ValueError('SSH files exceed the approved output budget')
         target = root / path
         if target.is_symlink() or not target.resolve().is_relative_to(root):

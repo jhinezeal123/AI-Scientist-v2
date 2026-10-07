@@ -67,7 +67,6 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
         <button type="button" onClick={() => setSelection(null)}>Đóng chi tiết</button></div>
       <div className="panel-head"><code className="source-id">{run.id}</code><span className="state-tag">{observations[run.id] || run.state}</span></div>
       {run.state === 'APPROVED' && <p>Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.</p>}
-      {run.state === 'IMPLEMENTING' && <p role="status">Codex đang tạo code / kiểm preflight… Bạn có thể chuyển tab.</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
       {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
         <h3>Working</h3>
@@ -107,7 +106,7 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
         {run.identity.status && <p>Trạng thái Kaggle: {run.identity.status}</p>}
         {run.state === 'UNKNOWN' && <p>Chưa biết chắc kết quả gửi. Đối soát chỉ đọc notebook đã gửi; không tạo lần gửi mới.</p>}
         <button disabled={busy || run.state === 'SUBMITTING'} onClick={() => void onReconcile(run.id)}>{run.state === 'UNKNOWN' ? 'Đối soát lần gửi' : 'Cập nhật trạng thái từ Kaggle'}</button>
-        {(['REMOTE_SUCCEEDED','COLLECTING'].includes(observations[run.id] || run.state) && run.collection?.phase !== 'retry_exhausted') && <p role="status">Kaggle đã hoàn tất. Workbench đang xác minh outputs và tạo report.</p>}
+        {['REMOTE_SUCCEEDED','COLLECTING'].includes(observations[run.id] || run.state) && <p className="muted">Run thuộc phiên bản cũ. Kết quả đã lưu vẫn có thể xem; tạo lượt Working mới để tiếp tục.</p>}
       </div>}
       <div className="context"><h3>Mục tiêu</h3><p>{run.purpose}</p><code className="source-id">Proposal {run.proposal_id} · v{run.proposal_version}</code>
         {!!run.expected_outputs?.length && <p className="muted">Đầu ra đã duyệt: {run.expected_outputs.join(' · ')}</p>}
@@ -116,9 +115,9 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
       {run.identity?.session_id && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved}/>}
       {run.working && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved} working/>}
       {run.attempts.map(attempt => <div className="context" key={attempt.attempt}>
-        <h3>Bản code {attempt.attempt} · {attempt.origin === 'REUSE' ? 'Dùng lại code' : 'Codex'} · {attempt.state}</h3>
+        <h3>Bản code cũ {attempt.attempt} · {attempt.origin === 'REUSE' ? 'Dùng lại code' : 'Codex'} · {attempt.state}</h3>
         {attempt.session_id && <code className="source-id">Codex session {attempt.session_id}</code>}
-        {attempt.checks && <><p>Preflight: {attempt.checks.pass ? 'PASS' : 'FAIL'}</p>
+        {attempt.checks && <><p>Preflight đã lưu từ phiên bản cũ: {attempt.checks.pass ? 'PASS' : 'FAIL'}</p>
           <ul>{attempt.checks.checks.map(item => <li key={item}>{item}</li>)}</ul>
           {attempt.checks.errors.map(item => <p role="alert" key={item}>{item}</p>)}</>}
         {attempt.error && <p>{attempt.error}</p>}

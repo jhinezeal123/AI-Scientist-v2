@@ -166,8 +166,8 @@ class ProjectStore:
         return next(item for item in self.ideas(project_id) if item["id"] == idea_id)
 
     def context_snapshot(self, project_id, idea_id, resource_ids):
-        if not resource_ids or len(resource_ids) != len(set(resource_ids)):
-            raise ValueError("Select at least one distinct source")
+        if len(resource_ids) != len(set(resource_ids)):
+            raise ValueError("Selected source IDs must be distinct")
         with self.connection(project_id) as connection:
             idea = connection.execute("SELECT id,text,conversation_json FROM ideas WHERE id=?", (idea_id,)).fetchone()
             if idea is None:
@@ -312,7 +312,7 @@ class ProjectStore:
             return result
 
     def approve_proposal(self, project_id, proposal_id, version, context_sha256, idle_unknown_ids=()):
-        from .models import ReadyProposal
+        from .models import WorkingProposal
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
             proposal = connection.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
@@ -329,11 +329,11 @@ class ProjectStore:
             if proposal["state"] != "AWAITING_APPROVAL" or latest != version or idea_state == "PLANNING":
                 raise StoreConflict("Proposal is not current and awaiting approval")
             self._check_context(connection, json.loads(proposal["context_snapshot_json"]))
-            body = ReadyProposal.model_validate_json(proposal["body_json"])
+            body = WorkingProposal.model_validate_json(proposal["body_json"])
             snapshot = json.loads(proposal["context_snapshot_json"])
             sources = {source["id"]: source for source in snapshot["resources"]}
-            if any(ref not in sources or sources[ref]["status"] == "reference_only" for ref in body.data_refs):
-                raise StoreConflict("Proposal cites unread or unselected source IDs; clarify before approval")
+            if any(ref not in sources for ref in body.data_refs):
+                raise StoreConflict("Proposal cites unselected source IDs")
             candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
             blocking = next((row for row in candidates if not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
             if blocking:
@@ -379,12 +379,20 @@ class ProjectStore:
             return item
 
     def implementation_snapshot(self, project_id, run_id, *, read_only=False):
+        """Compatibility access for saved notebook runs and standalone legacy tools."""
+        approved = self.approved_snapshot(project_id, run_id)
+        if not read_only and self.run(project_id, run_id)['state'] not in {'APPROVED', 'FAILED', 'IMPLEMENTING', 'PREFLIGHT'}:
+            raise StoreConflict('Implementation requires an approved proposal and eligible run')
+        return approved
+
+    def approved_snapshot(self, project_id, run_id):
+        """Read the exact approved request without workload-format requirements."""
         with self.connection(project_id) as connection:
             row = connection.execute('SELECT runs.state,proposals.state AS proposal_state,proposals.body_json,proposals.context_snapshot_json,proposals.context_sha256 FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
             if row is None:
                 raise KeyError('Run not found in this project')
-            if row['proposal_state'] != 'APPROVED' or (not read_only and row['state'] not in {'APPROVED', 'FAILED', 'IMPLEMENTING', 'PREFLIGHT'}):
-                raise StoreConflict('Implementation requires an approved proposal and eligible run')
+            if row['proposal_state'] != 'APPROVED':
+                raise StoreConflict('Working requires an approved proposal')
             snapshot = json.loads(row['context_snapshot_json'])
             if digest(canonical(snapshot)) != row['context_sha256']:
                 raise StoreConflict('Pinned context hash mismatch')

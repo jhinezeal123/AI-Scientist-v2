@@ -16,6 +16,12 @@ Không giới hạn tổng số lượt user yêu cầu. Sau khi lượt kết t
 để dùng cùng proposal và tham khảo code/kết quả cũ. Lượt mới chỉ chạy khi bạn bấm Working.
 Các đoạn coder/submit/telemetry phía dưới là bằng chứng lịch sử T01–T09.
 
+Working dùng proposal theo mục tiêu: nguồn là tùy chọn, split/seed/metric/budget chỉ
+cần khi phù hợp tác vụ. Không còn gate notebook template, `run/emit`, checkpoint,
+preflight hoặc trần mặc định 600 giây/10 MB. Agent được chạy, debug và sửa trong cùng
+phiên Kaggle. Các API code/submit cũ đã đóng (HTTP 410); run cũ chỉ để xem kết quả
+hoặc tạo lượt Working mới. Backend vẫn giữ approval và xác nhận dừng phiên.
+
 Xem [hướng dẫn Working qua SSH](WORKING_SSH.md) để biết trạng thái, config và phạm vi kiểm thử.
 
 Xem [research framework và data adapter](D:/Documents/AI-Scientist-v2/docs/customization/TRAINING_FRAMEWORK_RESEARCH.md)

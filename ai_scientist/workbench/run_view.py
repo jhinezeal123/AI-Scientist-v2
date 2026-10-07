@@ -34,9 +34,9 @@ class RunView:
         run['ready'] = run['state'] == 'PREFLIGHT' and bool(run['attempts']) and bool(run['attempts'][-1]['checks'] and run['attempts'][-1]['checks']['pass'])
         run['coder_calls'] = sum(attempt['origin'] == 'CODEX' for attempt in run['attempts'])
         run['can_retry'] = run['state'] in {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'} or (run['state'] == 'UNKNOWN' and self.allow_unknown_retry())
-        approved = self.store.implementation_snapshot(project_id, run_id, read_only=True)
+        approved = self.store.approved_snapshot(project_id, run_id)
         run['purpose'] = approved['body']['objective']
-        run['expected_outputs'] = approved['body']['expected_outputs']
+        run['expected_outputs'] = approved['body'].get('expected_outputs', [])
         run['identity'] = json.loads(run.pop('identity_json')) if run['identity_json'] else None
         collection = _collection_state(root / 'collection-state.json')
         phase = collection.get('phase')
@@ -64,7 +64,7 @@ class RunView:
         history = self.store.history(project_id)
         for item in history['runs']:
             detail = self.detail(project_id, item['id'])
-            approved = self.store.implementation_snapshot(project_id, item['id'], read_only=True)
+            approved = self.store.approved_snapshot(project_id, item['id'])
             snapshot = approved['snapshot']
             body = approved['body']
             selected_refs = set(body.get('data_refs', []))

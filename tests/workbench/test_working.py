@@ -99,7 +99,8 @@ class Runtime:
         self.calls.append(request)
         assert request.role == 'mvp0_working'
         pinned = json.loads((request.workdir / 'working-request.json').read_text(encoding='utf-8'))
-        assert pinned['approved']['body']['split']['seed'] == 42
+        if pinned['approved']['body'].get('split'):
+            assert pinned['approved']['body']['split']['seed'] == 42
         assert 'account' not in pinned and 'token' not in pinned
         access = json.loads((request.workdir / 'terminal-access.json').read_text())
         def call(action, **body):
@@ -126,7 +127,7 @@ def fixture(tmp_path, runtime=None, mcp=None, donor=None):
     store, project, run, worker, planner, implementation = setup(tmp_path, runtime)
     config = SimpleNamespace(workspace_root=tmp_path, kaggle_username='verified-user',
         kaggle_account_alias='fixture-account', working_seconds=900, kaggle_session_seconds=1800)
-    service = WorkingService(planner, config, implementation, mcp, donor=donor, stop_seconds=.01, poll_seconds=.01)
+    service = WorkingService(planner, config, implementation.view, mcp, donor=donor, stop_seconds=.01, poll_seconds=.01)
     return store, project, run['id'], worker, planner, service, runtime, mcp, donor
 
 
@@ -264,8 +265,8 @@ def test_working_http_routes_ownership_and_artifact_allowlist(tmp_path, monkeypa
                 break
             threading.Event().wait(.01)
         assert detail['state'] == 'COMPLETED'
-        assert client.post(path + '/submit').status_code == 409
-        assert client.post(path + '/implement').status_code == 409
+        assert client.post(path + '/submit').status_code == 410
+        assert client.post(path + '/implement').status_code == 410
         assert client.get(path + '/artifacts/output/test.csv').text == 'id,prediction\n1,7\n'
         assert client.get(path + '/artifacts/working-agent/terminal-access.json').status_code == 404
         assert client.get(path + '/logs').json()['terminal']

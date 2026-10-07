@@ -10,10 +10,8 @@ from .worker import RuntimeWorker
 from .api import library_router
 from .store import ProjectStore
 from .service import PlanningService
-from .implementation import ImplementationService
-from .submission import SubmissionService
-from .monitor import RunMonitor
-from .collection import RunResultsService
+from .run_view import RunView
+from .monitor_store import MonitorStore
 from .working import WorkingService
 
 
@@ -30,26 +28,20 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
         store.recover_submission()
         service = PlanningService(store, loaded, worker, config.workspace_root)
         app.state.service = service
-        app.state.implementation = ImplementationService(service, config)
+        app.state.view = RunView(store, config.workspace_root, lambda: service.idle_check is not None)
+        app.state.logs = MonitorStore(store)
         try:
             async with mcp_connection(config) as (session, names):
                 app.state.mcp = session
                 app.state.mcp_tools = names
-                app.state.submission = SubmissionService(app.state.implementation, config, session)
-                app.state.results = RunResultsService(app.state.submission, worker, loaded)
-                app.state.view = app.state.implementation.view
-                app.state.working = WorkingService(service, config, app.state.view, session, legacy_retry=app.state.implementation.retry)
+                app.state.working = WorkingService(service, config, app.state.view, session)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.working.check_idle
-                app.state.monitor = RunMonitor(app.state.submission, app.state.results)
-                app.state.monitor.start()
                 await app.state.working.recover()
                 try:
                     yield
                 finally:
-                    await app.state.monitor.close()
                     await app.state.working.close(config.shutdown_seconds)
-                    await app.state.submission.close()
                     await service.close()
                     await worker.close(config.shutdown_seconds)
         finally:
