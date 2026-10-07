@@ -2,8 +2,10 @@
 from contextlib import asynccontextmanager
 import asyncio
 import json
+import os
 import socket
 import subprocess
+import sys
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -36,9 +38,14 @@ async def connect_mcp(config):
             proxy.terminate()
             await proxy.wait()
             raise RuntimeError('Donor proxy did not become ready on port80')
+    # MCP's default Windows environment omits PROGRAMDATA. Win32 OpenSSH needs
+    # it even for `ssh -V`; without it the donor's SSH exits 255 silently.
+    donor_env = {}
+    if sys.platform == 'win32' and os.environ.get('PROGRAMDATA'):
+        donor_env['PROGRAMDATA'] = os.environ['PROGRAMDATA']
     params = StdioServerParameters(command=str(config.donor_python),
                                   args=[str(config.donor_root / "mcp_server.py")],
-                                  cwd=str(config.donor_root))
+                                  cwd=str(config.donor_root), env=donor_env)
     try:
         async with stdio_client(params) as (reader, writer):
             async with ClientSession(reader, writer) as session:
