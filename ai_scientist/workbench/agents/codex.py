@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from base64 import b64decode, b64encode
 import tempfile
+from ..system_prompt import load_prompt
 from typing import Callable
 from urllib.parse import urlsplit
 
@@ -170,12 +171,7 @@ class CodexCliRuntime:
                          cancelled: Callable[[], bool], schema_path: Path | None) -> RuntimeResult:
         structured=schema_path is not None
         if request.role == 'mvp0_working':
-            prompt = ('You are the Working agent. Use tools to read working-request.json and execute the '
-                      'supplied terminal helper for all remote work. Complete the approved task before returning. '
-                      'Return exactly one JSON object matching the supplied Working output schema: '
-                      'succeeded, summary, limitations, output_files. Do not wrap it in text/files or Markdown. '
-                      'Do not access local paths outside this request workspace, account credentials or MCP.\n'
-                      f'Request workspace: {request.workdir}\n{request.prompt}')
+            prompt = load_prompt('working.agent', workdir=request.workdir, task_prompt=request.prompt)
         elif structured:
             role_prompt=structured_role_prompt(request.role,request.prompt)
             prompt=("Return exactly one JSON object matching the supplied role output schema. Do not return an envelope, "
