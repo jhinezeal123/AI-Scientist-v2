@@ -96,7 +96,8 @@ def build_bundle(root, run, approved, payload, username):
                    'competition_slug': slug, 'input_mounts': ['/kaggle/input/competitions/' + slug],
                    'runtime_contract': {'input_mounts': ['/kaggle/input/competitions/' + slug]},
                    'output_dir': '/kaggle/working/ailab_bundle/output', 'config': config,
-                   'split': approved['body']['split'], 'metric': approved['body']['metric'], 'budget': budget,
+                   'split': approved['body']['split'], 'metric': approved['body']['metric'],
+                   'budget': {key: value for key, value in budget.items() if key not in {'coder_calls', 'training_attempts'}},
                    'objective': approved['body']['objective'], 'expected_outputs': approved['body']['expected_outputs']}
         runner_source = Path(__file__).with_name('notebook_runner.py').read_text(encoding='utf-8')
         notebook = nbformat.v4.new_notebook(cells=[

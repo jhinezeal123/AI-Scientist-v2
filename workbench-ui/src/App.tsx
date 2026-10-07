@@ -190,6 +190,15 @@ export default function App() {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/submit`, 'POST');setRevision(n => n+1);setNotice('Đã lưu yêu cầu gửi notebook. App sẽ xác minh đúng version và session qua MCP.');});
         }} onReconcile={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/reconcile`, 'POST');setRevision(n => n+1);setNotice('Đã đối soát trạng thái qua MCP; không gửi notebook lần nữa.');});
+        }} onRetry={async id => {
+          let newId:string|undefined;
+          await action(async () => {
+            const run = await api<{id:string}>(`/projects/${projectId}/runs/${id}/retry`, 'POST',
+              {request_id:crypto.randomUUID().replaceAll('-','')});
+            newId=run.id;setRevision(n => n+1);
+            setNotice(`Đã tạo run ${run.id.slice(0,8)} từ proposal đã duyệt. Bạn có thể sửa code hoặc gửi Kaggle khi sẵn sàng.`);
+          });
+          return newId;
         }}/>} 
       </>}
     </main>

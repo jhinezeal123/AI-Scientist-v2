@@ -64,6 +64,10 @@ class ApprovalInput(StrictModel):
     context_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class RetryInput(StrictModel):
+    request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+
+
 def library_router(store, workspace_root):
     router = APIRouter(prefix="/api")
 
@@ -175,6 +179,10 @@ def library_router(store, workspace_root):
     @router.get('/projects/{project_id}/runs/{run_id}')
     def run_detail(project_id: str, run_id: str, request: Request):
         return call(request.app.state.implementation.detail, project_id, run_id)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/retry', status_code=201)
+    async def retry_run(project_id: str, run_id: str, body: RetryInput, request: Request):
+        return await async_call(request.app.state.implementation.retry, project_id, run_id, body.request_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}/logs')
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):

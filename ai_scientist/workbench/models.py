@@ -60,8 +60,9 @@ class PlanPayload(StrictModel):
 
 
 class ProposalBudget(StrictModel):
-    coder_calls: int = Field(ge=1, le=2)
-    training_attempts: int = Field(ge=1, le=1)
+    # Retain legacy proposal fields for stored approvals; user actions have no quota.
+    coder_calls: int | None = Field(default=None, ge=1, description='Legacy metadata; omit. User controls each code request.')
+    training_attempts: int | None = Field(default=None, ge=1, description='Legacy metadata; omit. User controls each execution.')
     training_seconds: int = Field(ge=1, le=600)
     output_bytes: int = Field(ge=1, le=10_000_000)
 

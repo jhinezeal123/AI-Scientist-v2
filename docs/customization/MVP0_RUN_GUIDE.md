@@ -5,6 +5,22 @@
 GUI hiện có ba tab: **Library**, **Idea**, **Run**. Theo yêu cầu user, đã bỏ tab History;
 chọn card trong Run để xem log, kết quả, report và artifacts của lần chạy đã lưu.
 
+### Số lượt code và chạy Kaggle (cập nhật 2026-10-07)
+
+Không giới hạn tổng số lượt do bạn yêu cầu. Trong Run, **Tạo lại / sửa code bằng Codex**
+gọi coder một lần cho mỗi lần bấm; nếu lỗi, bấm tiếp khi muốn sửa. Có thể tạo lại code
+đã PASS trước khi gửi. Sau khi run kết thúc, bấm **Tạo lượt chạy mới** để dùng lại code
+và proposal đã duyệt; chọn sửa code hoặc **Gửi notebook và chạy trên Kaggle** trong run mới.
+Việc dùng lại code không gọi Codex. Mỗi lần chạy có ID, notebook, log và artifacts riêng.
+
+Nếu run cũ UNKNOWN, app kiểm tra Kaggle không còn phiên đang chạy trước khi cho tạo lượt mới.
+Request lặp của cùng một lần gửi không tự submit lại. Ngân sách thời gian/dung lượng vẫn
+áp dụng cho từng execution. Các đoạn `coder1/2`, `submit1/1` phía dưới là bằng chứng lịch sử
+của T01–T09 trước thay đổi này, không phải quota hiện hành.
+
+Xem [research framework và data adapter](D:/Documents/AI-Scientist-v2/docs/customization/TRAINING_FRAMEWORK_RESEARCH.md)
+để phân biệt lỗi notebook, đường dẫn dữ liệu và vòng training.
+
 Chạy PowerShell tại `D:\Documents\AI-Scientist-v2`:
 
 ```powershell
@@ -65,8 +81,8 @@ config validation từ chối path không tồn tại trước khi mở app.
    bản hiện hành. Sửa idea/nguồn trước approval sẽ làm proposal cũ `STALE`; cần lập bản mới.
    Approval tạo run, chưa tự chạy coder hoặc gửi Kaggle.
 4. **Run:** bấm thẻ alias của run đã duyệt → **Tạo code và notebook bằng Codex**.
-   Xem source/config/notebook và preflight. Nếu code bị từ chối, dùng lượt sửa còn lại trong
-   budget; preflight là kiểm tra contract/static, không chứng minh thuật toán ML đúng toàn bộ.
+   Xem source/config/notebook và preflight. Nếu code bị từ chối, bấm **Tạo lại / sửa code bằng Codex**
+   khi muốn sửa tiếp; không có quota tổng. Preflight là kiểm tra contract/static, không chứng minh thuật toán ML đúng toàn bộ.
 5. Khi run hiện **Sẵn sàng gửi** (`PREFLIGHT` đạt), bấm **Gửi notebook và chạy trên Kaggle**
    một lần. App kiểm account/rules/data/quota, lưu submit
    intent và ghim owner/ref/kernel/version/script version/session. Không tự gửi leaderboard.
@@ -76,6 +92,8 @@ config validation từ chối path không tồn tại trước khi mở app.
    manifest/hash và kết quả, gọi Codex viết report, rồi mới ghi `COMPLETED`.
 7. **Run → chọn card:** xem proposal đã duyệt, kết quả, report preview,
    notebook/source, facts và output links. Mở lại sau restart vẫn giữ cùng run và kết quả.
+8. Muốn chạy tiếp cùng proposal, bấm **Tạo lượt chạy mới** trong run đã kết thúc. App dựng
+   notebook với ID mới từ code đã lưu; chọn sửa code hoặc gửi Kaggle trong run mới.
 
 ### Dữ liệu lưu ở đâu
 

@@ -2,17 +2,19 @@ import {useCallback, useEffect, useState} from 'react';
 import {api, History} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 
-type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_budget:number;
+type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;
+  can_retry:boolean;parent_run_id:string|null;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
   result_metric?:{name:string;direction:string;final_value:number;best_value:number};
   collection?:{phase:string;report_attempts:number;report_limit:number};
   identity:{account:string;username:string;kernel_ref:string;version?:number;session_id?:number;kernel_id?:number;script_version_id?:number;status?:string;submit_attempts:number}|null;
-  code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;
+  code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;origin:'CODEX'|'REUSE';
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onReconcile}: {
+export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onReconcile, onRetry}: {
   projectId:string;runs:History['runs'];busy:boolean;onStart:(id:string)=>Promise<void>;
-  onSubmit:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>}) {
+  onSubmit:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
+  onRetry:(id:string)=>Promise<string|undefined>}) {
   const [details,setDetails] = useState<RunDetail[]>([]);
   const [error,setError] = useState('');
   const [selection,setSelection] = useState<{projectId:string;id:string}|null>(null);
@@ -63,10 +65,14 @@ export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onRe
       {run.state === 'APPROVED' && <p>Proposal đã duyệt. Tạo code và notebook từ snapshot đã pin; chưa gửi Kaggle.</p>}
       {run.state === 'IMPLEMENTING' && <p role="status">Codex đang tạo code / kiểm preflight… Bạn có thể chuyển tab.</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
-      {!run.identity && (run.state === 'APPROVED' || run.state === 'FAILED') && <button className="primary"
-        disabled={busy || run.attempts.length >= run.coder_budget}
-        onClick={() => void onStart(run.id)}>{run.state === 'FAILED' ? 'Tiếp tục trong ngân sách còn lại' : 'Tạo code và notebook bằng Codex'}</button>}
-      <p className="muted">Coder: {run.attempts.length}/{run.coder_budget} lượt đã cấp · Submit: {run.identity?.submit_attempts || 0}/1.</p>
+      {!run.identity && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <button className="primary"
+        disabled={busy}
+        onClick={() => void onStart(run.id)}>{run.state === 'APPROVED' && !run.attempts.length ? 'Tạo code và notebook bằng Codex' : 'Tạo lại / sửa code bằng Codex'}</button>}
+      <p className="muted">Đã gọi coder {run.coder_calls} lượt · Đã gửi Kaggle {run.identity?.submit_attempts || 0} lượt trong run này. Không giới hạn tổng số lượt bạn yêu cầu.</p>
+      {run.parent_run_id && <p className="muted">Tạo từ Run {run.parent_run_id.slice(0,8)} · dùng cùng proposal đã duyệt.</p>}
+      {run.can_retry && <div className="stack"><button disabled={busy} onClick={() => void onRetry(run.id).then(id => {
+        if (id)setSelection({projectId,id});
+      })}>Tạo lượt chạy mới</button><small className="muted">Dùng lại code đã lưu và proposal đã duyệt. Trong run mới, bạn chọn sửa code hoặc gửi Kaggle.</small></div>}
       {run.collection && <p className="muted">Report: {run.collection.report_attempts}/{run.collection.report_limit} lượt đã cấp.</p>}
       {run.state === 'COLLECTING' && run.collection?.phase === 'retry_exhausted' && <p role="alert" className="alert error">Outputs đã được xác minh. Report đã hết lượt thử cho phép; cần xử lý lỗi và duyệt thêm lượt report để tiếp tục.</p>}
       {run.state === 'SUBMITTING' && <p role="status">Đang gửi notebook qua MCP và xác minh phiên chạy…</p>}
@@ -86,14 +92,14 @@ export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onRe
       </div>
       {run.identity?.session_id && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved}/>}
       {run.attempts.map(attempt => <div className="context" key={attempt.attempt}>
-        <h3>Bản code {attempt.attempt} · {attempt.state}</h3>
+        <h3>Bản code {attempt.attempt} · {attempt.origin === 'REUSE' ? 'Dùng lại code' : 'Codex'} · {attempt.state}</h3>
         {attempt.session_id && <code className="source-id">Codex session {attempt.session_id}</code>}
         {attempt.checks && <><p>Preflight: {attempt.checks.pass ? 'PASS' : 'FAIL'}</p>
           <ul>{attempt.checks.checks.map(item => <li key={item}>{item}</li>)}</ul>
           {attempt.checks.errors.map(item => <p role="alert" key={item}>{item}</p>)}</>}
         {attempt.error && <p>{attempt.error}</p>}
       </div>)}
-      {run.ready && <p className="alert">Notebook đã qua preflight. Nút gửi dùng đúng proposal đã duyệt, tối đa một lần submit; mount và model cần được xác nhận khi chạy thật.</p>}
+      {run.ready && <p className="alert">Notebook đã qua preflight. Bấm gửi để chạy lượt này trên Kaggle. Sau khi kết thúc, dùng “Tạo lượt chạy mới” để chạy tiếp; mount và model cần được xác nhận khi chạy thật.</p>}
       {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
       {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><div className="stack">{run.artifacts.map(name =>
         <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}</div></>}

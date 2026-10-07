@@ -1,5 +1,6 @@
-"""Bounded coder and notebook preparation after approval. Never submit or train."""
+"""User-requested code revisions and notebook preparation. Never submit or train."""
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import uuid
 from .bundle import build_bundle, competition_slug
 from .code_prompt import coding_prompt
 from .journal import Node, Journal, journal_snapshot, restore_journal
+from .models import CodePayload
 from .store import StoreConflict
 
 
@@ -16,10 +18,9 @@ BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'paylo
 ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
                   'submission-intent.json', 'launch-readiness.json', 'remote-identity.json',
                   'save-receipt.json', 'launch-diagnostic.json',
-                  'collection-manifest.json', 'result-facts.json', 'report.md',
+                  'collection-manifest.json', 'result-facts.json', 'report.md', 'retry-feedback.json',
                   'output/result.json', 'output/metrics.json', 'output/runner.log',
-                  'submit-bundle/notebook.ipynb', 'submit-bundle/kernel-metadata.json', 'submit-bundle/bundle-manifest.json',
-                  *(f'attempts/{attempt}/{name}' for attempt in (1, 2) for name in (*BUNDLE_FILES, 'source/workload.py')))
+                  'submit-bundle/notebook.ipynb', 'submit-bundle/kernel-metadata.json', 'submit-bundle/bundle-manifest.json')
 
 
 class ImplementationService:
@@ -72,6 +73,88 @@ class ImplementationService:
             self.planner.task = asyncio.create_task(self._implement(project_id, run_id, approved, attempt, request_id))
             return {'run_id': run_id, 'state': 'IMPLEMENTING', 'attempt': attempt}
 
+    async def retry(self, project_id, parent_run_id, request_id):
+        """Prepare another run from the same approval; the user separately requests code/submit."""
+        async with self.planner.lock:
+            existing = await asyncio.to_thread(self.store.retry_run, project_id, parent_run_id, request_id)
+            if existing:
+                return await asyncio.to_thread(self.detail, project_id, existing)
+            if self.planner.closed or (self.planner.task is not None and not self.planner.task.done()):
+                raise StoreConflict('An agent job is active')
+            parent = await asyncio.to_thread(self.store.run, project_id, parent_run_id)
+            approved = await asyncio.to_thread(self.store.implementation_snapshot, project_id, parent_run_id, read_only=True)
+            competition_slug(approved['snapshot'])
+            unknown_ids = []
+            for project in await asyncio.to_thread(self.store.list_projects):
+                history = await asyncio.to_thread(self.store.history, project['id'])
+                unknown_ids.extend(item['id'] for item in history['runs'] if item['state'] == 'UNKNOWN')
+                allowed = {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
+                if self.planner.idle_check is not None:
+                    allowed.add('UNKNOWN')
+                blocking = next((item for item in history['runs'] if item['state'] not in allowed), None)
+                if blocking:
+                    raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) đang hoạt động; hoàn tất trước khi tạo lượt mới.")
+            evidence = await self.planner.idle_check() if unknown_ids else None
+            run, created = await asyncio.to_thread(self.store.reserve_retry, project_id, parent_run_id, request_id, tuple(unknown_ids))
+            if not created:
+                return await asyncio.to_thread(self.detail, project_id, run['id'])
+            try:
+                await asyncio.to_thread(self._reuse, project_id, run['id'], parent, approved, evidence)
+            except Exception as exc:
+                failed = await asyncio.to_thread(self.store.run, project_id, run['id'])
+                for attempt in failed['attempts']:
+                    if attempt['state'] == 'RUNNING':
+                        await asyncio.to_thread(self.store.finish_implementation_attempt, project_id, run['id'],
+                                               attempt['attempt'], None, None, error='Saved code reuse interrupted')
+                await asyncio.to_thread(self.store.implementation_failed, project_id, run['id'],
+                                        f'Không khôi phục được code ({type(exc).__name__}); bấm tạo code cho run mới. Run cũ giữ nguyên.')
+            return await asyncio.to_thread(self.detail, project_id, run['id'])
+
+    def _reuse(self, project_id, run_id, parent, approved, idle_evidence):
+        root = self.root(project_id, run_id)
+        root.mkdir(parents=True, exist_ok=True)
+        feedback = {'parent_run_id': parent['id'], 'parent_state': parent['state'],
+                    'code_sha256': parent['code_sha256'],
+                    'error': parent['error'], 'log_tail': self.store.retry_feedback(project_id, parent['id'])}
+        if idle_evidence:
+            feedback['idle_check'] = idle_evidence
+        (root/'retry-feedback.json').write_text(json.dumps(feedback, ensure_ascii=False, indent=2), encoding='utf-8')
+        previous_root = self.root(project_id, parent['id'])
+        completed = [attempt for attempt in parent['attempts'] if attempt['node']]
+        previous = previous_root/'attempts'/str(completed[-1]['attempt']) if completed else previous_root
+        payload_path = previous/'payload.json'
+        if not payload_path.is_file():
+            # Some early diagnostic runs only stored the root bundle.
+            payload_path = previous_root/'payload.json'
+        if not payload_path.is_file():
+            return  # The new approved run can request code even if the old call returned no source.
+        if payload_path.is_symlink() or not payload_path.resolve().is_relative_to(previous_root.resolve()) or payload_path.stat().st_size > 1_000_000:
+            raise ValueError('Invalid saved code payload path/size')
+        payload = CodePayload.model_validate_json(payload_path.read_text(encoding='utf-8'))
+        if hashlib.sha256(payload.source.encode('utf-8')).hexdigest() != parent['code_sha256']:
+            raise ValueError('Saved source differs from parent run')
+        attempt = self.store.reserve_implementation(project_id, run_id, uuid.uuid4().hex, origin='REUSE')
+        workdir = root/'attempts'/str(attempt)
+        run = self.store.run(project_id, run_id)
+        checks = build_bundle(workdir, run, approved, payload, self.username)
+        node = Node(plan='Reuse saved code from run '+parent['id'], code=payload.source, step=attempt)
+        node.is_buggy = not checks['pass']
+        node.analysis = 'User requested a new run with the same approved scope. No Codex call or Kaggle submit.\n' + json.dumps(checks, ensure_ascii=False)
+        if checks['pass']:
+            for name in BUNDLE_FILES:
+                shutil.copyfile(workdir/name, root/name)
+            (root/'source').mkdir(exist_ok=True)
+            shutil.copyfile(workdir/'source/workload.py', root/'source/workload.py')
+            manifest = {name: hashlib.sha256((root/name).read_bytes()).hexdigest() for name in (*BUNDLE_FILES, 'source/workload.py')}
+            (root/'bundle-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+        journal = Journal()
+        journal.append(node)
+        (root/'journal.json').write_text(json.dumps(journal_snapshot(journal), ensure_ascii=False, indent=2), encoding='utf-8')
+        self.store.finish_implementation_attempt(project_id, run_id, attempt, node.to_dict(), checks,
+                                                error=None if checks['pass'] else '; '.join(checks['errors'])[:1000])
+        if not checks['pass']:
+            self.store.implementation_failed(project_id, run_id, 'Code cũ chưa qua preflight; bấm sửa code: '+ '; '.join(checks['errors']))
+
     async def _implement(self, project_id, run_id, approved, attempt, request_id):
         root = self.root(project_id, run_id)
         root.mkdir(parents=True, exist_ok=True)
@@ -82,7 +165,11 @@ class ImplementationService:
         if nodes:
             journal = restore_journal({'nodes': nodes})
             repair = {'previous_source': journal.nodes[-1].code,
-                      'errors': prior[-2].get('checks', {}).get('errors', []) if len(prior) > 1 and prior[-2].get('checks') else ['Prior attempt interrupted; complete within approved scope']}
+                      'errors': prior[-2]['checks']['errors'] if len(prior) > 1 and prior[-2].get('checks') else [],
+                      'previous_request_error': prior[-2]['error'] if len(prior) > 1 else None}
+            feedback = root/'retry-feedback.json'
+            if feedback.is_file() and not feedback.is_symlink() and feedback.stat().st_size <= 100_000:
+                repair['previous_execution'] = json.loads(feedback.read_text(encoding='utf-8'))
         while True:
             checks = None
             node = None
@@ -117,7 +204,6 @@ class ImplementationService:
                     (root / 'source').mkdir(exist_ok=True)
                     shutil.copyfile(workdir / 'source/workload.py', root / 'source/workload.py')
                     manifest = {}
-                    import hashlib
                     for filename in (*BUNDLE_FILES, 'source/workload.py'):
                         manifest[filename] = hashlib.sha256((root / filename).read_bytes()).hexdigest()
                     (root / 'bundle-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -127,16 +213,11 @@ class ImplementationService:
                                        None if checks['pass'] else '; '.join(checks['errors'])[:1000])
                 if checks['pass']:
                     return
-                if attempt < approved['body']['budget']['coder_calls']:
-                    repair = {'previous_source': payload.source, 'errors': checks['errors']}
-                    request_id = uuid.uuid4().hex
-                    attempt = await asyncio.to_thread(self.store.reserve_implementation, project_id, run_id, request_id, repair=True)
-                    continue
                 await asyncio.to_thread(self.store.implementation_failed, project_id, run_id,
-                                        'Preflight failed; coder budget exhausted: ' + '; '.join(checks['errors']))
+                                        'Preflight failed; request another code revision: ' + '; '.join(checks['errors']))
                 return
             except BaseException as exc:
-                error = 'Implementation interrupted; retry explicitly within remaining coder budget' if isinstance(exc, asyncio.CancelledError) else f'Implementation failed ({type(exc).__name__}); attempt consumed, no training or submit'
+                error = 'Implementation interrupted; request another code revision explicitly' if isinstance(exc, asyncio.CancelledError) else f'Implementation failed ({type(exc).__name__}); request logged, no training or submit'
                 if isinstance(exc, ValueError) and 'Windows CLI argument limit' in str(exc):
                     error = str(exc)
                 try:
@@ -153,10 +234,12 @@ class ImplementationService:
         from .collection import artifact_paths, _collection_state, _report_limit
         run = self.store.run(project_id, run_id)
         root = self.root(project_id, run_id)
-        run['artifacts'] = [name for name in ARTIFACT_FILES if (root / name).is_file() and not (root / name).is_symlink()]
+        names = (*ARTIFACT_FILES, *(f"attempts/{attempt['attempt']}/{name}" for attempt in run['attempts'] for name in (*BUNDLE_FILES, 'source/workload.py')))
+        run['artifacts'] = [name for name in names if (root / name).is_file() and not (root / name).is_symlink()]
         run['artifacts'] = sorted(set(run['artifacts']) | set(artifact_paths(root)))
         run['ready'] = run['state'] == 'PREFLIGHT' and bool(run['attempts']) and bool(run['attempts'][-1]['checks'] and run['attempts'][-1]['checks']['pass'])
-        run['coder_budget'] = self.store.implementation_snapshot(project_id, run_id, read_only=True)['body']['budget']['coder_calls']
+        run['coder_calls'] = sum(attempt['origin'] == 'CODEX' for attempt in run['attempts'])
+        run['can_retry'] = run['state'] in {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'} or (run['state'] == 'UNKNOWN' and self.planner.idle_check is not None)
         approved = self.store.implementation_snapshot(project_id, run_id, read_only=True)
         run['purpose'] = approved['body']['objective']
         run['expected_outputs'] = approved['body']['expected_outputs']

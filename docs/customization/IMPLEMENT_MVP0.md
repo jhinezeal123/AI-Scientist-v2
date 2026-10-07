@@ -13,6 +13,16 @@ nguồn, notebook và kết quả; app không tự submit lại run cũ.
 
 **Giới hạn:** một người, một project nghiệm thu, một account được chọn, một run hoạt động tại một thời điểm.
 
+**Điều chỉnh số lượt ngày 2026-10-07 theo yêu cầu user:** không giới hạn tổng số lượt code
+hoặc execution do user yêu cầu. Mỗi lần bấm gọi coder một lượt, không tự gọi lượt tiếp theo.
+Sau khi execution kết thúc, user dùng **Tạo lượt chạy mới** từ cùng proposal đã duyệt,
+dùng lại code hoặc yêu cầu sửa rồi submit. Mỗi execution có run ID và identity riêng;
+request gửi lặp của cùng execution được chống trùng. Các quota `coder_calls<=2` và
+`training_attempts=1` trong kế hoạch nghiệm thu ban đầu dưới đây là lịch sử, không còn áp
+dụng như quota user. Thời gian/dung lượng vẫn thuộc ngân sách mỗi execution đã duyệt.
+Xem [hướng dẫn hiện hành](D:/Documents/AI-Scientist-v2/docs/customization/MVP0_RUN_GUIDE.md)
+và [research framework](D:/Documents/AI-Scientist-v2/docs/customization/TRAINING_FRAMEWORK_RESEARCH.md).
+
 **Điều chỉnh do user chọn:** project giữ nhiều run lịch sử. `REMOTE_SUCCEEDED` và `REMOTE_FAILED`
 không khóa lượt mới. Khi `allow_new_run_after_idle_check=true`, UNKNOWN cũ có thể được giữ nguyên
 trong lúc duyệt run mới, nhưng phải kiểm identity account và zero active sessions qua Kaggle MCP.

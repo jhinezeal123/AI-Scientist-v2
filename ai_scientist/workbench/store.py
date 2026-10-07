@@ -22,7 +22,10 @@ IMPLEMENTATION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS implementation_attempts(
 run_id TEXT NOT NULL REFERENCES runs(id), attempt INTEGER NOT NULL,
 request_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, node_json TEXT,
-session_id TEXT, checks_json TEXT, error TEXT, PRIMARY KEY(run_id,attempt));
+session_id TEXT, checks_json TEXT, error TEXT, origin TEXT NOT NULL DEFAULT 'CODEX', PRIMARY KEY(run_id,attempt));
+CREATE TABLE IF NOT EXISTS run_retries(
+run_id TEXT PRIMARY KEY REFERENCES runs(id), parent_run_id TEXT NOT NULL REFERENCES runs(id),
+request_id TEXT NOT NULL UNIQUE);
 """
 
 
@@ -54,7 +57,9 @@ class ProjectStore:
                 connection.executescript(IMPLEMENTATION_SCHEMA)
                 if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
                     connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
-                connection.execute('UPDATE project_meta SET schema_version=2 WHERE schema_version<2')
+                if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
+                    connection.execute("ALTER TABLE implementation_attempts ADD COLUMN origin TEXT NOT NULL DEFAULT 'CODEX'")
+                connection.execute('UPDATE project_meta SET schema_version=3 WHERE schema_version<3')
 
     def _path(self, project_id):
         if not re.fullmatch(r"[0-9a-f]{32}", project_id):
@@ -91,7 +96,7 @@ class ProjectStore:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
             connection.executescript(IMPLEMENTATION_SCHEMA)
-            connection.execute("INSERT INTO project_meta VALUES(?,?,?,2)",
+            connection.execute("INSERT INTO project_meta VALUES(?,?,?,3)",
                                (project_id, name.strip(), datetime.now(timezone.utc).isoformat()))
             connection.commit()
         finally:
@@ -364,6 +369,8 @@ class ProjectStore:
             if row is None:
                 raise KeyError('Run not found in this project')
             item = dict(row)
+            retry = connection.execute('SELECT parent_run_id FROM run_retries WHERE run_id=?', (run_id,)).fetchone()
+            item['parent_run_id'] = retry['parent_run_id'] if retry else None
             attempts = [dict(a) for a in connection.execute('SELECT * FROM implementation_attempts WHERE run_id=? ORDER BY attempt', (run_id,))]
             for attempt in attempts:
                 attempt['node'] = json.loads(attempt.pop('node_json')) if attempt['node_json'] else None
@@ -459,21 +466,64 @@ class ProjectStore:
             with self.connection(project['id']) as connection:
                 connection.execute("UPDATE runs SET state='UNKNOWN',error='Submission interrupted by restart; reconcile using read-only history, never push again' WHERE state='SUBMITTING'")
 
-    def reserve_implementation(self, project_id, run_id, request_id, *, repair=False):
+    def reserve_retry(self, project_id, parent_run_id, request_id, idle_unknown_ids=()):
+        """A deliberate new execution shares approval, never the old remote identity."""
+        if not re.fullmatch(r'[0-9a-f]{32}', request_id):
+            raise ValueError('Invalid retry request ID')
         with self.connection(project_id) as connection:
             connection.execute('BEGIN IMMEDIATE')
-            row = connection.execute('SELECT runs.state,proposals.state AS proposal_state,proposals.body_json FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
+            existing = connection.execute('SELECT run_id,parent_run_id FROM run_retries WHERE request_id=?', (request_id,)).fetchone()
+            if existing:
+                if existing['parent_run_id'] != parent_run_id:
+                    raise StoreConflict('Retry request belongs to a different run')
+                return dict(connection.execute('SELECT * FROM runs WHERE id=?', (existing['run_id'],)).fetchone()), False
+            parent = connection.execute('SELECT runs.*,proposals.state AS proposal_state FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (parent_run_id,)).fetchone()
+            if parent is None:
+                raise KeyError('Run not found in this project')
+            eligible = {'FAILED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'COMPLETED'}
+            if parent_run_id in idle_unknown_ids:
+                eligible.add('UNKNOWN')
+            if parent['proposal_state'] != 'APPROVED' or parent['state'] not in eligible:
+                raise StoreConflict('Chỉ tạo lượt mới sau khi lượt cũ kết thúc hoặc Kaggle xác nhận account đang rảnh')
+            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('FAILED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
+            if any(row['state'] != 'UNKNOWN' or row['id'] not in idle_unknown_ids for row in candidates):
+                raise StoreConflict('Một run khác đang hoạt động; hoàn tất run đó trước khi tạo lượt mới')
+            run_id = uuid.uuid4().hex
+            connection.execute("INSERT INTO runs(id,proposal_id,state,intent_key,artifact_dir) VALUES(?,?,'APPROVED',?,?)",
+                               (run_id, parent['proposal_id'], 'retry:' + request_id, 'runs/' + run_id))
+            connection.execute('INSERT INTO run_retries VALUES(?,?,?)', (run_id, parent_run_id, request_id))
+            return dict(connection.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()), True
+
+    def retry_run(self, project_id, parent_run_id, request_id):
+        with self.connection(project_id) as connection:
+            row = connection.execute('SELECT run_id,parent_run_id FROM run_retries WHERE request_id=?', (request_id,)).fetchone()
+            if row is None:
+                return None
+            if row['parent_run_id'] != parent_run_id:
+                raise StoreConflict('Retry request belongs to a different run')
+            return row['run_id']
+
+    def retry_feedback(self, project_id, run_id):
+        with self.connection(project_id) as connection:
+            rows = connection.execute('SELECT text FROM logs WHERE run_id=? AND generation=(SELECT MAX(generation) FROM logs WHERE run_id=?) ORDER BY seq DESC LIMIT 20', (run_id, run_id)).fetchall()
+            return '\n'.join(row['text'] for row in reversed(rows))[-16000:]
+
+    def reserve_implementation(self, project_id, run_id, request_id, *, repair=False, origin='CODEX'):
+        if origin not in {'CODEX', 'REUSE'}:
+            raise ValueError('Invalid implementation origin')
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT runs.state,runs.identity_json,proposals.state AS proposal_state FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
             if row is None:
                 raise KeyError('Run not found in this project')
-            states = {'IMPLEMENTING'} if repair else {'APPROVED', 'FAILED'}
-            if row['proposal_state'] != 'APPROVED' or row['state'] not in states:
+            states = {'IMPLEMENTING'} if repair else {'APPROVED', 'FAILED', 'PREFLIGHT'}
+            if row['proposal_state'] != 'APPROVED' or row['state'] not in states or row['identity_json']:
                 raise StoreConflict('Run is not eligible for a coder call')
             attempts = connection.execute('SELECT attempt,state,checks_json FROM implementation_attempts WHERE run_id=? ORDER BY attempt', (run_id,)).fetchall()
-            budget = json.loads(row['body_json'])['budget']['coder_calls']
-            if len(attempts) >= budget or any(a['state'] == 'RUNNING' for a in attempts) or any(a['checks_json'] and json.loads(a['checks_json'])['pass'] for a in attempts):
-                raise StoreConflict('Coder budget exhausted, already active, or preflight already passed')
+            if any(a['state'] == 'RUNNING' for a in attempts):
+                raise StoreConflict('A coder request is already active')
             attempt = len(attempts) + 1
-            connection.execute("INSERT INTO implementation_attempts(run_id,attempt,request_id,state) VALUES(?,?,?,'RUNNING')", (run_id, attempt, request_id))
+            connection.execute("INSERT INTO implementation_attempts(run_id,attempt,request_id,state,origin) VALUES(?,?,?,'RUNNING',?)", (run_id, attempt, request_id, origin))
             connection.execute("UPDATE runs SET state='IMPLEMENTING',error=NULL WHERE id=?", (run_id,))
             return attempt
 
@@ -493,13 +543,13 @@ class ProjectStore:
 
     def implementation_failed(self, project_id, run_id, error):
         with self.connection(project_id) as connection:
-            connection.execute("UPDATE runs SET state='FAILED',error=? WHERE id=? AND state IN ('IMPLEMENTING','PREFLIGHT')", (error[:1000], run_id))
+            connection.execute("UPDATE runs SET state='FAILED',error=? WHERE id=? AND state IN ('APPROVED','IMPLEMENTING','PREFLIGHT')", (error[:1000], run_id))
 
     def recover_implementation(self):
         for project in self.list_projects():
             with self.connection(project['id']) as connection:
-                connection.execute("UPDATE implementation_attempts SET state='FAILED',error='Interrupted by restart; attempt remains consumed' WHERE state='RUNNING'")
-                connection.execute("UPDATE runs SET state='FAILED',error='Implementation interrupted by restart; retry explicitly within remaining coder budget' WHERE state='IMPLEMENTING'")
+                connection.execute("UPDATE implementation_attempts SET state='FAILED',error='Interrupted by restart; request remains in history' WHERE state='RUNNING'")
+                connection.execute("UPDATE runs SET state='FAILED',error='Implementation interrupted by restart; request another code revision explicitly' WHERE state='IMPLEMENTING'")
 
     def record_preflight_review(self, project_id, run_id, checks, node):
         # Rechecking saved source consumes no additional coder call and never changes scope.

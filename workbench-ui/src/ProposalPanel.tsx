@@ -33,10 +33,11 @@ export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,on
         <h3>Split / subset / seed</h3><p>{latest.body.split?.method}</p><p className="muted">Group: {latest.body.split?.group_key} · seed: {latest.body.split?.seed}</p><p>{latest.body.split?.subset}</p>
         <h3>Metric</h3><p>{latest.body.metric?.name} · {latest.body.metric?.direction === 'minimize' ? 'Càng thấp càng tốt' : 'Càng cao càng tốt'}</p><p>{latest.body.metric?.definition}</p>
         <h3>Cách triển khai</h3><ol>{latest.body.implementation_steps?.map((step,i) => <li key={i}>{step}</li>)}</ol>
-        <h3>Ngân sách tối đa</h3><div className="budget-grid"><span>Coder calls<strong>{latest.body.budget?.coder_calls}</strong></span><span>Training attempts<strong>{latest.body.budget?.training_attempts}</strong></span><span>Thời gian training<strong>{latest.body.budget?.training_seconds} giây</strong></span><span>Outputs<strong>{((latest.body.budget?.output_bytes || 0)/1000000).toFixed(1)} MB</strong></span></div>
+        <h3>Ngân sách mỗi lượt chạy</h3><div className="budget-grid"><span>Thời gian training<strong>{latest.body.budget?.training_seconds} giây</strong></span><span>Outputs<strong>{((latest.body.budget?.output_bytes || 0)/1000000).toFixed(1)} MB</strong></span></div>
+        <p className="muted">Bạn quyết định từng lượt tạo code và chạy Kaggle, không giới hạn tổng số lượt.</p>
         <h3>Đầu ra dự kiến</h3><ul>{latest.body.expected_outputs?.map((output,i) => <li key={i}>{output}</li>)}</ul>
         <code className="source-id">Context SHA256 {latest.context_sha256}</code>
-        {latest.state === 'AWAITING_APPROVAL' && <div className="stack"><p className="muted">Duyệt sẽ pin proposal này và tạo một run duy nhất. T04 chưa khởi động coder/training; mount vẫn phải xác minh trước submit.</p><button className="primary" disabled={busy || idea?.state === 'PLANNING'} onClick={() => void onApprove(latest).catch(() => {})}>Duyệt proposal v{latest.version}</button></div>}
+        {latest.state === 'AWAITING_APPROVAL' && <div className="stack"><p className="muted">Duyệt sẽ pin proposal này và tạo run đầu tiên. Các lượt tiếp theo dùng cùng phạm vi đã duyệt; mount được xác minh trước submit.</p><button className="primary" disabled={busy || idea?.state === 'PLANNING'} onClick={() => void onApprove(latest).catch(() => {})}>Duyệt proposal v{latest.version}</button></div>}
         {latest.state === 'APPROVED' && <p className="alert">Đã duyệt. Mở tab Run để tạo hoặc xem code, notebook và preflight. Chưa tự gửi Kaggle.</p>}
       </>}
       {answered && <div className="stack"><p className="alert">Câu trả lời đã được lưu. Tiếp tục để Codex đọc câu trả lời và lập proposal v{latest.version + 1} từ các nguồn của v{latest.version}.</p>
