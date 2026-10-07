@@ -2,6 +2,14 @@
 
 Ngày: **2026-10-06** · Trạng thái: **T01–T09 đã triển khai và nghiệm thu MVP0 trong scope prototype**.
 
+**Cập nhật Working 2026-10-07 theo yêu cầu user:** code và submit đã gộp thành một
+lượt agent làm việc qua SSH trong Kaggle. Đã nghiệm thu GUI thật từ idea đến report,
+xác nhận dừng phiên và mở lại sau restart, với run `abb8c794…` tạo CSV trên CPU.
+Luồng hiện hành không dùng notebook preflight/contract hoặc artifacts training bắt buộc.
+Các bước coder/submit tách rời và gate training phía dưới ghi lại kế hoạch T01–T09 ban đầu;
+xem [Working qua SSH](WORKING_SSH.md) và [bằng chứng nghiệm thu](WORKING_ACCEPTANCE.md)
+cho hành vi hiện tại, phạm vi đã kiểm và các lỗi tích hợp đã sửa.
+
 Nguồn yêu cầu: [DESIGN_BRIEF.md](DESIGN_BRIEF.md).
 Checkpoint sản phẩm và các ID nghiệm thu: [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md#4-mvp-0--prototype-lần-sử-dụng-thành-công-đầu-tiên).
 Nền tảng đã chọn: [CUSTOMIZATION_PLAN.md](CUSTOMIZATION_PLAN.md).

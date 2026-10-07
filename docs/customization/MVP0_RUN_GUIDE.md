@@ -24,6 +24,9 @@ hoặc tạo lượt Working mới. Backend vẫn giữ approval và xác nhận
 
 Xem [hướng dẫn Working qua SSH](WORKING_SSH.md) để biết trạng thái, config và phạm vi kiểm thử.
 
+Luồng Working đã nghiệm thu qua GUI và Kaggle thật ngày 2026-10-07, bao gồm mở lại
+report/artifacts/log sau restart. Xem [biên bản và giới hạn nghiệm thu](WORKING_ACCEPTANCE.md).
+
 Xem [research framework và data adapter](D:/Documents/AI-Scientist-v2/docs/customization/TRAINING_FRAMEWORK_RESEARCH.md)
 để phân biệt lỗi notebook, đường dẫn dữ liệu và vòng training.
 

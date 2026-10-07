@@ -106,6 +106,14 @@ proposal không còn các trần training/output mặc định của MVP0 cũ.
 CLI được tìm lại khi đường dẫn cũ không còn tồn tại sau cập nhật: PATH, rồi bản
 desktop hiện có. Backend không tự đổi model hoặc đăng nhập account khác.
 
+Trên Windows, backend truyền `PROGRAMDATA` vào tiến trình MCP để OpenSSH khởi động
+được. Lượt Working dùng `--ignore-user-config` để không đưa MCP/config cá nhân vào
+agent; vì vậy backend đặt rõ `windows.sandbox="elevated"`, cùng `workspace-write`
+và network access cho helper local. Sandbox Windows cần được setup sẵn trên máy.
+Phản hồi cuối dùng schema `WorkingPayload` trực tiếp của CLI (`succeeded`, `summary`,
+`limitations`, `output_files`); đây là định dạng báo kết quả, không phải contract
+notebook, mô hình hoặc training.
+
 ## Bằng chứng kiểm thử
 
 - Bộ kiểm thử Workbench, bao gồm luồng Working qua gateway HTTP thật với terminal
@@ -113,8 +121,12 @@ desktop hiện có. Backend không tự đổi model hoặc đăng nhập accoun
 - Kiểm thử donor cho request ID, cancellation, Bash thật ở local, cwd/exports/env,
   redaction, timeout, file trên 10 MB, tương thích các tool cũ và proxy không replay submit: **17 passed**.
 - Frontend TypeScript/Vite build thành công.
-- Theo phạm vi user đã duyệt, **chưa tạo phiên Kaggle mới để nghiệm thu tích hợp này**.
-  Các fixture không chứng minh độ trễ mạng, cấp phát GPU/TPU hay khả năng của agent trên dữ liệu thật.
+- **Nghiệm thu GUI/Kaggle thật 2026-10-07:** idea → proposal bởi Codex thật → duyệt
+  → Working CPU → 4 files đã kiểm hash → report → xác nhận dừng phiên. Run `abb8c794…`
+  tạo đúng 1.000 dòng CSV, không missing; restart giữ 9 artifact links, 1.762 log records,
+  1 lượt agent và 8 lệnh SSH. Xem [biên bản nghiệm thu](WORKING_ACCEPTANCE.md).
+  Lượt này chứng minh tác vụ tổng quát CPU/stdlib, chưa kiểm GPU/TPU, finetune hoặc
+  dữ liệu ngoài trên luồng Working mới. Training MVP0 cũ có bằng chứng riêng trong guide.
 
 Chạy backend như trước rồi mở lại GUI để dùng bản mới:
 
