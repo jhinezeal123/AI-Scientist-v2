@@ -8,15 +8,14 @@ không cần restart backend sau khi tính năng này đã được nạp.
 | --- | --- | --- |
 | `working.agent` | `working_agent.md` | Prompt trực tiếp gửi cho Codex CLI |
 | `working.instructions` | `working_instructions.md` | Hướng dẫn được lưu vào `working-request.json` |
-| `working.task` | `working_task.md` | Lời nhắc đọc yêu cầu và thực hiện công việc |
 
 `aliases.json` ánh xạ alias sang đường dẫn file tương đối trong thư mục này.
 Muốn dùng bản prompt khác, sửa tên file trong ánh xạ. Backend vẫn gọi cùng alias.
 
 ## Cách sửa
 
-- `working_agent.md` có hai biến `{{workdir}}` và `{{task_prompt}}`; giữ chúng để
-  agent nhận thư mục của run và lời nhắc tương ứng. Biến chưa được cung cấp sẽ báo lỗi.
+- `working_agent.md` gồm cả lời nhắc đọc yêu cầu và thực hiện công việc. Giữ biến
+  `{{workdir}}` để agent nhận thư mục của run. Biến chưa được cung cấp sẽ báo lỗi.
 - Trong `working_instructions.md`, mỗi đoạn cách nhau bằng một dòng trống sẽ trở
   thành một phần tử của `instructions`. File chứa đúng nội dung gửi cho agent;
   đừng thêm ghi chú quản trị vào file prompt.

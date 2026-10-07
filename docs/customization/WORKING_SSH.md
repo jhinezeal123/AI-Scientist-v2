@@ -23,7 +23,7 @@ trước khi viết code. Agent không nhận Kaggle MCP, token account hoặc k
 Model/reasoning lấy từ config hiện có; không cài Codex trong Kaggle.
 
 Prompt Working được cấu hình trong `ai_scientist/workbench/system_prompt/`.
-`aliases.json` trỏ các alias `working.agent`, `working.instructions`, `working.task`
+`aliases.json` trỏ hai alias `working.agent` và `working.instructions`
 tới file Markdown gốc. Sửa file có hiệu lực ở lượt Working tiếp theo, không cần
 restart. Xem [cách cấu hình prompt](../../ai_scientist/workbench/system_prompt/README.md).
 

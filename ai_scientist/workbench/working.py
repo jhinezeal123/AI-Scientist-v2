@@ -114,10 +114,8 @@ class WorkingService:
                 raise StoreConflict('Agent worker chưa xác nhận kết thúc lượt trước')
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
             # Validate editable prompt files before opening a paid Kaggle session.
-            task_prompt = load_prompt('working.task')
             load_prompt('working.instructions')
-            load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent',
-                        task_prompt=task_prompt)
+            load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
             for project in await asyncio.to_thread(self.store.list_projects):
                 for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
                     if item['id'] == run_id:
@@ -169,7 +167,7 @@ class WorkingService:
             data['previous_source'] = source.read_text(encoding='utf-8')
         (workdir / 'working-request.json').write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         return self.planner.bindings.request_type(key[1], 'mvp0_working',
-            load_prompt('working.task'), workdir,
+            load_prompt('working.agent', workdir=workdir), workdir,
             timeout_seconds=min(getattr(self.config, 'working_seconds', 900), max(1, descriptor['ttl_seconds'] - 60)),
             max_output_bytes=3_000_000)
 

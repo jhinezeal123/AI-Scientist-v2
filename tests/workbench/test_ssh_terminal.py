@@ -125,7 +125,9 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
         return Process()
     monkeypatch.setattr('ai_scientist.workbench.agents.codex.subprocess.Popen', launch)
     runtime = CodexCliRuntime(str(tmp_path / 'removed.exe'), model='fixture', reasoning_effort='max')
-    request = SimpleNamespace(role='mvp0_working', workdir=tmp_path, prompt='fixture', timeout_seconds=1, max_output_bytes=100000)
+    from ai_scientist.workbench.system_prompt import load_prompt
+    prompt = load_prompt('working.agent', workdir=tmp_path)
+    request = SimpleNamespace(role='mvp0_working', workdir=tmp_path, prompt=prompt, timeout_seconds=1, max_output_bytes=100000)
     result = runtime.run(request, lambda event: None, lambda: False)
     assert json.loads(result.text) == payload
     assert arguments[0] == str(executable) and '--ignore-user-config' in arguments
@@ -136,5 +138,6 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
     assert set(schemas[0]['required']) == set(payload)
     assert schemas[0]['additionalProperties'] is False
     assert 'Use tools to read working-request.json' in arguments[-1]
+    assert arguments[-1] == prompt
     assert 'Do not call tools' not in arguments[-1]
     assert not list(tmp_path.glob('.codex-output-*.json'))
