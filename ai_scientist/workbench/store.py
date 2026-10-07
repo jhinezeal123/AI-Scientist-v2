@@ -54,12 +54,17 @@ class ProjectStore:
         self.root.mkdir(parents=True, exist_ok=True)
         for project in self.list_projects():
             with self.connection(project['id']) as connection:
-                connection.executescript(IMPLEMENTATION_SCHEMA)
-                if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
-                    connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
-                if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
-                    connection.execute("ALTER TABLE implementation_attempts ADD COLUMN origin TEXT NOT NULL DEFAULT 'CODEX'")
-                connection.execute('UPDATE project_meta SET schema_version=3 WHERE schema_version<3')
+                self._migrate_schema(connection)
+
+    @staticmethod
+    def _migrate_schema(connection):
+        """Keep upgrades of existing project databases in one place."""
+        connection.executescript(IMPLEMENTATION_SCHEMA)
+        if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
+            connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+        if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
+            connection.execute("ALTER TABLE implementation_attempts ADD COLUMN origin TEXT NOT NULL DEFAULT 'CODEX'")
+        connection.execute('UPDATE project_meta SET schema_version=3 WHERE schema_version<3')
 
     def _path(self, project_id):
         if not re.fullmatch(r"[0-9a-f]{32}", project_id):
