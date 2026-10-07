@@ -51,8 +51,8 @@ class WorkingService:
         return self.records.get(project_id, run_id)
 
     async def check_idle(self):
-        """Resolve old UNKNOWN notebooks using token-backed reads, without browser cookies."""
-        observations = []
+        """Check known notebooks; unreadable old saves need verified account idleness."""
+        observations, unresolved_refs = [], []
         for project in await asyncio.to_thread(self.store.list_projects):
             history = await asyncio.to_thread(self.store.history, project['id'])
             for item in history['runs']:
@@ -69,13 +69,33 @@ class WorkingService:
                     raise StoreConflict('Run UNKNOWN cũ thiếu notebook reference để đối soát')
                 try:
                     receipt = await asyncio.to_thread(self.donor.inspect, identity['kernel_ref'])
-                except Exception as exc:
-                    raise StoreConflict('Chưa xác minh được notebook UNKNOWN cũ; chưa mở phiên mới') from exc
+                except Exception:
+                    unresolved_refs.append(identity['kernel_ref'])
+                    continue
                 if receipt.get('stopped') is not True:
                     raise StoreConflict('Notebook UNKNOWN cũ vẫn đang chạy trên Kaggle')
                 observations.append(receipt)
+        account_observation = None
+        if unresolved_refs:
+            # Old ambiguous saves may have no readable notebook. Check all active
+            # sessions, including older versions, without altering or replaying it.
+            try:
+                account_observation = decode_result(await asyncio.wait_for(
+                    self.mcp.call_tool('workbench_account_idle', {'account': self.config.kaggle_account_alias}), 60))
+            except Exception as exc:
+                raise StoreConflict('Chưa xác minh được phiên UNKNOWN cũ hoặc trạng thái toàn account') from exc
+            owners = {ref.split('/', 1)[0] for ref in unresolved_refs}
+            if (account_observation.get('account') != self.config.kaggle_account_alias
+                    or owners != {account_observation.get('username')}
+                    or (self.config.kaggle_username and account_observation.get('username') != self.config.kaggle_username)
+                    or account_observation.get('idle') is not True
+                    or type(account_observation.get('active_session_count')) is not int
+                    or account_observation['active_session_count'] != 0
+                    or not account_observation.get('observed_at')):
+                raise StoreConflict('Account Kaggle chưa xác nhận không có phiên hoạt động; chưa mở phiên mới')
         return {'idle': True, 'account': self.config.kaggle_account_alias,
-                'known_notebooks': observations, 'checked_at': datetime.now(timezone.utc).isoformat()}
+                'known_notebooks': observations, 'unresolved_notebooks': unresolved_refs,
+                'account_observation': account_observation, 'checked_at': datetime.now(timezone.utc).isoformat()}
 
     async def start(self, project_id, run_id, accelerator=None, ttl_seconds=None):
         accelerator = accelerator or getattr(self.config, 'kaggle_accelerator', 'cpu')

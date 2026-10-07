@@ -167,3 +167,40 @@ def test_legacy_reconcile_only_reads_pinned_status(tmp_path, monkeypatch):
         await planner.close()
         await worker.close(1)
     asyncio.run(check())
+
+
+@pytest.mark.parametrize('case', ['idle', 'running', 'wrong_owner', 'wrong_account', 'bad_count', 'unavailable'])
+def test_unknown_unreadable_notebook_requires_verified_account_idle(tmp_path, case):
+    async def check():
+        store, project, old, worker, planner, service, runtime, _, donor = fixture(tmp_path)
+        identity = {'kernel_ref': 'verified-user/old-notebook', 'username': 'verified-user'}
+        with store.connection(project) as connection:
+            connection.execute("UPDATE runs SET state='UNKNOWN',identity_json=? WHERE id=?", (json.dumps(identity), old))
+        donor.inspect = lambda ref: (_ for _ in ()).throw(RuntimeError('fixture inaccessible notebook'))
+        calls = []
+        class AccountMCP:
+            async def call_tool(self, name, body):
+                calls.append((name, body))
+                assert name == 'workbench_account_idle' and body == {'account': 'fixture-account'}
+                if case == 'unavailable':
+                    raise RuntimeError('fixture unavailable')
+                receipt = {'account': 'fixture-account', 'username': 'verified-user',
+                           'active_session_count': 0, 'idle': True, 'observed_at': '2026-10-07T08:44:52Z'}
+                if case == 'running': receipt.update(active_session_count=1, idle=False)
+                if case == 'wrong_owner': receipt['username'] = 'other-user'
+                if case == 'wrong_account': receipt['account'] = 'other-account'
+                if case == 'bad_count': receipt['active_session_count'] = False
+                return SimpleNamespace(structuredContent=receipt, isError=False)
+        service.mcp = AccountMCP()
+        if case == 'idle':
+            proof = await service.check_idle()
+            assert proof['idle'] and proof['unresolved_notebooks'] == [identity['kernel_ref']]
+            assert proof['account_observation']['active_session_count'] == 0
+        else:
+            with pytest.raises(StoreConflict):
+                await service.check_idle()
+        assert len(calls) == 1 and store.run(project, old)['state'] == 'UNKNOWN' and runtime.calls == []
+        await service.close(1)
+        await planner.close()
+        await worker.close(1)
+    asyncio.run(check())

@@ -67,7 +67,11 @@ reporter training cũ. Các module/schema cũ còn trong repo cho dữ liệu v�
 không tham gia luồng đang chạy. Tạo lượt mới từ run cũ chỉ tham khảo source/log, không
 build hoặc kiểm lại bundle cũ. Đối soát run cũ chỉ đọc trạng thái bằng token.
 UNKNOWN cũ được kiểm tra bằng token đối với notebook reference đã lưu, không cần cookie.
-Đây là kiểm tra các notebook Workbench đã biết, không phải kiểm kê mọi phiên ngoài Workbench.
+Nếu reference UNKNOWN cũ không đọc được, backend dùng `workbench_account_idle` để
+xác minh đúng account/cookie và toàn bộ phiên hoạt động. Chỉ cho lượt mới khi count=0,
+idle=true và có timestamp; giữ nguyên UNKNOWN và không gửi lại notebook cũ.
+Phép đọc này chỉ hỗ trợ lịch sử UNKNOWN, không kiểm format code/mount hay training contract.
+Khi mọi reference đọc được, backend chỉ kiểm tra các notebook Workbench đã biết.
 
 ## Trách nhiệm các module
 
