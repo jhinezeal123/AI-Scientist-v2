@@ -3,6 +3,8 @@
 Ngày: **2026-10-07**. User chọn **Codex local, thao tác trong Kaggle qua SSH**.
 Mục tiêu: kiểm vòng sửa/chạy code, đọc dữ liệu/log, lấy output và dừng qua SSH.
 
+Thử nghiệm tiếp theo: [CNN MNIST trên T4 ×2, CSV test và dataset public](KAGGLE_MNIST_SSH_WORKFLOW.md).
+
 ## 1. Kết quả
 
 **Khả thi trong lượt CPU đã thử.** Đã push một notebook bootstrap bằng SDK/token qua
