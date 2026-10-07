@@ -107,9 +107,10 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
     payload = {'succeeded': True, 'summary': 'fixture', 'limitations': [], 'output_files': []}
     events = [
         {'type': 'thread.started', 'thread_id': 'fixture'},
-        {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': json.dumps({'text': json.dumps(payload), 'files': {}})}},
+        {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': json.dumps(payload)}},
         {'type': 'turn.completed'}]
     arguments = []
+    schemas = []
     class Process:
         returncode = 0
         def __init__(self):
@@ -119,6 +120,7 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
             return 0
     def launch(args, **options):
         arguments.extend(args)
+        schemas.append(json.loads(Path(args[args.index('--output-schema') + 1]).read_text()))
         return Process()
     monkeypatch.setattr('ai_scientist.workbench.agents.codex.subprocess.Popen', launch)
     runtime = CodexCliRuntime(str(tmp_path / 'removed.exe'), model='fixture', reasoning_effort='max')
@@ -128,3 +130,8 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
     assert arguments[0] == str(executable) and '--ignore-user-config' in arguments
     assert arguments[arguments.index('--sandbox') + 1] == 'workspace-write'
     assert 'sandbox_workspace_write.network_access=true' in arguments
+    assert set(schemas[0]['required']) == set(payload)
+    assert schemas[0]['additionalProperties'] is False
+    assert 'Use tools to read working-request.json' in arguments[-1]
+    assert 'Do not call tools' not in arguments[-1]
+    assert not list(tmp_path.glob('.codex-output-*.json'))
