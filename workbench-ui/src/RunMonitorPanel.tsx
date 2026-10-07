@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import {api} from './api';
+import RunLogView from './RunLogView';
 
 type MetricPoint={step:number;elapsed_seconds:number;total_steps:number;metrics:Record<string,number>};
 type Delta={run_state:string;generation:number;entries:{seq:number;text:string;stream:string}[];next_cursor:string;
@@ -100,8 +101,6 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
             <td>{point.elapsed_seconds.toFixed(1)}</td><td>{metricValue(point.metrics[metric])}</td></tr>)}</tbody>
         </table></div></details>
     </section>}
-    <details className="live-log" open><summary>Log đã lưu · {entries.length} records · generation {data?.generation || 1}</summary>
-      {entries.length ? <pre aria-label="Log Kaggle">{entries.map(entry=><span key={entry.seq} data-stream={entry.stream}>{entry.text}{entry.text.endsWith('\n') ? '' : '\n'}</span>)}</pre> : <p className="muted">Chưa nhận được log. Bạn có thể chuyển tab; backend vẫn theo dõi.</p>}
-    </details>
+    <RunLogView entries={entries} generation={data?.generation || 1}/>
   </div>;
 }
