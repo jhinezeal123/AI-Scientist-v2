@@ -25,6 +25,12 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 .run-card-status[data-state='UNKNOWN'] .run-status-dot,.run-card-status[data-state='IMPLEMENTING'] .run-status-dot,.run-card-status[data-state='SUBMITTING'] .run-status-dot,.run-card-status[data-state='REMOTE_RUNNING'] .run-status-dot{background:#e4bd7a}
 .run-hint{margin-bottom:0}
 .run-detail>.panel-head:first-child,.idea-detail>.panel-head:first-child{margin-bottom:12px}
+.run-detail h3{font-size:22px;font-weight:750;line-height:1.35;letter-spacing:-.02em;color:#f3f7f3;margin-bottom:14px}
+.run-detail>.panel-head:first-child h3{font-size:28px;font-weight:800;color:var(--mint);margin-bottom:0}
+.run-detail .context h3,.run-detail>h3{border-left:3px solid var(--mint);padding-left:12px}
+.run-detail .panel-head h3{margin-bottom:0}
+.run-detail>h3{margin-top:28px}
+.run-detail .live-log>summary{font-size:17px;font-weight:650}
 .live-log pre{max-height:360px;margin-bottom:0}.live-log span[data-stream='stderr']{color:#f08f83}
 .training-metrics{margin:20px 0;padding:16px;border:1px solid var(--line);border-radius:5px;background:var(--panel2)}
 .training-metrics>label{margin-top:14px}.training-metrics select{background:var(--panel);min-width:0}
