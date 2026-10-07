@@ -41,7 +41,7 @@ class WorkingStore:
             run = connection.execute('SELECT runs.*,proposals.state AS proposal_state FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (run_id,)).fetchone()
             if run is None:
                 raise KeyError('Run not found')
-            if run['proposal_state'] != 'APPROVED' or run['state'] not in {'APPROVED', 'PREFLIGHT', 'FAILED'} or run['identity_json']:
+            if run['deleted_at'] or run['proposal_state'] != 'APPROVED' or run['state'] not in {'APPROVED', 'PREFLIGHT', 'FAILED'} or run['identity_json']:
                 raise StoreConflict('Working requires an approved, unsubmitted Run')
             connection.execute('INSERT INTO working_runs(run_id,session_id,phase,accelerator,ttl_seconds,started_at) VALUES(?,?,?,?,?,?)',
                                (run_id, run_id, 'starting', accelerator, ttl, datetime.now(timezone.utc).isoformat()))

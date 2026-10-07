@@ -8,13 +8,15 @@ import re
 import sqlite3
 import uuid
 
+from .library import LibraryFiles
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS project_meta(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, schema_version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS resources(id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, url TEXT, content TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, content_sha256 TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY, text TEXT NOT NULL, conversation_json TEXT NOT NULL, state TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, title TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY, text TEXT NOT NULL, conversation_json TEXT NOT NULL, state TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', deleted_at TEXT);
 CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, idea_id TEXT NOT NULL REFERENCES ideas(id), version INTEGER NOT NULL, body_json TEXT NOT NULL, context_snapshot_json TEXT NOT NULL, context_sha256 TEXT NOT NULL, state TEXT NOT NULL, approved_at TEXT);
-CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL REFERENCES proposals(id), node_id TEXT, node_json TEXT, state TEXT NOT NULL, intent_key TEXT UNIQUE NOT NULL, code_sha256 TEXT, identity_json TEXT, artifact_dir TEXT NOT NULL, error TEXT, report_path TEXT);
+CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL REFERENCES proposals(id), node_id TEXT, node_json TEXT, state TEXT NOT NULL, intent_key TEXT UNIQUE NOT NULL, code_sha256 TEXT, identity_json TEXT, artifact_dir TEXT NOT NULL, error TEXT, report_path TEXT, deleted_at TEXT);
 CREATE TABLE IF NOT EXISTS logs(run_id TEXT NOT NULL REFERENCES runs(id), generation INTEGER NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, stream TEXT NOT NULL, UNIQUE(run_id,generation,seq));
 """
 
@@ -55,6 +57,8 @@ class ProjectStore:
         for project in self.list_projects():
             with self.connection(project['id']) as connection:
                 self._migrate_schema(connection)
+                for row in connection.execute('SELECT * FROM resources'):
+                    self.library(project['id']).reference(dict(row))
 
     @staticmethod
     def _migrate_schema(connection):
@@ -64,7 +68,13 @@ class ProjectStore:
             connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
             connection.execute("ALTER TABLE implementation_attempts ADD COLUMN origin TEXT NOT NULL DEFAULT 'CODEX'")
-        connection.execute('UPDATE project_meta SET schema_version=3 WHERE schema_version<3')
+        for table in ('ideas', 'runs'):
+            if 'deleted_at' not in {row['name'] for row in connection.execute(f'PRAGMA table_info({table})')}:
+                connection.execute(f'ALTER TABLE {table} ADD COLUMN deleted_at TEXT')
+        connection.execute('UPDATE project_meta SET schema_version=4 WHERE schema_version<4')
+
+    def library(self, project_id):
+        return LibraryFiles(self._path(project_id).parent)
 
     def _path(self, project_id):
         if not re.fullmatch(r"[0-9a-f]{32}", project_id):
@@ -96,12 +106,13 @@ class ProjectStore:
         project_id = uuid.uuid4().hex
         database = self._path(project_id)
         database.parent.mkdir()
+        (database.parent / 'library').mkdir()
         connection = sqlite3.connect(database)
         try:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
             connection.executescript(IMPLEMENTATION_SCHEMA)
-            connection.execute("INSERT INTO project_meta VALUES(?,?,?,3)",
+            connection.execute("INSERT INTO project_meta VALUES(?,?,?,4)",
                                (project_id, name.strip(), datetime.now(timezone.utc).isoformat()))
             connection.commit()
         finally:
@@ -124,7 +135,8 @@ class ProjectStore:
 
     def resources(self, project_id):
         with self.connection(project_id) as connection:
-            return [dict(row) for row in connection.execute("SELECT * FROM resources ORDER BY rowid")]
+            return [{**dict(row), **self.library(project_id).reference(dict(row))}
+                    for row in connection.execute("SELECT * FROM resources ORDER BY rowid")]
 
     def save_resource(self, project_id, body, resource_id=None, expected_version=None):
         title, content = body["title"].strip(), body["content"]
@@ -146,15 +158,16 @@ class ProjectStore:
                    "content": content, "status": status, "version": version,
                    "content_sha256": digest(canonical({"kind": body["kind"], "title": title,
                                                        "url": url, "content": content, "status": status}))}
+            reference = self.library(project_id).reference(row)
             connection.execute("INSERT INTO resources VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
                                "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
             connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
-            return row
+            return {**row, **reference}
 
-    def ideas(self, project_id):
+    def ideas(self, project_id, include_deleted=False):
         with self.connection(project_id) as connection:
             result = []
-            for row in connection.execute("SELECT * FROM ideas ORDER BY rowid DESC"):
+            for row in connection.execute("SELECT * FROM ideas" + ('' if include_deleted else ' WHERE deleted_at IS NULL') + " ORDER BY rowid DESC"):
                 item = dict(row)
                 item["conversation"] = json.loads(item.pop("conversation_json"))
                 result.append(item)
@@ -174,7 +187,7 @@ class ProjectStore:
         if len(resource_ids) != len(set(resource_ids)):
             raise ValueError("Selected source IDs must be distinct")
         with self.connection(project_id) as connection:
-            idea = connection.execute("SELECT id,text,conversation_json FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            idea = connection.execute("SELECT id,text,conversation_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if idea is None:
                 raise KeyError("Idea not found in this project")
             resources = []
@@ -182,13 +195,13 @@ class ProjectStore:
                 row = connection.execute("SELECT * FROM resources WHERE id=?", (resource_id,)).fetchone()
                 if row is None:
                     raise KeyError("Source not found in this project")
-                resources.append(dict(row))
+                resources.append(self.library(project_id).reference(dict(row)))
             context = {"project_id": project_id, "idea": {"id": idea["id"], "text": idea["text"],
                         "conversation": json.loads(idea["conversation_json"])},
                        "resources": sorted(resources, key=lambda item: item["id"])}
             serialized = canonical(context)
             if len(serialized.encode("utf-8")) > 100_000:
-                raise ValueError("Selected context exceeds 100 KB; select fewer or shorter sources")
+                raise ValueError("Idea, conversation and source references exceed 100 KB")
             return {"snapshot": context, "context_sha256": digest(serialized)}
 
     def save_proposal(self, project_id, idea_id, body, context):
@@ -198,6 +211,7 @@ class ProjectStore:
         serialized = canonical(snapshot)
         if digest(serialized) != context["context_sha256"]:
             raise ValueError("Context hash mismatch")
+        self.library(project_id).agent_snapshot(snapshot)
         proposal_id = uuid.uuid4().hex
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -217,7 +231,7 @@ class ProjectStore:
 
     @staticmethod
     def _check_context(connection, snapshot):
-        idea = connection.execute("SELECT text,conversation_json FROM ideas WHERE id=?", (snapshot["idea"]["id"],)).fetchone()
+        idea = connection.execute("SELECT text,conversation_json FROM ideas WHERE id=? AND deleted_at IS NULL", (snapshot["idea"]["id"],)).fetchone()
         # Assistant proposal messages do not change the human request context.
         human = lambda messages: [message for message in messages if message.get("role") == "user"]
         if idea is None or idea["text"] != snapshot["idea"]["text"] or human(json.loads(idea["conversation_json"])) != human(snapshot["idea"]["conversation"]):
@@ -236,7 +250,7 @@ class ProjectStore:
     def reserve_plan(self, project_id, idea_id):
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT state FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            row = connection.execute("SELECT state FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if row is None:
                 raise KeyError("Idea not found in this project")
             if row["state"] in {"PLANNING", "APPROVED"}:
@@ -263,7 +277,9 @@ class ProjectStore:
             latest = connection.execute("SELECT MAX(version) FROM proposals WHERE idea_id=?", (idea_id,)).fetchone()[0]
             if proposal["version"] != version or version != latest or proposal["state"] != "NEEDS_CLARIFICATION":
                 raise StoreConflict("Clarification is stale or not waiting for an answer")
-            idea = connection.execute("SELECT state,conversation_json FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            idea = connection.execute("SELECT state,conversation_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
+            if idea is None:
+                raise StoreConflict('Khôi phục idea trước khi trả lời')
             if idea["state"] == "PLANNING":
                 raise StoreConflict("Wait for the current planner")
             conversation = json.loads(idea["conversation_json"])
@@ -278,7 +294,7 @@ class ProjectStore:
         title = idea_title(title) if title is not None else None
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT text,state,title FROM ideas WHERE id=?", (idea_id,)).fetchone()
+            row = connection.execute("SELECT text,state,title FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if row is None:
                 raise KeyError("Idea not found in this project")
             if row["text"] != expected_text or row["state"] in {"PLANNING", "APPROVED"}:
@@ -296,7 +312,7 @@ class ProjectStore:
         title = idea_title(title)
         with self.connection(project_id) as connection:
             connection.execute('BEGIN IMMEDIATE')
-            row = connection.execute('SELECT title FROM ideas WHERE id=?', (idea_id,)).fetchone()
+            row = connection.execute('SELECT title FROM ideas WHERE id=? AND deleted_at IS NULL', (idea_id,)).fetchone()
             if row is None:
                 raise KeyError('Idea not found in this project')
             if row['title'] != expected_title:
@@ -323,23 +339,28 @@ class ProjectStore:
             proposal = connection.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
             if proposal is None:
                 raise KeyError("Proposal not found in this project")
+            if not connection.execute('SELECT 1 FROM ideas WHERE id=? AND deleted_at IS NULL', (proposal['idea_id'],)).fetchone():
+                raise StoreConflict('Khôi phục idea trước khi duyệt proposal')
             if proposal["version"] != version or proposal["context_sha256"] != context_sha256:
                 raise StoreConflict("Approval version/hash is stale")
             intent_key = proposal_id + ":" + str(version)
             existing = connection.execute("SELECT * FROM runs WHERE intent_key=?", (intent_key,)).fetchone()
             if existing is not None and proposal["state"] == "APPROVED":
+                if existing['deleted_at']:
+                    raise StoreConflict('Khôi phục run đã xóa trước khi tiếp tục')
                 return dict(existing)
             latest = connection.execute("SELECT MAX(version) FROM proposals WHERE idea_id=?", (proposal["idea_id"],)).fetchone()[0]
             idea_state = connection.execute("SELECT state FROM ideas WHERE id=?", (proposal["idea_id"],)).fetchone()[0]
             if proposal["state"] != "AWAITING_APPROVAL" or latest != version or idea_state == "PLANNING":
                 raise StoreConflict("Proposal is not current and awaiting approval")
             self._check_context(connection, json.loads(proposal["context_snapshot_json"]))
+            self.library(project_id).agent_snapshot(json.loads(proposal['context_snapshot_json']))
             body = WorkingProposal.model_validate_json(proposal["body_json"])
             snapshot = json.loads(proposal["context_snapshot_json"])
             sources = {source["id"]: source for source in snapshot["resources"]}
             if any(ref not in sources for ref in body.data_refs):
                 raise StoreConflict("Proposal cites unselected source IDs")
-            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
+            candidates = connection.execute("SELECT id,state FROM runs WHERE deleted_at IS NULL AND state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
             blocking = next((row for row in candidates if not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
             if blocking:
                 raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) đang chặn lượt mới. Run đã kết thúc trên Kaggle không chặn duyệt proposal.")
@@ -361,12 +382,50 @@ class ProjectStore:
                 raise StoreConflict("Implementation requires an approved run")
             return {"body": json.loads(row["body_json"]), "snapshot": json.loads(row["context_snapshot_json"]), "context_sha256": row["context_sha256"]}
 
-    def history(self, project_id):
+    def history(self, project_id, include_deleted=False):
         with self.connection(project_id) as connection:
             return {"proposals": [dict(row) for row in connection.execute(
                 "SELECT id,idea_id,version,state,context_sha256,approved_at FROM proposals ORDER BY rowid DESC")],
                 "runs": [dict(row) for row in connection.execute(
-                "SELECT id,proposal_id,node_id,state,artifact_dir,error,report_path FROM runs ORDER BY rowid DESC")]}
+                "SELECT id,proposal_id,node_id,state,artifact_dir,error,report_path,deleted_at FROM runs" + ('' if include_deleted else ' WHERE deleted_at IS NULL') + " ORDER BY rowid DESC")]}
+
+    @staticmethod
+    def _can_delete_run(connection, run):
+        if run['state'] not in {'APPROVED', 'PREFLIGHT', 'FAILED', 'CANCELLED', 'COMPLETED', 'REMOTE_SUCCEEDED', 'REMOTE_FAILED'}:
+            return False
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='working_runs'").fetchone():
+            working = connection.execute('SELECT stop_confirmed FROM working_runs WHERE run_id=?', (run['id'],)).fetchone()
+            if working is not None:
+                return bool(working['stop_confirmed'])
+        identity = json.loads(run['identity_json']) if run['identity_json'] else None
+        return not identity or str(identity.get('status', '')).lower() in {'complete', 'completed', 'error', 'cancelled', 'canceled'}
+
+    def can_delete_run(self, project_id, run_id):
+        with self.connection(project_id) as connection:
+            row = connection.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError('Run not found in this project')
+            return self._can_delete_run(connection, row)
+
+    def set_deleted(self, project_id, kind, item_id, deleted=True):
+        if kind not in {'ideas', 'runs'}:
+            raise ValueError('Unknown item type')
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute(f'SELECT * FROM {kind} WHERE id=?', (item_id,)).fetchone()
+            if row is None:
+                raise KeyError('Item not found in this project')
+            if deleted and kind == 'ideas':
+                if row['state'] == 'PLANNING':
+                    raise StoreConflict('Chờ Codex lập proposal xong trước khi xóa idea')
+                runs = connection.execute('SELECT runs.* FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE proposals.idea_id=? AND runs.deleted_at IS NULL', (item_id,))
+                if any(not self._can_delete_run(connection, run) for run in runs):
+                    raise StoreConflict('Dừng hoặc đối soát run của idea trước khi xóa')
+            if deleted and kind == 'runs' and not self._can_delete_run(connection, row):
+                raise StoreConflict('Run đang hoạt động hoặc chưa xác nhận Kaggle dừng; chưa thể xóa')
+            timestamp = (row['deleted_at'] or datetime.now(timezone.utc).isoformat()) if deleted else None
+            connection.execute(f'UPDATE {kind} SET deleted_at=? WHERE id=?', (timestamp, item_id))
+            return {'id': item_id, 'deleted_at': timestamp}
 
     def run(self, project_id, run_id):
         with self.connection(project_id) as connection:
@@ -374,6 +433,7 @@ class ProjectStore:
             if row is None:
                 raise KeyError('Run not found in this project')
             item = dict(row)
+            item['can_delete'] = self._can_delete_run(connection, row)
             retry = connection.execute('SELECT parent_run_id FROM run_retries WHERE run_id=?', (run_id,)).fetchone()
             item['parent_run_id'] = retry['parent_run_id'] if retry else None
             attempts = [dict(a) for a in connection.execute('SELECT * FROM implementation_attempts WHERE run_id=? ORDER BY attempt', (run_id,))]
@@ -493,12 +553,14 @@ class ProjectStore:
             parent = connection.execute('SELECT runs.*,proposals.state AS proposal_state FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (parent_run_id,)).fetchone()
             if parent is None:
                 raise KeyError('Run not found in this project')
+            if parent['deleted_at']:
+                raise StoreConflict('Khôi phục run trước khi tạo lượt mới')
             eligible = {'FAILED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'COMPLETED'}
             if parent_run_id in idle_unknown_ids:
                 eligible.add('UNKNOWN')
             if parent['proposal_state'] != 'APPROVED' or parent['state'] not in eligible:
                 raise StoreConflict('Chỉ tạo lượt mới sau khi lượt cũ kết thúc hoặc Kaggle xác nhận account đang rảnh')
-            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('FAILED','CANCELLED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
+            candidates = connection.execute("SELECT id,state FROM runs WHERE deleted_at IS NULL AND state NOT IN ('FAILED','CANCELLED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
             if any(row['state'] != 'UNKNOWN' or row['id'] not in idle_unknown_ids for row in candidates):
                 raise StoreConflict('Một run khác đang hoạt động; hoàn tất run đó trước khi tạo lượt mới')
             run_id = uuid.uuid4().hex

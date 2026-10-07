@@ -28,17 +28,19 @@ export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,on
     {idea?.state === 'PLANNING' && <p role="status" className="alert">Codex đang đọc nguồn và lập proposal. Bạn vẫn có thể xem Library; chưa tạo code hoặc chạy notebook.</p>}
     {idea?.error && <p role="alert" className="alert error">{idea.error}</p>}
     {idea?.conversation.map((message,index) => <article className="conversation" key={index}><span className="source-meta">{message.role === 'user' ? 'Bạn' : `Codex · v${message.version}`}</span>
-      {message.role === 'user' ? <pre>{message.text}</pre> : <><p>{message.body.paraphrase}</p>{message.body.questions.length > 0 && <ol>{message.body.questions.map((question,i) => <li key={i}>{question}</li>)}</ol>}</>}
+      {message.role === 'user' ? <pre>{message.text}</pre> : message.body.questions.length === 1 ? <p>{message.body.questions[0]}</p>
+        : message.body.questions.length > 1 ? <ol>{message.body.questions.map((question,i) => <li key={i}>{question}</li>)}</ol>
+        : <p>{message.body.paraphrase}</p>}
     </article>)}
     {latest && <article className="proposal"><div className="panel-head"><h3>Proposal v{latest.version}</h3><span className="state-tag">{answered ? 'Đã trả lời' : latest.state}</span></div>
       <code className="source-id">{latest.id}</code>
-      <p>{latest.body.paraphrase}</p>
+      {!latest.body.needs_clarification && <p>{latest.body.paraphrase}</p>}
       {latest.state === 'NEEDS_CLARIFICATION' && <form className="stack" onSubmit={event => {event.preventDefault(); void onAnswer(latest,answer).then(() => setAnswer('')).catch(() => {});}}>
         <label>Trả lời câu hỏi<textarea value={answer} rows={5} maxLength={20000} required onChange={e => setAnswer(e.target.value)}/></label>
         <button className="primary" disabled={busy || !answer.trim()}>Lưu câu trả lời</button><small className="muted">Sau khi lưu, bấm “Lập proposal bằng Codex” để tạo phiên bản mới.</small></form>}
       {!latest.body.needs_clarification && <>
         <h3>Mục tiêu</h3><p>{latest.body.objective}</p>
-        <h3>Data và nguồn được pin</h3>{latest.context_snapshot.resources.map(source => <div className="context-source" key={source.id}><strong>{source.title}</strong><small>v{source.version} · {source.status}</small><code className="source-id">{source.id}</code></div>)}
+        <h3>Nguồn đã chọn</h3>{latest.context_snapshot.resources.map(source => <div className="context-source" key={source.id}><strong>{source.title}</strong><small>v{source.version} · {source.status}</small><code className="source-id">{source.file_path || source.id}</code></div>)}
         {latest.body.split && <><h3>Chia dữ liệu</h3><Details value={latest.body.split}/></>}
         {latest.body.metric && <><h3>Cách đánh giá</h3><Details value={latest.body.metric}/></>}
         <h3>Cách triển khai</h3><ol>{latest.body.implementation_steps?.map((step,i) => <li key={i}>{step}</li>)}</ol>

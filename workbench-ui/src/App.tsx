@@ -48,11 +48,11 @@ export default function App() {
     let cancelled = false;
     setLoading(true);
     Promise.all([api<Resource[]>(`/projects/${projectId}/resources`),
-      api<Idea[]>(`/projects/${projectId}/ideas`), api<History>(`/projects/${projectId}/history`),api<Proposal[]>(`/projects/${projectId}/proposals`)])
+      api<Idea[]>(`/projects/${projectId}/ideas?include_deleted=true`), api<History>(`/projects/${projectId}/history?include_deleted=true`),api<Proposal[]>(`/projects/${projectId}/proposals`)])
       .then(([r, i, h, p]) => {
         if (cancelled) return;
         setResources(r); setIdeas(i); setHistory(h); setProposals(p);
-        setIdeaId(current => i.some(idea => idea.id === current) ? current : '');
+        setIdeaId(current => i.some(idea => idea.id === current && !idea.deleted_at) ? current : '');
       }).catch(e => {if (!cancelled) setError(e.message);})
       .finally(() => {if (!cancelled) setLoading(false);});
     return () => {cancelled = true;};
@@ -72,7 +72,7 @@ export default function App() {
     const timer=window.setInterval(() => {
       if (inFlight)return;
       inFlight=true;
-      api<History>(`/projects/${projectId}/history`).then(latest => {
+      api<History>(`/projects/${projectId}/history?include_deleted=true`).then(latest => {
         if (!cancelled)setHistory(old => JSON.stringify(old)===JSON.stringify(latest) ? old : latest);
       }).catch(() => { /* Run log polling shows read failures; retain the last history snapshot. */ })
         .finally(() => {inFlight=false;});
@@ -132,12 +132,14 @@ export default function App() {
             <button disabled={busy || loading} onClick={() => void action(async () => {
               await api(`/projects/${projectId}/import-readiness`, 'POST'); setRevision(n => n+1); setNotice('Đã nhập nguồn competition đã đọc ở T01.');
             })}>Nhập nguồn T01</button></div>
-            <p className="muted">Lưu text hoặc liên kết kèm mô tả. Dataset được giữ dưới dạng reference.</p>
+            <p className="muted">Nguồn được lưu thành file riêng theo phiên bản. Agent nhận đường dẫn và tự tìm, đọc phần cần thiết.</p>
+            <code className="source-id">.workbench/projects/{projectId}/library/</code>
             {!resources.length && <p className="empty">Chưa có nguồn. Thêm nguồn ở form bên cạnh hoặc nhập bản đọc T01.</p>}
             {resources.map(resource => <article className="resource" key={resource.id}>
               <div className="panel-head"><h3>{resource.title}</h3><button disabled={busy} onClick={() => {setEditing(resource); setForm({kind: resource.kind,title: resource.title,url: resource.url || '',content: resource.content});}}>Sửa nguồn</button></div>
               <p className="source-meta">{resource.kind} · v{resource.version} · {statusText(resource.status)}</p>
               <code className="source-id">{resource.id}</code>
+              {resource.file_path && <div className="stack"><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>}
               {resource.url && <a href={resource.url} target="_blank" rel="noreferrer">Mở nguồn ↗</a>}
               <details><summary>Xem nội dung và dấu kiểm tra</summary><pre>{resource.content || 'Chưa cung cấp nội dung nguồn. App chưa tải trang này.'}</pre><code className="source-id">SHA256 {resource.content_sha256}</code></details>
             </article>)}
@@ -158,20 +160,27 @@ export default function App() {
             setIdeaId(idea.id); setIdeaText(''); setTitle(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea.');
           });}}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
           <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || loading || !title.trim() || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');setTitle('');}}>Hủy sửa idea</button>}</div></form>
-          <IdeaCards ideas={ideas} selectedId={ideaId} busy={busy} onSelect={selectIdea}
+          <IdeaCards key={projectId} ideas={ideas} selectedId={ideaId} busy={busy} onSelect={selectIdea}
+            onDelete={async id=>{await action(async()=>{
+              await api(`/projects/${projectId}/ideas/${id}`,'DELETE');setIdeaId('');setContext(null);setEditingIdea(null);setIdeaText('');setTitle('');
+              setRevision(n=>n+1);setNotice('Đã xóa idea khỏi danh sách. Có thể khôi phục trong mục Đã xóa.');
+            });}}
+            onRestore={async id=>{await action(async()=>{
+              await api(`/projects/${projectId}/ideas/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục idea.');
+            });}}
             onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);}}
             onRename={async (idea,newTitle)=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${idea.id}/title`,'PATCH',{title:newTitle,expected_title:idea.title});
               setRevision(n=>n+1);setNotice('Đã lưu tiêu đề idea.');
             });}}/>
-        </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn idea và đúng nguồn của project. Xem trước không gọi Codex; bấm lập proposal để gọi Codex thật.</p>
-          <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.map(idea => <option key={idea.id} value={idea.id}>{ideaTitle(idea)}</option>)}</select></label>
+        </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn nguồn để đưa đường dẫn file vào context. Agent tự tìm và đọc phần cần thiết; xem trước không gọi Codex.</p>
+          <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.filter(idea=>!idea.deleted_at).map(idea => <option key={idea.id} value={idea.id}>{ideaTitle(idea)}</option>)}</select></label>
             {resources.map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || loading || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
             <button className="primary" disabled={busy || loading || planning || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
               await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
             })}>Lập proposal bằng Codex</button>
-          </div>{context && <div className="context"><h3>Context snapshot</h3><code className="source-id">SHA256 {context.context_sha256}</code>{context.snapshot.resources.map(resource => <div className="context-source" key={resource.id}><strong>{resource.title}</strong><small>v{resource.version} · {statusText(resource.status)}</small><code className="source-id">{resource.id}</code></div>)}<details><summary>Xem toàn bộ context</summary><pre>{JSON.stringify(context.snapshot,null,2)}</pre></details></div>}
+          </div>{context && <div className="context"><h3>Context snapshot</h3><code className="source-id">SHA256 {context.context_sha256}</code>{context.snapshot.resources.map(resource => <div className="context-source" key={resource.id}><strong>{resource.title}</strong><small>v{resource.version} · {statusText(resource.status)}</small><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>)}<details><summary>Xem context và đường dẫn nguồn</summary><pre>{JSON.stringify(context.snapshot,null,2)}</pre></details></div>}
         </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={ideas.find(i => i.id === ideaId)} proposals={proposals} resources={resources} busy={busy || loading || planning} onAnswer={async (proposal,text) => {
           let saved = false;
           await action(async () => {await api(`/projects/${projectId}/ideas/${ideaId}/answer`,'POST',{proposal_id:proposal.id,version:proposal.version,text});setRevision(n => n+1);setNotice(`Đã lưu câu trả lời. Bấm “Tiếp tục lập proposal v${proposal.version + 1}” để Codex tiếp tục.`);saved = true;});
@@ -184,7 +193,14 @@ export default function App() {
         });}} onApprove={async proposal => {await action(async () => {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
-        {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} busy={busy || planning || implementing} onWorking={async (id,accelerator,ttl) => {
+        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} runs={history.runs} busy={busy || planning || implementing}
+          onDelete={async id=>{await action(async()=>{
+            await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRevision(n=>n+1);setNotice('Đã xóa run khỏi danh sách. Artifacts được giữ để khôi phục.');
+          });}}
+          onRestore={async id=>{await action(async()=>{
+            await api(`/projects/${projectId}/runs/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục run.');
+          });}}
+          onWorking={async (id,accelerator,ttl) => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl});setRevision(n => n+1);setNotice('Đã bắt đầu Working: mở Kaggle, viết và chạy code, thu kết quả rồi dừng phiên.');});
         }} onStop={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/stop`, 'POST');setRevision(n => n+1);setNotice('Đã yêu cầu dừng Working. Backend sẽ xác nhận phiên Kaggle đã dừng.');});

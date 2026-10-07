@@ -1,5 +1,6 @@
 """One user-started Working action: connect, implement, execute, collect, stop."""
 import asyncio
+import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -113,6 +114,7 @@ class WorkingService:
             if self.planner.worker.closed or self.planner.worker.state.get('status') == 'unknown':
                 raise StoreConflict('Agent worker chưa xác nhận kết thúc lượt trước')
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
+            await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
             # Validate editable prompt files before opening a paid Kaggle session.
             load_prompt('working.instructions')
             load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
@@ -156,7 +158,10 @@ class WorkingService:
 
     def _request(self, key, approved, descriptor, workdir):
         helper = str(Path(sys.executable))
-        data = {'approved': approved, 'remote_directory': descriptor['remote_directory'],
+        library = self.store.library(key[0])
+        library.stage(approved['snapshot'], workdir)
+        agent_approved = {**approved, 'snapshot': library.agent_snapshot(approved['snapshot'])}
+        data = {'approved': agent_approved, 'remote_directory': descriptor['remote_directory'],
                 'terminal_command': f'& "{helper}" .\\terminal.py' if sys.platform == 'win32' else shlex.quote(helper) + ' ./terminal.py',
                 'instructions': load_prompt('working.instructions').split('\n\n')}
         feedback = self.view.root(*key) / 'retry-feedback.json'
@@ -189,6 +194,11 @@ class WorkingService:
             terminal = await asyncio.to_thread(self.donor.open, run_id,
                 lambda text: self.records.append_log(*key, text))
             self.terminals[key] = terminal
+            for name, data in self.store.library(project_id).selected_files(approved['snapshot']):
+                receipt = await asyncio.to_thread(terminal.request, 'write', path=name,
+                                                 data=base64.b64encode(data).decode('ascii'))
+                if receipt.get('bytes') != len(data):
+                    raise ValueError('Selected Library file was not transferred completely')
             if key in self.stop_requests:
                 outcome = 'CANCELLED'
                 return
@@ -347,7 +357,7 @@ class WorkingService:
             detail['working'] = {key: record[key] for key in ('phase', 'accelerator', 'ttl_seconds', 'started_at', 'agent_called', 'stop_confirmed')}
             detail['working']['notebook_ref'] = descriptor.get('notebook_ref')
             detail['working']['summary'] = record['summary']
-            detail['can_retry'] = record['stop_confirmed']
+            detail['can_retry'] = record['stop_confirmed'] and not detail['deleted_at']
             detail['coder_calls'] = record['agent_called']
             root = self.view.root(project_id, run_id)
             for name in ('working-manifest.json', 'working-stop.json', 'report.md'):
@@ -360,8 +370,8 @@ class WorkingService:
             detail['artifacts'] = sorted(set(detail['artifacts']))
         return detail
 
-    def history(self, project_id):
-        history = self.view.history(project_id)
+    def history(self, project_id, include_deleted=False):
+        history = self.view.history(project_id, include_deleted=include_deleted)
         for run in history['runs']:
             detail = self.detail(project_id, run['id'])
             run.update(execution_mode=detail['execution_mode'], working=detail.get('working'),

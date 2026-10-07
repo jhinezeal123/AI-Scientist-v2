@@ -44,7 +44,7 @@ class Terminal:
         if action == 'manifest':
             return {'command_count': self.commands, 'files': [
                 {'path': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
-                for name, data in self.files.items()]}
+                for name, data in self.files.items() if name.startswith(('source/', 'output/'))]}
         if action == 'stop':
             self.stop_requested = True
             return {'stop_requested': True}
@@ -99,6 +99,9 @@ class Runtime:
         self.calls.append(request)
         assert request.role == 'mvp0_working'
         pinned = json.loads((request.workdir / 'working-request.json').read_text(encoding='utf-8'))
+        for source in pinned['approved']['snapshot']['resources']:
+            assert 'content' not in source
+            assert (request.workdir / source['file_path']).is_file()
         if pinned['approved']['body'].get('split'):
             assert pinned['approved']['body']['split']['seed'] == 42
         assert 'account' not in pinned and 'token' not in pinned
@@ -108,6 +111,9 @@ class Runtime:
                 {'Authorization': 'Bearer ' + access['token'], 'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=5) as response:
                 return json.load(response)
+        for source in pinned['approved']['snapshot']['resources']:
+            data = base64.b64decode(call('read', path=source['file_path'])['data'])
+            assert hashlib.sha256(data).hexdigest() == source['file_sha256']
         assert call('exec', command='fixture only', timeout=2)['returncode'] == 0
         call('write', path='source/workload.py', data=base64.b64encode(b'print("fixture")\n').decode())
         call('write', path='output/test.csv', data=base64.b64encode(b'id,prediction\n1,7\n').decode())

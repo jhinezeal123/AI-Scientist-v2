@@ -35,9 +35,10 @@ class PlanningService:
             request_id = uuid.uuid4().hex
             workdir = self.workspace_root / ".workbench/projects" / project_id / "planning" / request_id
             workdir.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(self.store.library(project_id).stage, context['snapshot'], workdir)
             (workdir / "context.json").write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
             request = self.bindings.request_type(request_id, "mvp0_plan", planning_prompt(context), workdir,
-                                                 timeout_seconds=180, max_output_bytes=300_000)
+                                                 timeout_seconds=300, max_output_bytes=300_000)
             if os.name == 'nt' and len(subprocess.list2cmdline([request.prompt]).encode('utf-16-le')) // 2 > 29_000:
                 raise ValueError("Selected context is too large for the Windows CLI argument limit")
             _, payload = await self.worker.run(request)

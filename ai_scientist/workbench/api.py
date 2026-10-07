@@ -136,8 +136,43 @@ def library_router(store, workspace_root):
         return imported
 
     @router.get("/projects/{project_id}/ideas")
-    def ideas(project_id: str):
-        return call(store.ideas, project_id)
+    def ideas(project_id: str, include_deleted: bool = False):
+        return call(store.ideas, project_id, include_deleted=include_deleted)
+
+    @router.get('/projects/{project_id}/library/{resource_id}/versions/{version}')
+    def source_file(project_id: str, resource_id: str, version: int):
+        from fastapi.responses import PlainTextResponse
+        call(store.project, project_id)
+        with store.connection(project_id) as connection:
+            if not connection.execute('SELECT 1 FROM resources WHERE id=?', (resource_id,)).fetchone():
+                raise HTTPException(404, 'Source not found in this project')
+        path = call(store.library(project_id).path, f'library/{resource_id}/v{version}/source.md')
+        if not path.is_file():
+            raise HTTPException(404, 'Source version not found')
+        return PlainTextResponse(path.read_text(encoding='utf-8'))
+
+    async def change_deleted(request, project_id, kind, item_id, deleted):
+        service = getattr(request.app.state, 'service', None)
+        if service:
+            async with service.lock:
+                return call(store.set_deleted, project_id, kind, item_id, deleted)
+        return call(store.set_deleted, project_id, kind, item_id, deleted)
+
+    @router.delete('/projects/{project_id}/ideas/{idea_id}')
+    async def delete_idea(project_id: str, idea_id: str, request: Request):
+        return await change_deleted(request, project_id, 'ideas', idea_id, True)
+
+    @router.post('/projects/{project_id}/ideas/{idea_id}/restore')
+    async def restore_idea(project_id: str, idea_id: str, request: Request):
+        return await change_deleted(request, project_id, 'ideas', idea_id, False)
+
+    @router.delete('/projects/{project_id}/runs/{run_id}')
+    async def delete_run(project_id: str, run_id: str, request: Request):
+        return await change_deleted(request, project_id, 'runs', run_id, True)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/restore')
+    async def restore_run(project_id: str, run_id: str, request: Request):
+        return await change_deleted(request, project_id, 'runs', run_id, False)
 
     @router.post("/projects/{project_id}/ideas", status_code=201)
     def add_idea(project_id: str, body: IdeaInput):
@@ -173,9 +208,9 @@ def library_router(store, workspace_root):
         return call(store.context_snapshot, project_id, body.idea_id, body.resource_ids)
 
     @router.get("/projects/{project_id}/history")
-    def history(project_id: str, request: Request):
+    def history(project_id: str, request: Request, include_deleted: bool = False):
         working = getattr(request.app.state, 'working', None)
-        return call(working.history if working else store.history, project_id)
+        return call(working.history if working else store.history, project_id, include_deleted=include_deleted)
 
     @router.post('/projects/{project_id}/runs/{run_id}/implement', status_code=202)
     async def implement(project_id: str, run_id: str, request: Request):

@@ -43,7 +43,7 @@ def test_persistence_isolation_and_resource_version(tmp_path):
         restarted.save_resource(a["id"], source("stale edit"), resource["id"], 1)
 
 
-def test_reference_only_and_bounded_context(tmp_path):
+def test_reference_only_and_file_references_keep_context_small(tmp_path):
     store = ProjectStore(tmp_path)
     project = store.create_project("A")["id"]
     ref = store.save_resource(project, source(""))
@@ -51,8 +51,12 @@ def test_reference_only_and_bounded_context(tmp_path):
     idea = store.save_idea(project, "idea")
     r1 = store.save_resource(project, source("a" * 60000))
     r2 = store.save_resource(project, source("b" * 60000))
-    with pytest.raises(ValueError, match="100 KB"):
-        store.context_snapshot(project, idea["id"], [r1["id"], r2["id"]])
+    context = store.context_snapshot(project, idea['id'], [r1['id'], r2['id']])
+    assert len(json.dumps(context).encode()) < 3000
+    assert all('content' not in ref for ref in context['snapshot']['resources'])
+    for ref in context['snapshot']['resources']:
+        assert ref['file_bytes'] > 60000
+        assert store.library(project).path(ref['file_path']).is_file()
     with pytest.raises(ValueError, match="distinct"):
         store.context_snapshot(project, idea["id"], [ref["id"], ref["id"]])
     with pytest.raises(KeyError):

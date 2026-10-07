@@ -33,7 +33,7 @@ class RunView:
         run['artifacts'] = sorted(set(run['artifacts']) | set(artifact_paths(root)))
         run['ready'] = run['state'] == 'PREFLIGHT' and bool(run['attempts']) and bool(run['attempts'][-1]['checks'] and run['attempts'][-1]['checks']['pass'])
         run['coder_calls'] = sum(attempt['origin'] == 'CODEX' for attempt in run['attempts'])
-        run['can_retry'] = run['state'] in {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'} or (run['state'] == 'UNKNOWN' and self.allow_unknown_retry())
+        run['can_retry'] = not run['deleted_at'] and (run['state'] in {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'} or (run['state'] == 'UNKNOWN' and self.allow_unknown_retry()))
         approved = self.store.approved_snapshot(project_id, run_id)
         run['purpose'] = approved['body']['objective']
         run['expected_outputs'] = approved['body'].get('expected_outputs', [])
@@ -60,8 +60,8 @@ class RunView:
         run.pop('node_json', None)
         return run
 
-    def history(self, project_id):
-        history = self.store.history(project_id)
+    def history(self, project_id, include_deleted=False):
+        history = self.store.history(project_id, include_deleted=include_deleted)
         for item in history['runs']:
             detail = self.detail(project_id, item['id'])
             approved = self.store.approved_snapshot(project_id, item['id'])

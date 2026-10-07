@@ -2,7 +2,7 @@ import {useCallback, useEffect, useState} from 'react';
 import {api, History, Working} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 
-type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;
+type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   execution_mode:'ssh'|'legacy';working?:Working;
   can_retry:boolean;parent_run_id:string|null;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
@@ -12,16 +12,19 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;origin:'CODEX'|'REUSE';
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, runs, busy, onWorking, onStop, onReconcile, onRetry}: {
+export default function RunPanel({projectId, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore}: {
   projectId:string;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
-  onRetry:(id:string)=>Promise<string|undefined>}) {
+  onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>}) {
+  const [showDeleted,setShowDeleted]=useState(false);
+  const visible=runs.filter(run=>Boolean(run.deleted_at)===showDeleted);
+  const deletedCount=runs.filter(run=>run.deleted_at).length;
   const [details,setDetails] = useState<RunDetail[]>([]);
   const [error,setError] = useState('');
   const [accelerator,setAccelerator] = useState('cpu');
   const [ttl,setTtl] = useState(1800);
   const [selection,setSelection] = useState<{projectId:string;id:string}|null>(null);
-  const selectedId = selection?.projectId === projectId && runs.some(run => run.id === selection.id)
+  const selectedId = selection?.projectId === projectId && visible.some(run => run.id === selection.id && !run.deleted_at)
     ? selection.id : null;
   const [observations,setObservations] = useState<Record<string,string>>({});
   const onObserved=useCallback((status:string) => {
@@ -45,26 +48,32 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
     return () => {cancelled = true;};
   }, [projectId,runs]);
   return <section className="panel run-panel"><div className="panel-head"><h2>Lần chạy của project</h2>
-    {!!runs.length && <span className="muted">{runs.length} run</span>}</div>
-    {!runs.length && <p className="empty">Chưa có lần chạy. Lập và duyệt proposal ở Idea để tạo run.</p>}
+    <button type="button" disabled={busy} onClick={()=>{setShowDeleted(!showDeleted);setSelection(null);}}>
+      {showDeleted ? 'Run đã lưu' : `Đã xóa (${deletedCount})`}</button>
+    {!!visible.length && <span className="muted">{visible.length} run</span>}</div>
+    {!visible.length && <p className="empty">{showDeleted ? 'Chưa có run đã xóa.' : 'Chưa có lần chạy. Lập và duyệt proposal ở Idea để tạo run.'}</p>}
     {error && <p role="alert">{error}</p>}
-    {!!runs.length && <div className="run-cards" aria-label="Danh sách run">
-      {runs.map(run => <button type="button" key={run.id}
+    {!!visible.length && <div className="run-cards" aria-label={showDeleted ? 'Run đã xóa' : 'Danh sách run'}>
+      {visible.map(run => <button type="button" key={run.id} disabled={!!run.deleted_at && busy}
+        aria-label={run.deleted_at ? `Khôi phục Run ${run.id.slice(0,8)}` : undefined}
         className={`run-card ${selectedId === run.id ? 'selected' : ''}`}
         aria-expanded={selectedId === run.id} aria-controls="run-detail"
-        onClick={() => setSelection(selectedId === run.id ? null : {projectId,id:run.id})}>
+        onClick={() => run.deleted_at ? void onRestore(run.id) : setSelection(selectedId === run.id ? null : {projectId,id:run.id})}>
         <span className="run-alias">Run {run.id.slice(0,8)}</span>
         <span className="run-card-status" data-state={observations[run.id] || run.state}>
-          <span className="run-status-dot" aria-hidden="true"/>{run.state === 'COLLECTING' && details.find(item => item.id === run.id)?.collection?.phase === 'retry_exhausted'
+          <span className="run-status-dot" aria-hidden="true"/>{run.deleted_at ? 'Đã xóa · bấm để khôi phục' : run.state === 'COLLECTING' && details.find(item => item.id === run.id)?.collection?.phase === 'retry_exhausted'
             ? 'Report cần xử lý' : labels[observations[run.id] || run.state] || observations[run.id] || run.state}
         </span>
       </button>)}
     </div>}
-    {!!runs.length && !selectedId && <p className="muted run-hint">Chọn một run để xem chi tiết và thao tác.</p>}
+    {!!visible.length && !selectedId && !showDeleted && <p className="muted run-hint">Chọn một run để xem chi tiết và thao tác.</p>}
     {selectedId && !details.some(run => run.id === selectedId) && !error && <p role="status" className="muted">Đang tải chi tiết run…</p>}
     {details.filter(run => run.id === selectedId).map(run => <article className="resource run-detail" id="run-detail" key={run.id} aria-label={`Chi tiết Run ${run.id.slice(0,8)}`}>
       <div className="panel-head"><h3>Run {run.id.slice(0,8)}</h3>
-        <button type="button" onClick={() => setSelection(null)}>Đóng chi tiết</button></div>
+        <div className="actions"><button type="button" className="danger-button" disabled={busy || !run.can_delete}
+          title={run.can_delete ? 'Có thể khôi phục trong mục Đã xóa' : 'Dừng hoặc đối soát Kaggle trước khi xóa'}
+          onClick={()=>void onDelete(run.id)}>Xóa run</button>
+        <button type="button" onClick={() => setSelection(null)}>Đóng chi tiết</button></div></div>
       <div className="panel-head"><code className="source-id">{run.id}</code><span className="state-tag">{observations[run.id] || run.state}</span></div>
       {run.state === 'APPROVED' && <p>Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}

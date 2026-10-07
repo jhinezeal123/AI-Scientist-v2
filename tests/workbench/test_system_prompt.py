@@ -25,7 +25,8 @@ def test_packaged_working_aliases_are_complete():
     agent = system_prompt.load_prompt('working.agent', workdir='fixture')
     instructions = system_prompt.load_prompt('working.instructions').split('\n\n')
     assert 'Request workspace: fixture\nRead working-request.json, then perform the approved work through terminal.py.' in agent
-    assert len(instructions) == 11
+    assert len(instructions) == 12
+    assert any('approved.snapshot.resources[*].file_path' in instruction for instruction in instructions)
     assert any('do not print full package inventories' in item for item in instructions)
 
 
