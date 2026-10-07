@@ -80,7 +80,12 @@ thực hiện bước này. Khóa SSH và tunnel sinh riêng cho mỗi lượt, 
 
 Trong cửa sổ kiểm 10 giây, chưa thiết lập được đường UDP direct. Ping đi qua `DERP(1)`,
 RTT khoảng `288–300 ms`. Lệnh SSH mở kết nối mới mất khoảng `3.7–4.7 s` sau lần đầu.
-Terminal giữ kết nối đã hoạt động. Chưa đủ số liệu để kết luận tốc độ tải file lớn.
+Key của lượt này chứa relay Tokyo (`304 / tok`, `tc304a.ipn.dev`). `DERP(1)` là mã
+nội bộ được gán lại khi giải mã địa chỉ có nhúng thông tin relay. Generator hiện dùng
+`--region=tok` để mọi phiên mới cố định Tokyo, thay vì chọn region gần nhất lúc tạo key.
+Terminal `shell` giữ kết nối đã hoạt động; các thao tác riêng trong script kiểm tra
+mở SSH mới, chưa dùng một kết nối xuyên suốt cả lượt. Chưa đủ số liệu để kết luận
+tốc độ tải file lớn.
 
 ### Endpoint status của SDK 0.1.37 trả 404
 

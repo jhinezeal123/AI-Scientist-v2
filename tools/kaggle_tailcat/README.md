@@ -16,6 +16,9 @@ SSH server có thời hạn; trong cùng session có thể sửa/chạy code nhi
 - Account cần có Internet cho notebook và quyền đọc competition Soil.
 
 Script tải Tailcat **v0.7.0** cho Windows và Linux, kiểm SHA-256 của archive.
+Mọi phiên tạo bằng `prepare` cố định relay **Tokyo** (`--region=tok`), nhúng thông tin
+relay vào key và địa chỉ để cả local lẫn Kaggle dùng cùng relay, không tự chọn region khác.
+Nếu thiết lập được kết nối direct, Tailcat vẫn có thể truyền dữ liệu trực tiếp giữa hai máy.
 Proxy account được dùng lại ở port 80; nếu chưa có, script chạy riêng `proxy.py`
 của donor ở nền. Không cần khởi động MCP server để dùng các lệnh bên dưới.
 
@@ -66,6 +69,10 @@ Một lệnh remote riêng lẻ hoặc kiểm đường truyền:
 ```
 
 `network` có thể báo không đạt đường direct sau 10 giây trong khi SSH qua DERP vẫn dùng được.
+
+`shell` giữ một kết nối SSH cho đến khi thoát terminal. Các lệnh `ssh`, `connect`,
+`probe` và `stop` hiện mở kết nối riêng cho từng thao tác; prototype chưa giữ một
+kết nối SSH chung từ lúc bắt đầu đến lúc kết thúc lượt.
 
 ## State và lỗi
 

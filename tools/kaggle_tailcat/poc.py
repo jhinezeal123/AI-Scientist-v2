@@ -63,7 +63,7 @@ def prepare(args):
     binary = tailcat(args.state_root)
     server_key = root / "server.private.json"
     generated = subprocess.run(
-        [str(binary), "genkey", "--key", str(server_key), "--fixed-region", "--embed-derp-map"],
+        [str(binary), "genkey", "--key", str(server_key), "--region=tok", "--embed-derp-map"],
         capture_output=True, text=True, timeout=45, check=True,
     )
     addresses = re.findall(r"\btc[A-Za-z0-9_-]{40,}", generated.stdout + generated.stderr)
