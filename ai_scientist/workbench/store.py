@@ -334,7 +334,7 @@ class ProjectStore:
             sources = {source["id"]: source for source in snapshot["resources"]}
             if any(ref not in sources or sources[ref]["status"] == "reference_only" for ref in body.data_refs):
                 raise StoreConflict("Proposal cites unread or unselected source IDs; clarify before approval")
-            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('COMPLETED','FAILED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
+            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
             blocking = next((row for row in candidates if not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
             if blocking:
                 raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) đang chặn lượt mới. Run đã kết thúc trên Kaggle không chặn duyệt proposal.")
@@ -480,12 +480,12 @@ class ProjectStore:
             parent = connection.execute('SELECT runs.*,proposals.state AS proposal_state FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?', (parent_run_id,)).fetchone()
             if parent is None:
                 raise KeyError('Run not found in this project')
-            eligible = {'FAILED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'COMPLETED'}
+            eligible = {'FAILED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'COMPLETED'}
             if parent_run_id in idle_unknown_ids:
                 eligible.add('UNKNOWN')
             if parent['proposal_state'] != 'APPROVED' or parent['state'] not in eligible:
                 raise StoreConflict('Chỉ tạo lượt mới sau khi lượt cũ kết thúc hoặc Kaggle xác nhận account đang rảnh')
-            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('FAILED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
+            candidates = connection.execute("SELECT id,state FROM runs WHERE state NOT IN ('FAILED','CANCELLED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
             if any(row['state'] != 'UNKNOWN' or row['id'] not in idle_unknown_ids for row in candidates):
                 raise StoreConflict('Một run khác đang hoạt động; hoàn tất run đó trước khi tạo lượt mới')
             run_id = uuid.uuid4().hex

@@ -7,5 +7,8 @@
   "kaggle_account_alias": "jhin_access_token.txt",
   "kaggle_username": "huynhtrungcuong",
   "workspace_root": "D:/Documents/AI-Scientist-v2",
-  "allow_new_run_after_idle_check": true
+  "allow_new_run_after_idle_check": true,
+  "working_seconds": 900,
+  "kaggle_session_seconds": 1800,
+  "kaggle_accelerator": "cpu"
 }

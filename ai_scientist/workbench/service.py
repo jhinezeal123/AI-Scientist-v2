@@ -81,7 +81,7 @@ class PlanningService:
                 # An idempotent repeat approval returns its existing run.
                 candidates = [run for run in history['runs'] if not (project['id'] == project_id and run['proposal_id'] == proposal_id)]
                 unknown_ids.extend(run['id'] for run in candidates if run['state'] == 'UNKNOWN')
-                allowed = {'COMPLETED','FAILED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
+                allowed = {'COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
                 if self.idle_check is not None:
                     allowed.add('UNKNOWN')
                 blocking = next((run for run in candidates if run['state'] not in allowed), None)

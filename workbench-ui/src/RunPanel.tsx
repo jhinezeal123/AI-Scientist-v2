@@ -1,8 +1,9 @@
 import {useCallback, useEffect, useState} from 'react';
-import {api, History} from './api';
+import {api, History, Working} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;
+  execution_mode:'ssh'|'legacy';working?:Working;
   can_retry:boolean;parent_run_id:string|null;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
   result_metric?:{name:string;direction:string;final_value:number;best_value:number};
@@ -11,12 +12,14 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;origin:'CODEX'|'REUSE';
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onReconcile, onRetry}: {
-  projectId:string;runs:History['runs'];busy:boolean;onStart:(id:string)=>Promise<void>;
-  onSubmit:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
+export default function RunPanel({projectId, runs, busy, onWorking, onStop, onReconcile, onRetry}: {
+  projectId:string;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
+  onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>}) {
   const [details,setDetails] = useState<RunDetail[]>([]);
   const [error,setError] = useState('');
+  const [accelerator,setAccelerator] = useState('cpu');
+  const [ttl,setTtl] = useState(1800);
   const [selection,setSelection] = useState<{projectId:string;id:string}|null>(null);
   const selectedId = selection?.projectId === projectId && runs.some(run => run.id === selection.id)
     ? selection.id : null;
@@ -26,10 +29,11 @@ export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onRe
     setObservations(old => old[selectedId]===status ? old : {...old,[selectedId]:status});
   },[selectedId]);
   const labels:Record<string,string> = {
-    APPROVED:'Đã duyệt', IMPLEMENTING:'Đang tạo code', PREFLIGHT:'Sẵn sàng gửi',
+    APPROVED:'Sẵn sàng Working', IMPLEMENTING:'Đang tạo code', PREFLIGHT:'Sẵn sàng Working',
     SUBMITTING:'Đang gửi Kaggle', UNKNOWN:'Cần đối soát', FAILED:'Có lỗi',
     REMOTE_RUNNING:'Kaggle đang chạy', REMOTE_SUCCEEDED:'Kaggle hoàn tất',
-    REMOTE_FAILED:'Kaggle có lỗi', COMPLETED:'Hoàn tất',COLLECTING:'Đang hoàn tất kết quả',RUNNING:'Kaggle đang chạy',QUEUED:'Đang xếp hàng',STARTING:'Đang khởi động',
+    REMOTE_FAILED:'Kaggle có lỗi', COMPLETED:'Hoàn tất',COLLECTING:'Đang hoàn tất kết quả',RUNNING:'Kaggle đang chạy',QUEUED:'Đang xếp hàng',STARTING:'Đang mở Kaggle',
+    WORKING:'Đang Working',STOPPING:'Đang dừng Kaggle',CANCELLED:'Đã dừng',
   };
   useEffect(() => {
     let cancelled = false;
@@ -62,21 +66,40 @@ export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onRe
       <div className="panel-head"><h3>Run {run.id.slice(0,8)}</h3>
         <button type="button" onClick={() => setSelection(null)}>Đóng chi tiết</button></div>
       <div className="panel-head"><code className="source-id">{run.id}</code><span className="state-tag">{observations[run.id] || run.state}</span></div>
-      {run.state === 'APPROVED' && <p>Proposal đã duyệt. Tạo code và notebook từ snapshot đã pin; chưa gửi Kaggle.</p>}
+      {run.state === 'APPROVED' && <p>Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.</p>}
       {run.state === 'IMPLEMENTING' && <p role="status">Codex đang tạo code / kiểm preflight… Bạn có thể chuyển tab.</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
-      {!run.identity && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <button className="primary"
-        disabled={busy}
-        onClick={() => void onStart(run.id)}>{run.state === 'APPROVED' && !run.attempts.length ? 'Tạo code và notebook bằng Codex' : 'Tạo lại / sửa code bằng Codex'}</button>}
-      <p className="muted">Đã gọi coder {run.coder_calls} lượt · Đã gửi Kaggle {run.identity?.submit_attempts || 0} lượt trong run này. Không giới hạn tổng số lượt bạn yêu cầu.</p>
+      {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
+        <h3>Working</h3>
+        <p>Mở phiên Kaggle, viết và chạy code qua SSH, lưu kết quả rồi dừng phiên.</p>
+        <label>Phần cứng<select value={accelerator} disabled={busy} onChange={e=>setAccelerator(e.target.value)}>
+          <option value="cpu">CPU</option><option value="NvidiaT4">GPU · T4 x2</option>
+          <option value="TpuV5E8">TPU · v5e-8</option><option value="TpuV6E8">TPU · v6e-8</option>
+        </select></label>
+        <label>Thời gian tối đa của phiên (phút)<input type="number" min="1" max="720" step="1" value={ttl/60}
+          disabled={busy} onChange={e=>setTtl(Number(e.target.value)*60)}/></label>
+        <button className="primary" disabled={busy || !Number.isInteger(ttl) || ttl<60 || ttl>43200}
+          onClick={()=>void onWorking(run.id,accelerator,ttl)}>Bắt đầu Working</button>
+      </div>}
+      {run.working && <div className="context"><h3>Phiên Working</h3>
+        <p>{run.working.accelerator === 'NvidiaT4' ? 'GPU · T4 x2' : run.working.accelerator} · tối đa {run.working.ttl_seconds/60} phút</p>
+        <p role="status">{run.working.stop_confirmed ? 'Backend đã xác nhận Kaggle dừng.'
+          : run.state==='STARTING' ? 'Đang mở Kaggle và kết nối SSH…'
+          : run.state==='STOPPING' ? 'Đang chờ xác nhận Kaggle dừng. Kết quả chưa được đánh dấu hoàn tất.'
+          : 'Agent đang viết và thực thi code trên Kaggle qua cùng một kết nối SSH.'}</p>
+        {run.working.notebook_ref && <a href={`https://www.kaggle.com/code/${run.working.notebook_ref}`} target="_blank" rel="noreferrer">Mở phiên trên Kaggle ↗</a>}
+        {!run.working.stop_confirmed && <p><button onClick={()=>void onStop(run.id)}>
+          {run.state==='STOPPING' ? 'Yêu cầu dừng / kiểm tra lại' : 'Dừng Working'}</button></p>}
+        {run.working.summary && <><h3>Tóm tắt công việc</h3><p>{run.working.summary.summary}</p></>}
+      </div>}
+      <p className="muted">Mỗi lượt do bạn yêu cầu. Không giới hạn tổng số lượt Working.</p>
       {run.parent_run_id && <p className="muted">Tạo từ Run {run.parent_run_id.slice(0,8)} · dùng cùng proposal đã duyệt.</p>}
       {run.can_retry && <div className="stack"><button disabled={busy} onClick={() => void onRetry(run.id).then(id => {
         if (id)setSelection({projectId,id});
-      })}>Tạo lượt chạy mới</button><small className="muted">Dùng lại code đã lưu và proposal đã duyệt. Trong run mới, bạn chọn sửa code hoặc gửi Kaggle.</small></div>}
+      })}>Tạo lượt Working mới</button><small className="muted">Dùng cùng proposal đã duyệt và tham khảo kết quả cũ. Bấm Working để bắt đầu lượt mới.</small></div>}
       {run.collection && <p className="muted">Report: {run.collection.report_attempts}/{run.collection.report_limit} lượt đã cấp.</p>}
       {run.state === 'COLLECTING' && run.collection?.phase === 'retry_exhausted' && <p role="alert" className="alert error">Outputs đã được xác minh. Report đã hết lượt thử cho phép; cần xử lý lỗi và duyệt thêm lượt report để tiếp tục.</p>}
       {run.state === 'SUBMITTING' && <p role="status">Đang gửi notebook qua MCP và xác minh phiên chạy…</p>}
-      {run.ready && <button className="primary" disabled={busy} onClick={() => void onSubmit(run.id)}>Gửi notebook và chạy trên Kaggle</button>}
       {run.identity && <div className="context"><h3>Notebook trên Kaggle</h3>
         <a href={`https://www.kaggle.com/code/${run.identity.kernel_ref}${run.identity.script_version_id ? `?scriptVersionId=${run.identity.script_version_id}` : ''}`} target="_blank" rel="noreferrer">{run.identity.kernel_ref} ↗</a>
         <p>Account: {run.identity.username} · Version: {run.identity.version ?? 'chưa xác minh'}</p>
@@ -91,6 +114,7 @@ export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onRe
         {run.result_metric && <p>Kết quả đo được: {run.result_metric.name} · {run.result_metric.direction} · cuối {run.result_metric.final_value} · tốt nhất {run.result_metric.best_value}</p>}
       </div>
       {run.identity?.session_id && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved}/>}
+      {run.working && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved} working/>}
       {run.attempts.map(attempt => <div className="context" key={attempt.attempt}>
         <h3>Bản code {attempt.attempt} · {attempt.origin === 'REUSE' ? 'Dùng lại code' : 'Codex'} · {attempt.state}</h3>
         {attempt.session_id && <code className="source-id">Codex session {attempt.session_id}</code>}
@@ -99,7 +123,6 @@ export default function RunPanel({projectId, runs, busy, onStart, onSubmit, onRe
           {attempt.checks.errors.map(item => <p role="alert" key={item}>{item}</p>)}</>}
         {attempt.error && <p>{attempt.error}</p>}
       </div>)}
-      {run.ready && <p className="alert">Notebook đã qua preflight. Bấm gửi để chạy lượt này trên Kaggle. Sau khi kết thúc, dùng “Tạo lượt chạy mới” để chạy tiếp; mount và model cần được xác nhận khi chạy thật.</p>}
       {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
       {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><div className="stack">{run.artifacts.map(name =>
         <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}</div></>}

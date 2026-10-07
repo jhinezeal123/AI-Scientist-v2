@@ -21,10 +21,15 @@ class WorkbenchConfig(BaseModel):
     workspace_root: Path
     allow_new_run_after_idle_check: bool = False
     shutdown_seconds: float = Field(default=15, ge=1, le=60)
+    working_seconds: int = Field(default=900, ge=60)
+    kaggle_session_seconds: int = Field(default=1800, ge=60)
+    kaggle_accelerator: str = 'cpu'
 
     @classmethod
     def load(cls, path: Path):
         config = cls.model_validate_json(path.read_text(encoding="utf-8"))
+        from .codex_executable import resolve_codex_executable
+        config.codex_executable = resolve_codex_executable(config.codex_executable)
         for name in ("donor_root", "workspace_root"):
             value = getattr(config, name)
             if not value.is_absolute() or not value.is_dir():
@@ -116,7 +121,15 @@ class ReportPayload(StrictModel):
     evidence_refs: list[str]
 
 
-ROLE_PAYLOADS = {"mvp0_plan": PlanPayload, "mvp0_code": CodePayload, "mvp0_report": ReportPayload}
+class WorkingPayload(StrictModel):
+    succeeded: bool
+    summary: str = Field(min_length=1, max_length=20_000)
+    limitations: list[str] = Field(max_length=30)
+    output_files: list[str] = Field(max_length=200)
+
+
+ROLE_PAYLOADS = {"mvp0_plan": PlanPayload, "mvp0_code": CodePayload, "mvp0_report": ReportPayload,
+                 "mvp0_working": WorkingPayload}
 
 
 def validate_result(role, result):

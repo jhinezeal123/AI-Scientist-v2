@@ -68,6 +68,11 @@ class RetryInput(StrictModel):
     request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
+class WorkingInput(StrictModel):
+    accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
+    ttl_seconds: int = Field(default=1800, ge=60, le=43200)
+
+
 def library_router(store, workspace_root):
     router = APIRouter(prefix="/api")
 
@@ -168,38 +173,54 @@ def library_router(store, workspace_root):
 
     @router.get("/projects/{project_id}/history")
     def history(project_id: str, request: Request):
-        implementation = getattr(request.app.state, 'implementation', None)
+        implementation = getattr(request.app.state, 'working', None) or getattr(request.app.state, 'implementation', None)
         operation = implementation.history if implementation else store.history
         return call(operation, project_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/implement', status_code=202)
     async def implement(project_id: str, run_id: str, request: Request):
+        if call(request.app.state.working.record, project_id, run_id):
+            raise HTTPException(409, 'Run này dùng Working; tạo lượt mới sau khi Kaggle đã dừng')
         return await async_call(request.app.state.implementation.start, project_id, run_id)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/working', status_code=202)
+    async def working(project_id: str, run_id: str, body: WorkingInput, request: Request):
+        return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/stop', status_code=202)
+    async def stop_working(project_id: str, run_id: str, request: Request):
+        return await async_call(request.app.state.working.stop, project_id, run_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}')
     def run_detail(project_id: str, run_id: str, request: Request):
-        return call(request.app.state.implementation.detail, project_id, run_id)
+        return call(request.app.state.working.detail, project_id, run_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/retry', status_code=201)
     async def retry_run(project_id: str, run_id: str, body: RetryInput, request: Request):
-        return await async_call(request.app.state.implementation.retry, project_id, run_id, body.request_id)
+        return await async_call(request.app.state.working.retry, project_id, run_id, body.request_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}/logs')
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):
+        if call(request.app.state.working.record, project_id, run_id):
+            return call(request.app.state.working.records.logs, project_id, run_id, cursor, limit)
         return call(request.app.state.monitor.cache.delta, project_id, run_id, cursor, limit)
 
     @router.post('/projects/{project_id}/runs/{run_id}/submit', status_code=202)
     async def submit(project_id: str, run_id: str, request: Request):
+        if call(request.app.state.working.record, project_id, run_id):
+            raise HTTPException(409, 'Working đã mở phiên Kaggle; không submit lại notebook này')
         return await async_call(request.app.state.submission.start, project_id, run_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/reconcile')
     async def reconcile(project_id: str, run_id: str, request: Request):
+        if call(request.app.state.working.record, project_id, run_id):
+            return await async_call(request.app.state.working.stop, project_id, run_id)
         return await async_call(request.app.state.submission.reconcile, project_id, run_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}')
     def artifact(project_id: str, run_id: str, name: str, request: Request):
         from fastapi.responses import FileResponse, PlainTextResponse
-        detail = call(request.app.state.implementation.detail, project_id, run_id)
+        detail = call(request.app.state.working.detail, project_id, run_id)
         if name not in detail['artifacts']:
             raise HTTPException(404, 'Artifact not found')
         root = call(request.app.state.implementation.root, project_id, run_id)

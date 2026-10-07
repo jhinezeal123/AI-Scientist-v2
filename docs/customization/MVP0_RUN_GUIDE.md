@@ -5,18 +5,18 @@
 GUI hiện có ba tab: **Library**, **Idea**, **Run**. Theo yêu cầu user, đã bỏ tab History;
 chọn card trong Run để xem log, kết quả, report và artifacts của lần chạy đã lưu.
 
-### Số lượt code và chạy Kaggle (cập nhật 2026-10-07)
+### Working (cập nhật 2026-10-07)
 
-Không giới hạn tổng số lượt do bạn yêu cầu. Trong Run, **Tạo lại / sửa code bằng Codex**
-gọi coder một lần cho mỗi lần bấm; nếu lỗi, bấm tiếp khi muốn sửa. Có thể tạo lại code
-đã PASS trước khi gửi. Sau khi run kết thúc, bấm **Tạo lượt chạy mới** để dùng lại code
-và proposal đã duyệt; chọn sửa code hoặc **Gửi notebook và chạy trên Kaggle** trong run mới.
-Việc dùng lại code không gọi Codex. Mỗi lần chạy có ID, notebook, log và artifacts riêng.
+Code và submit đã gộp thành **Bắt đầu Working**. Backend mở Kaggle, cho Codex local
+viết và thực thi code qua cùng một terminal SSH, thu files/report rồi dừng phiên.
+**Hoàn tất** chỉ được ghi sau khi Kaggle xác nhận dừng. Có thể bấm **Dừng Working**;
+restart backend tiếp tục dừng/đối soát, không tự gọi lại agent hay submit notebook.
 
-Nếu run cũ UNKNOWN, app kiểm tra Kaggle không còn phiên đang chạy trước khi cho tạo lượt mới.
-Request lặp của cùng một lần gửi không tự submit lại. Ngân sách thời gian/dung lượng vẫn
-áp dụng cho từng execution. Các đoạn `coder1/2`, `submit1/1` phía dưới là bằng chứng lịch sử
-của T01–T09 trước thay đổi này, không phải quota hiện hành.
+Không giới hạn tổng số lượt user yêu cầu. Sau khi lượt kết thúc, bấm **Tạo lượt Working mới**
+để dùng cùng proposal và tham khảo code/kết quả cũ. Lượt mới chỉ chạy khi bạn bấm Working.
+Các đoạn coder/submit/telemetry phía dưới là bằng chứng lịch sử T01–T09.
+
+Xem [hướng dẫn Working qua SSH](WORKING_SSH.md) để biết trạng thái, config và phạm vi kiểm thử.
 
 Xem [research framework và data adapter](D:/Documents/AI-Scientist-v2/docs/customization/TRAINING_FRAMEWORK_RESEARCH.md)
 để phân biệt lỗi notebook, đường dẫn dữ liệu và vòng training.
@@ -61,9 +61,8 @@ Sửa đường dẫn tuyệt đối trong `.workbench/config.local.json` cho m�
 `codex_model`, `codex_reasoning_effort`, `kaggle_account_alias` và `kaggle_username`.
 Example hiện dùng `gpt-6-luna`/`max`, alias `jhin_access_token.txt`, username
 `huynhtrungcuong`. Alias là tên account đã đăng ký trong donor, không phải token.
-Executable hiện trỏ tới bản Codex npm trong đường dẫn vendor cố định, không dùng thư mục
-version của desktop app. Nếu package layout thay đổi, cập nhật path rồi khởi động lại;
-config validation từ chối path không tồn tại trước khi mở app.
+Backend tìm lại Codex CLI khi đường dẫn cũ không còn tồn tại sau cập nhật, qua PATH
+và bản desktop hiện có. Model/reasoning/account vẫn lấy từ config bạn đã chọn.
 
 ### Đi hết pipeline bằng GUI
 
@@ -80,20 +79,12 @@ config validation từ chối path không tồn tại trước khi mở app.
 3. Đọc mục tiêu, split, metric, các bước, budget và outputs. Bấm **Duyệt proposal vN** của
    bản hiện hành. Sửa idea/nguồn trước approval sẽ làm proposal cũ `STALE`; cần lập bản mới.
    Approval tạo run, chưa tự chạy coder hoặc gửi Kaggle.
-4. **Run:** bấm thẻ alias của run đã duyệt → **Tạo code và notebook bằng Codex**.
-   Xem source/config/notebook và preflight. Nếu code bị từ chối, bấm **Tạo lại / sửa code bằng Codex**
-   khi muốn sửa tiếp; không có quota tổng. Preflight là kiểm tra contract/static, không chứng minh thuật toán ML đúng toàn bộ.
-5. Khi run hiện **Sẵn sàng gửi** (`PREFLIGHT` đạt), bấm **Gửi notebook và chạy trên Kaggle**
-   một lần. App kiểm account/rules/data/quota, lưu submit
-   intent và ghim owner/ref/kernel/version/script version/session. Không tự gửi leaderboard.
-6. Giữ tab **Run** để xem status, log và loss/metric nếu notebook phát telemetry;
-   các tab Library/Idea vẫn dùng được trong lúc chờ.
-   Log dùng cursor được lưu ở backend. Sau exact-session success, app tải outputs, kiểm
-   manifest/hash và kết quả, gọi Codex viết report, rồi mới ghi `COMPLETED`.
-7. **Run → chọn card:** xem proposal đã duyệt, kết quả, report preview,
-   notebook/source, facts và output links. Mở lại sau restart vẫn giữ cùng run và kết quả.
-8. Muốn chạy tiếp cùng proposal, bấm **Tạo lượt chạy mới** trong run đã kết thúc. App dựng
-   notebook với ID mới từ code đã lưu; chọn sửa code hoặc gửi Kaggle trong run mới.
+4. **Run:** chọn card của lượt đã duyệt, chọn phần cứng và thời gian phiên, bấm
+   **Bắt đầu Working**. Agent khảo sát mount/packages thật, viết và chạy code trên Kaggle.
+5. Xem **Log Working**; có thể chuyển tab hoặc bấm **Dừng Working**. Backend thu
+   source/output và kiểm tra hash, lưu report, yêu cầu dừng và kiểm tra Kaggle.
+6. Sau khi đã xác nhận dừng, xem report và artifact links trong card. Muốn chạy tiếp,
+   bấm **Tạo lượt Working mới**, rồi bấm Working để bắt đầu. Sau restart vẫn giữ kết quả cũ.
 
 ### Dữ liệu lưu ở đâu
 

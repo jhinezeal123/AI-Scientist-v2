@@ -59,7 +59,7 @@ export default function App() {
   }, [projectId, revision]);
 
   const planning = ideas.some(idea => idea.state === 'PLANNING');
-  const implementing = history.runs.some(run => ['IMPLEMENTING','SUBMITTING'].includes(run.state));
+  const implementing = history.runs.some(run => ['IMPLEMENTING','SUBMITTING','STARTING','WORKING','STOPPING'].includes(run.state));
   useEffect(() => {
     if (!planning && !implementing) return;
     const timer = window.setInterval(() => setRevision(n => n+1),1500);
@@ -184,10 +184,10 @@ export default function App() {
         });}} onApprove={async proposal => {await action(async () => {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
-        {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} busy={busy || planning || implementing} onStart={async id => {
-          await action(async () => {await api(`/projects/${projectId}/runs/${id}/implement`, 'POST');setRevision(n => n+1);setNotice('Đã gửi yêu cầu tạo implementation. Chưa submit hoặc training.');});
-        }} onSubmit={async id => {
-          await action(async () => {await api(`/projects/${projectId}/runs/${id}/submit`, 'POST');setRevision(n => n+1);setNotice('Đã lưu yêu cầu gửi notebook. App sẽ xác minh đúng version và session qua MCP.');});
+        {tab === 'Run' && <RunPanel projectId={projectId} runs={history.runs} busy={busy || planning || implementing} onWorking={async (id,accelerator,ttl) => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl});setRevision(n => n+1);setNotice('Đã bắt đầu Working: mở Kaggle, viết và chạy code, thu kết quả rồi dừng phiên.');});
+        }} onStop={async id => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/stop`, 'POST');setRevision(n => n+1);setNotice('Đã yêu cầu dừng Working. Backend sẽ xác nhận phiên Kaggle đã dừng.');});
         }} onReconcile={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/reconcile`, 'POST');setRevision(n => n+1);setNotice('Đã đối soát trạng thái qua MCP; không gửi notebook lần nữa.');});
         }} onRetry={async id => {
@@ -196,7 +196,7 @@ export default function App() {
             const run = await api<{id:string}>(`/projects/${projectId}/runs/${id}/retry`, 'POST',
               {request_id:crypto.randomUUID().replaceAll('-','')});
             newId=run.id;setRevision(n => n+1);
-            setNotice(`Đã tạo run ${run.id.slice(0,8)} từ proposal đã duyệt. Bạn có thể sửa code hoặc gửi Kaggle khi sẵn sàng.`);
+            setNotice(`Đã tạo run ${run.id.slice(0,8)} từ proposal đã duyệt. Bấm Working khi sẵn sàng.`);
           });
           return newId;
         }}/>} 

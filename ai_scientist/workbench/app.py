@@ -14,6 +14,7 @@ from .implementation import ImplementationService
 from .submission import SubmissionService
 from .monitor import RunMonitor
 from .collection import RunResultsService
+from .working import WorkingService
 
 
 def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
@@ -36,14 +37,17 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 app.state.mcp_tools = names
                 app.state.submission = SubmissionService(app.state.implementation, config, session)
                 app.state.results = RunResultsService(app.state.submission, worker, loaded)
+                app.state.working = WorkingService(service, config, app.state.implementation, session)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
-                    service.idle_check = app.state.submission.check_idle
+                    service.idle_check = app.state.working.check_idle
                 app.state.monitor = RunMonitor(app.state.submission, app.state.results)
                 app.state.monitor.start()
+                await app.state.working.recover()
                 try:
                     yield
                 finally:
                     await app.state.monitor.close()
+                    await app.state.working.close(config.shutdown_seconds)
                     await app.state.submission.close()
                     await service.close()
                     await worker.close(config.shutdown_seconds)

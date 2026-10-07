@@ -43,7 +43,7 @@ class ImplementationService:
                 history = await asyncio.to_thread(self.store.history, project['id'])
                 candidates = [item for item in history['runs'] if item['id'] != run_id]
                 has_unknown = has_unknown or any(item['state'] == 'UNKNOWN' for item in candidates)
-                allowed = {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
+                allowed = {'FAILED','COMPLETED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
                 if self.planner.idle_check is not None:
                     allowed.add('UNKNOWN')
                 blocking = next((item for item in candidates if item['state'] not in allowed), None)
@@ -78,7 +78,7 @@ class ImplementationService:
             for project in await asyncio.to_thread(self.store.list_projects):
                 history = await asyncio.to_thread(self.store.history, project['id'])
                 unknown_ids.extend(item['id'] for item in history['runs'] if item['state'] == 'UNKNOWN')
-                allowed = {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
+                allowed = {'FAILED','COMPLETED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
                 if self.planner.idle_check is not None:
                     allowed.add('UNKNOWN')
                 blocking = next((item for item in history['runs'] if item['state'] not in allowed), None)

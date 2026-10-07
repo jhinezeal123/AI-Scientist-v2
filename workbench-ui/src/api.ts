@@ -8,13 +8,15 @@ export type PlanBody = {needs_clarification: boolean; questions: string[]; parap
 export type Idea = {id: string; title: string; text: string; state: string; error: string|null; created_at: string;
   conversation: ({role:'user';text:string;reply_to:string}|{role:'assistant';proposal_id:string;version:number;body:PlanBody})[]};
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
+export type Working = {phase:string;accelerator:string;ttl_seconds:number;started_at:string;agent_called:number;
+  stop_confirmed:boolean;notebook_ref?:string;summary?:{succeeded:boolean;summary:string;limitations:string[];output_files:string[]}|null};
 export type Context = {context_sha256: string; snapshot: {project_id: string;
   idea: {id: string; text: string}; resources: Resource[]}};
 export type History = {proposals: {id: string; version: number; state: string; context_sha256: string}[];
   runs: {id: string; proposal_id: string; proposal_version?:number; idea_id?:string|null; state: string; error: string|null;
     purpose?: string; idea_text?:string; proposal_objective?:string; context_sha256?:string;
     source_refs?:{id:string;title:string;kind:string;version:number;content_sha256:string}[];
-    code_sha256?:string|null; artifacts?:string[];
+    code_sha256?:string|null; artifacts?:string[];execution_mode?:'ssh'|'legacy';working?:Working|null;
     result_metric?: {name:string;direction:string;final_value:number;best_value:number};report_available?:boolean}[]};
 export type Proposal = {id:string;idea_id:string;version:number;state:string;body:PlanBody;
   context_sha256:string;context_snapshot:Context['snapshot'];approved_at:string|null};

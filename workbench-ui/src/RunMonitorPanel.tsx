@@ -37,7 +37,7 @@ function MetricCurve({points,metric}:{points:MetricPoint[];metric:string}) {
   </svg>;
 }
 
-export default function RunMonitorPanel({projectId,runId,onObserved}:{projectId:string;runId:string;onObserved:(state:string)=>void}) {
+export default function RunMonitorPanel({projectId,runId,onObserved,working=false}:{projectId:string;runId:string;onObserved:(state:string)=>void;working?:boolean}) {
   const [data,setData]=useState<Delta|null>(null);
   const [entries,setEntries]=useState<Delta['entries']>([]);
   const [error,setError]=useState('');
@@ -77,13 +77,13 @@ export default function RunMonitorPanel({projectId,runId,onObserved}:{projectId:
     ? 'training_loss' : data?.primary_metric && metrics.includes(data.primary_metric) ? data.primary_metric : metrics[0];
   const samples=metric ? points.filter(point=>Number.isFinite(point.metrics[metric])) : [];
   const latest=samples[samples.length-1];
-  return <div className="context monitor-panel"><div className="panel-head"><h3>Theo dõi Kaggle</h3>
-    <span className="state-tag">{data?.terminal ? 'Đã kết thúc' : data?.observation ? 'Theo dõi nền' : 'Đang chờ quan sát'}</span></div>
+  return <div className="context monitor-panel"><div className="panel-head"><h3>{working ? 'Log Working' : 'Theo dõi Kaggle'}</h3>
+    <span className="state-tag">{data?.terminal ? 'Đã kết thúc' : working ? 'Đang theo dõi' : data?.observation ? 'Theo dõi nền' : 'Đang chờ quan sát'}</span></div>
     {data?.observation && <p className="muted">{data.observation.identity.status} · Quan sát lúc {new Date(data.observation.observed_at).toLocaleTimeString('vi-VN')}</p>}
     {(error || data?.error) && <p className="alert error" role="alert">{error || data?.error}</p>}
     {data?.gap && <p className="alert error">Nguồn log bị cắt hoặc đổi. Đã lưu generation mới; đang chờ đối soát log terminal.</p>}
     {data?.telemetry_error && <p className="alert error" role="alert">{data.telemetry_error}</p>}
-    {latest && <section className="training-metrics" aria-label="Loss và metric training">
+    {!working && latest && <section className="training-metrics" aria-label="Loss và metric training">
       <div className="panel-head"><h3>Loss và metric</h3>
         <span className="muted">Step {latest.step}/{latest.total_steps} · {samples.length} mẫu</span></div>
       <label>Metric hiển thị<select value={metric} onChange={event=>setSelectedMetric(event.target.value)}>
