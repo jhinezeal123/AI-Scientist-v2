@@ -6,7 +6,7 @@ import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import ImportedSource from './ImportedSource';
 
-const blank = {kind: 'text' as Resource['kind'], title: '', url: '', content: ''};
+const blank = {title: '', url: '', content: ''};
 const statusText = (status: string) => ({reference_only:'Chỉ có liên kết · chưa đọc',provided_text:'Có nội dung được cung cấp',
   extracted:'Đã trích text',partial:'Text trích một phần',no_text:'Không có text · có thể cần OCR',locked:'PDF khóa mật khẩu',
   error:'Trích text lỗi',file_reference:'Có file gốc · chưa trích text'}[status] || status);
@@ -103,7 +103,7 @@ export default function App() {
     event.preventDefault();
     void action(async () => {
       const path = `/projects/${projectId}/resources` + (editing ? `/${editing.id}` : '');
-      await api(path, editing ? 'PUT' : 'POST', {...form, url: form.url || null,
+      await api(path, editing ? 'PUT' : 'POST', {...form, kind: editing?.kind || (form.url.trim() ? 'url' : 'text'), url: form.url || null,
         ...(editing ? {expected_version: editing.version} : {})});
       setForm(blank); setEditing(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu nguồn vào project.');
     });
@@ -143,7 +143,7 @@ export default function App() {
             {resources.map(resource => <article className="resource" key={resource.id}>
               <div className="panel-head"><h3>{resource.title}</h3><button disabled={busy} onClick={() => {
                 if (resource.attachment){setReplacing(resource);return;}
-                setEditing(resource); setForm({kind: resource.kind,title: resource.title,url: resource.url || '',content: resource.content});
+                setEditing(resource); setForm({title: resource.title,url: resource.url || '',content: resource.content});
               }}>{resource.attachment ? 'Thay file' : 'Sửa nguồn'}</button></div>
               <p className="source-meta">{resource.kind} · v{resource.version} · {statusText(resource.status)}</p>
               <code className="source-id">{resource.id}</code>
@@ -154,7 +154,7 @@ export default function App() {
             </article>)}
           </section>
           <section className="panel"><h2>{editing ? `Sửa nguồn · v${editing.version}` : 'Thêm nguồn'}</h2>
-            <form onSubmit={saveResource} className="stack"><label>Loại nguồn<select value={form.kind} onChange={e => setForm({...form,kind: e.target.value as Resource['kind']})}><option value="text">Text / đề bài</option><option value="url">URL</option><option value="dataset">Dataset reference</option></select></label>
+            <form onSubmit={saveResource} className="stack">
               <label>Tiêu đề<input required maxLength={240} value={form.title} onChange={e => setForm({...form,title:e.target.value})}/></label>
               <label>URL nguồn<input type="url" value={form.url} maxLength={2000} onChange={e => setForm({...form,url:e.target.value})}/></label>
               <label>Nội dung / mô tả<textarea rows={10} maxLength={60000} value={form.content} onChange={e => setForm({...form,content:e.target.value})}/></label>
