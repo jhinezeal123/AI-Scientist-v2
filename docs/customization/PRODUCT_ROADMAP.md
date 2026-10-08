@@ -437,6 +437,10 @@ Không xây SSO enterprise, billing, multi-region hoặc fleet orchestration cho
 
 ## 13. Trạng thái và cách chuyển checkpoint
 
+**Bản chốt MVP0, 2026-10-08:** xem [MVP0_RELEASE.md](MVP0_RELEASE.md).
+Luồng hiện hành dùng Working qua SSH, Library dạng file theo tên và lịch sử trong
+tab Run. Các bảng T09 dưới đây giữ bằng chứng của luồng notebook ban đầu.
+
 | Hạng mục | Trạng thái hiện tại | Bằng chứng |
 | --- | --- | --- |
 | Fork/checkout/branch upstream | Đã chuẩn bị | origin/upstream và branch codex/personal-implementation-agent |
