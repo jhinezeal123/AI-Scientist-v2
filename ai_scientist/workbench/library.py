@@ -122,15 +122,7 @@ class LibraryFiles:
         path = self.path(name)
         if 'content' in source:
             data = self.document(source)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists():
-                try:
-                    with path.open('xb') as stream:
-                        stream.write(data)
-                except FileExistsError:
-                    pass
-            if path.read_bytes() != data:
-                raise ValueError('Library file changed; save a new source version through the app')
+            self._write_version_file(path, data)
         else:
             directory, identity = self._source_folder(source['id'])
             accepted = {f"library/{alias}/v{source['version']}/source.md" for alias in (*identity['aliases'], directory.name)}
@@ -141,6 +133,18 @@ class LibraryFiles:
                 raise ValueError('Pinned Library file hash mismatch')
         return {key: value for key, value in source.items() if key != 'content'} | {
             'file_path': name, 'file_sha256': hashlib.sha256(data).hexdigest(), 'file_bytes': len(data)}
+
+    @staticmethod
+    def _write_version_file(path, data):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            try:
+                with path.open('xb') as stream:
+                    stream.write(data)
+            except FileExistsError:
+                pass
+        if path.read_bytes() != data:
+            raise ValueError('Library file changed; save a new source version through the app')
 
     def selected_files(self, snapshot):
         for source in snapshot['resources']:

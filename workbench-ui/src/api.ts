@@ -26,6 +26,10 @@ export async function api<T>(path: string, method='GET', body?: unknown): Promis
   const response = await fetch('/api' + path, {method,
     headers: body === undefined ? {} : {'Content-Type': 'application/json'},
     body: body === undefined ? undefined : JSON.stringify(body)});
+  return responseJson<T>(response);
+}
+
+async function responseJson<T>(response:Response):Promise<T> {
   if (!response.ok) {
     let detail: unknown;
     try {detail = (await response.json()).detail;} catch {detail = response.statusText;}

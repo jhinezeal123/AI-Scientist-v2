@@ -212,10 +212,14 @@ class ProjectStore:
                    "content_sha256": digest(canonical({"kind": body["kind"], "title": title,
                                                        "url": url, "content": content, "status": status}))}
             reference = self.library(project_id).reference(row)
-            connection.execute("INSERT INTO resources VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
-                               "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
-            connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
+            self._write_resource(connection, row)
             return {**row, **reference}
+
+    @staticmethod
+    def _write_resource(connection, row):
+        connection.execute("INSERT INTO resources VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
+                           "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
+        connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
 
     def ideas(self, project_id, include_deleted=False):
         with self.connection(project_id) as connection:
