@@ -255,10 +255,14 @@ class ProjectStore:
             self._write_resource(connection, row)
             return {**row, **reference}
 
-    @staticmethod
-    def _write_resource(connection, row):
+    @classmethod
+    def _write_resource(cls, connection, row):
         connection.execute("INSERT INTO resources(id,kind,title,url,content,status,version,content_sha256) VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
                            "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
+        cls._invalidate_source_proposals(connection, row['id'])
+
+    @staticmethod
+    def _invalidate_source_proposals(connection, resource_id):
         connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
 
     def delete_resource(self, project_id, resource_id):

@@ -6,6 +6,7 @@ import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import SourceCards from './SourceCards';
 import {statusText} from './sourceStatus';
+import {loadProjectData} from './projectData';
 
 const blank = {title: '', content: ''};
 const initialPage=new URLSearchParams(window.location.search);
@@ -51,8 +52,7 @@ export default function App() {
     if (!projectId) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([api<Resource[]>(`/projects/${projectId}/resources`),
-      api<Idea[]>(`/projects/${projectId}/ideas?include_deleted=true`), api<History>(`/projects/${projectId}/history?include_deleted=true`),api<Proposal[]>(`/projects/${projectId}/proposals`)])
+    loadProjectData(projectId)
       .then(([r, i, h, p]) => {
         if (cancelled) return;
         setResources(r); setIdeas(i); setHistory(h); setProposals(p);
