@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {Idea, Proposal, Resource} from './api';
 
 type Props = {idea?: Idea; proposals: Proposal[]; resources:Resource[]; busy: boolean;
+  onReplan:()=>Promise<void>;
   onAnswer: (proposal: Proposal, text: string) => Promise<void>;
   onContinue: (proposal: Proposal) => Promise<void>;
   onApprove: (proposal: Proposal) => Promise<void>};
@@ -15,15 +16,17 @@ function Details({value}:{value:string|Record<string,unknown>}) {
     .map(([key,item])=><p key={key}><strong>{labels[key] || key}: </strong>{typeof item==='string' ? item : JSON.stringify(item)}</p>)}</div>;
 }
 
-export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,onContinue,onApprove}:Props) {
+export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,onContinue,onApprove,onReplan}:Props) {
   const [answer,setAnswer] = useState('');
   const latest = proposals.filter(p => p.idea_id === idea?.id).sort((a,b) => b.version-a.version)[0];
+  const changedSources=latest?.context_snapshot.resources.filter(source=>!resources.some(current=>
+    !current.deletion_pending && current.id===source.id && current.version===source.version && current.content_sha256===source.content_sha256)) || [];
   const answered = latest?.state === 'STALE' && latest.body.needs_clarification
     && idea?.conversation.some(message => message.role === 'user' && message.reply_to === latest.id)
     && latest.context_snapshot.idea.text === idea?.text
     && latest.context_snapshot.resources.every(source => resources.some(current =>
       !current.deletion_pending && current.id === source.id && current.version === source.version && current.content_sha256 === source.content_sha256));
-  return <section className="panel proposal-panel"><div className="panel-head"><h2>Trao đổi và proposal</h2>{idea && <span className="state-tag">{idea.state}</span>}</div>
+  return <section className="panel proposal-panel"><div className="panel-head"><h2>Trao đổi và proposal</h2>{idea && <span className="state-tag">{idea.state==='NEEDS_REVIEW' ? 'Cần xem lại nguồn' : idea.state}</span>}</div>
     {!idea && <p className="empty">Chọn một idea đã lưu để lập proposal.</p>}
     {idea?.state === 'PLANNING' && <p role="status" className="alert">Codex đang đọc nguồn và lập proposal. Bạn vẫn có thể xem Library; chưa tạo code hoặc chạy notebook.</p>}
     {idea?.error && <p role="alert" className="alert error">{idea.error}</p>}
@@ -54,7 +57,13 @@ export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,on
       {answered && <div className="stack"><p className="alert">Câu trả lời đã được lưu. Tiếp tục để Codex đọc câu trả lời và lập proposal v{latest.version + 1} từ các nguồn của v{latest.version}.</p>
         <button type="button" className="primary" disabled={busy || idea?.state === 'PLANNING'}
           onClick={() => void onContinue(latest).catch(() => {})}>Tiếp tục lập proposal v{latest.version + 1}</button></div>}
-      {latest.state === 'STALE' && !answered && <p className="alert error">Proposal đã cũ. Chọn nguồn hiện hành và lập proposal lại trước khi duyệt.</p>}
+      {latest.state === 'STALE' && !answered && <div className="stack"><p className="alert error">Proposal cần xem lại.{changedSources.length
+        ? ` Nguồn đã đổi phiên bản hoặc bị xóa: ${changedSources.map(source=>source.title).join(', ')}.`
+        : ' Nội dung idea hoặc trao đổi đã thay đổi.'} Bản proposal cũ vẫn được lưu; kiểm tra nguồn đang chọn rồi lập bản mới trước khi duyệt.</p>
+        {idea?.state!=='APPROVED' && <button type="button" className="primary" disabled={busy}
+          onClick={()=>void onReplan()}>Lập lại proposal từ nguồn đang chọn</button>}</div>}
     </article>}
+    {idea?.state==='FAILED' && <div className="stack"><p className="muted">Trao đổi đã lưu sẽ được gửi cùng các nguồn đang chọn. Tiếp tục là yêu cầu một lượt lập proposal mới.</p>
+      <button type="button" className="primary" disabled={busy} onClick={()=>void onReplan()}>Tiếp tục lập proposal</button></div>}
   </section>;
 }

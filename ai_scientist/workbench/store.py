@@ -263,7 +263,10 @@ class ProjectStore:
 
     @staticmethod
     def _invalidate_source_proposals(connection, resource_id):
-        connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
+        for proposal in connection.execute("SELECT id,idea_id,context_snapshot_json FROM proposals WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')").fetchall():
+            if any(source['id'] == resource_id for source in json.loads(proposal['context_snapshot_json'])['resources']):
+                connection.execute("UPDATE proposals SET state='STALE' WHERE id=?", (proposal['id'],))
+                connection.execute("UPDATE ideas SET state='NEEDS_REVIEW' WHERE id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (proposal['idea_id'],))
 
     def delete_resource(self, project_id, resource_id):
         from .source_deletion import deletion_plan, remove_source_files
@@ -281,9 +284,7 @@ class ProjectStore:
                 pending = connection.execute('SELECT plan_json FROM source_deletions WHERE resource_id=?', (resource_id,)).fetchone()
                 plan = json.loads(pending[0]) if pending else deletion_plan(library, resource_id)
                 connection.execute('INSERT OR IGNORE INTO source_deletions VALUES(?,?,NULL)', (resource_id, canonical(plan)))
-                for proposal in connection.execute("SELECT id,context_snapshot_json FROM proposals WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')"):
-                    if any(source['id'] == resource_id for source in json.loads(proposal['context_snapshot_json'])['resources']):
-                        connection.execute("UPDATE proposals SET state='STALE' WHERE id=?", (proposal['id'],))
+                self._invalidate_source_proposals(connection, resource_id)
             try:
                 remove_source_files(library, resource_id, plan)
             except (OSError, ValueError) as exc:
@@ -431,7 +432,9 @@ class ProjectStore:
     def recover_planning(self):
         for project in self.list_projects():
             with self.connection(project["id"]) as connection:
-                connection.execute("UPDATE ideas SET state='FAILED',error='Planning interrupted by restart; retry explicitly' WHERE state='PLANNING'")
+                connection.execute("UPDATE ideas SET state='FAILED',error='Lập proposal bị gián đoạn khi backend khởi động lại. Trao đổi đã lưu vẫn còn; bấm tiếp tục để yêu cầu lượt mới.' WHERE state='PLANNING'")
+                connection.execute("UPDATE ideas SET state='NEEDS_REVIEW' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION') AND "
+                                   "(SELECT state FROM proposals WHERE idea_id=ideas.id ORDER BY version DESC LIMIT 1)='STALE'")
 
     def answer(self, project_id, idea_id, proposal_id, version, text):
         if not text.strip():

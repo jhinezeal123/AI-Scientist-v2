@@ -12,8 +12,8 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;origin:'CODEX'|'REUSE';
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, initialRunId, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore}: {
-  projectId:string;initialRunId?:string;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
+export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore}: {
+  projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>}) {
   const [showDeleted,setShowDeleted]=useState(false);
@@ -23,9 +23,7 @@ export default function RunPanel({projectId, initialRunId, runs, busy, onWorking
   const [error,setError] = useState('');
   const [accelerator,setAccelerator] = useState('cpu');
   const [ttl,setTtl] = useState(1800);
-  const [selection,setSelection] = useState<{projectId:string;id:string}|null>(()=>initialRunId ? {projectId,id:initialRunId} : null);
-  const selectedId = selection?.projectId === projectId && visible.some(run => run.id === selection.id && !run.deleted_at)
-    ? selection.id : null;
+  const selectedId = visible.some(run => run.id===selectedRunId && !run.deleted_at) ? selectedRunId : null;
   const [observations,setObservations] = useState<Record<string,string>>({});
   const onObserved=useCallback((status:string) => {
     if (!selectedId)return;
@@ -48,7 +46,7 @@ export default function RunPanel({projectId, initialRunId, runs, busy, onWorking
     return () => {cancelled = true;};
   }, [projectId,runs]);
   return <section className="panel run-panel"><div className="panel-head"><h2>Lần chạy của project</h2>
-    <button type="button" disabled={busy} onClick={()=>{setShowDeleted(!showDeleted);setSelection(null);}}>
+    <button type="button" disabled={busy} onClick={()=>{setShowDeleted(!showDeleted);onSelect('');}}>
       {showDeleted ? 'Run đã lưu' : `Đã xóa (${deletedCount})`}</button>
     {!!visible.length && <span className="muted">{visible.length} run</span>}</div>
     {!visible.length && <p className="empty">{showDeleted ? 'Chưa có run đã xóa.' : 'Chưa có lần chạy. Lập và duyệt proposal ở Idea để tạo run.'}</p>}
@@ -58,7 +56,7 @@ export default function RunPanel({projectId, initialRunId, runs, busy, onWorking
         aria-label={run.deleted_at ? `Khôi phục Run ${run.id.slice(0,8)}` : undefined}
         className={`run-card ${selectedId === run.id ? 'selected' : ''}`}
         aria-expanded={selectedId === run.id} aria-controls="run-detail"
-        onClick={() => run.deleted_at ? void onRestore(run.id) : setSelection(selectedId === run.id ? null : {projectId,id:run.id})}>
+        onClick={() => run.deleted_at ? void onRestore(run.id) : onSelect(selectedId === run.id ? '' : run.id)}>
         <span className="run-alias">Run {run.id.slice(0,8)}</span>
         <span className="run-card-status" data-state={observations[run.id] || run.state}>
           <span className="run-status-dot" aria-hidden="true"/>{run.deleted_at ? 'Đã xóa · bấm để khôi phục' : run.state === 'COLLECTING' && details.find(item => item.id === run.id)?.collection?.phase === 'retry_exhausted'
@@ -73,7 +71,7 @@ export default function RunPanel({projectId, initialRunId, runs, busy, onWorking
         <div className="actions"><button type="button" className="danger-button" disabled={busy || !run.can_delete}
           title={run.can_delete ? 'Có thể khôi phục trong mục Đã xóa' : 'Dừng hoặc đối soát Kaggle trước khi xóa'}
           onClick={()=>void onDelete(run.id)}>Xóa run</button>
-        <button type="button" onClick={() => setSelection(null)}>Đóng chi tiết</button></div></div>
+        <button type="button" onClick={() => onSelect('')}>Đóng chi tiết</button></div></div>
       <div className="panel-head"><code className="source-id">{run.id}</code><span className="state-tag">{observations[run.id] || run.state}</span></div>
       {run.state === 'APPROVED' && <p>Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
@@ -94,6 +92,7 @@ export default function RunPanel({projectId, initialRunId, runs, busy, onWorking
         <p role="status">{run.working.stop_confirmed ? 'Backend đã xác nhận Kaggle dừng.'
           : run.state==='STARTING' ? 'Đang mở Kaggle và kết nối SSH…'
           : run.state==='STOPPING' ? 'Đang chờ xác nhận Kaggle dừng. Kết quả chưa được đánh dấu hoàn tất.'
+          : run.working.phase==='collecting' ? 'Đang lưu và kiểm tra kết quả trước khi dừng Kaggle.'
           : 'Agent đang viết và thực thi code trên Kaggle qua cùng một kết nối SSH.'}</p>
         {run.working.notebook_ref && <a href={`https://www.kaggle.com/code/${run.working.notebook_ref}`} target="_blank" rel="noreferrer">Mở phiên trên Kaggle ↗</a>}
         {!run.working.stop_confirmed && <p><button onClick={()=>void onStop(run.id)}>
@@ -103,7 +102,7 @@ export default function RunPanel({projectId, initialRunId, runs, busy, onWorking
       <p className="muted">Mỗi lượt do bạn yêu cầu. Không giới hạn tổng số lượt Working.</p>
       {run.parent_run_id && <p className="muted">Tạo từ Run {run.parent_run_id.slice(0,8)} · dùng cùng proposal đã duyệt.</p>}
       {run.can_retry && <div className="stack"><button disabled={busy} onClick={() => void onRetry(run.id).then(id => {
-        if (id)setSelection({projectId,id});
+        if (id)onSelect(id);
       })}>Tạo lượt Working mới</button><small className="muted">Dùng cùng proposal đã duyệt và tham khảo kết quả cũ. Bấm Working để bắt đầu lượt mới.</small></div>}
       {run.collection && <p className="muted">Report: {run.collection.report_attempts}/{run.collection.report_limit} lượt đã cấp.</p>}
       {run.state === 'COLLECTING' && run.collection?.phase === 'retry_exhausted' && <p role="alert" className="alert error">Outputs đã được xác minh. Report đã hết lượt thử cho phép; cần xử lý lỗi và duyệt thêm lượt report để tiếp tục.</p>}

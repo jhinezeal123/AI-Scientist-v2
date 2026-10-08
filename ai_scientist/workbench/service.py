@@ -51,7 +51,7 @@ class PlanningService:
                 body = ready.model_dump(exclude_none=True)
             await asyncio.to_thread(self.store.save_proposal, project_id, idea_id, body, context)
         except asyncio.CancelledError:
-            await asyncio.to_thread(self.store.plan_failed, project_id, idea_id, "Planning interrupted; retry explicitly")
+            await asyncio.to_thread(self.store.plan_failed, project_id, idea_id, "Lập proposal bị gián đoạn. Trao đổi đã lưu vẫn còn; bấm tiếp tục để yêu cầu lượt mới.")
             raise
         except Exception as exc:
             # No unvalidated model output, prompts or stderr in an error shown to the user.
@@ -76,6 +76,8 @@ class PlanningService:
                 raise KeyError('Proposal not found in this project')
             if proposal['version'] != version or proposal['context_sha256'] != context_sha256:
                 raise StoreConflict('Approval version/hash is stale')
+            if proposal['state'] == 'STALE':
+                raise StoreConflict('Proposal cần xem lại. Kiểm tra idea/nguồn hiện hành và lập proposal mới trước khi duyệt.')
             # Serialize across all project DBs in this single-process app.
             unknown_ids = []
             for project in await asyncio.to_thread(self.store.list_projects):

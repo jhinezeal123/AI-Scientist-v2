@@ -335,7 +335,10 @@ class WorkingService:
 
     async def _recover_stop(self, key):
         record = self.record(*key)
-        self.records.update(*key, state='STOPPING', phase='stopping', outcome=record['outcome'] or 'FAILED')
+        self.records.append_log(*key, 'Khôi phục Run đã lưu: kiểm tra và dừng phiên Kaggle cũ; không chạy lại agent hoặc gửi notebook mới.\n', 'backend')
+        summary = record['summary'] or {'succeeded': False, 'summary': 'Working bị gián đoạn; chưa xác minh kết quả thực thi.',
+                                       'limitations': ['Agent không được tự chạy lại khi khôi phục Run.'], 'output_files': []}
+        self.records.update(*key, state='STOPPING', phase='stopping', outcome=record['outcome'] or 'FAILED', summary=summary)
         await self._request_stop(key)
         await self._finish_stop(key)
 

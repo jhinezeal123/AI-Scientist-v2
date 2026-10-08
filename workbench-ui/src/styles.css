@@ -23,6 +23,7 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 .run-status-dot,.idea-status-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#9ba59b}
 .idea-card-status[data-state='APPROVED'] .idea-status-dot{background:var(--mint)}
 .idea-card-status[data-state='FAILED'] .idea-status-dot{background:#f08f83}
+.idea-card-status[data-state='NEEDS_REVIEW'] .idea-status-dot{background:#e4bd7a}
 .idea-card-status[data-state='PLANNING'] .idea-status-dot,.idea-card-status[data-state='NEEDS_CLARIFICATION'] .idea-status-dot,.idea-card-status[data-state='AWAITING_APPROVAL'] .idea-status-dot{background:#e4bd7a}
 .run-card-status[data-state='REMOTE_SUCCEEDED'] .run-status-dot,.run-card-status[data-state='COMPLETED'] .run-status-dot,.run-card-status[data-state='PREFLIGHT'] .run-status-dot{background:var(--mint)}
 .run-card-status[data-state='FAILED'] .run-status-dot,.run-card-status[data-state='REMOTE_FAILED'] .run-status-dot{background:#f08f83}

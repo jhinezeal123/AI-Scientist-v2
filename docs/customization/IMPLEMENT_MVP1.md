@@ -18,7 +18,7 @@ mốc sau, không thêm vào MVP1.
 | Task | Bàn giao | Nghiệm thu | Trạng thái |
 | --- | --- | --- | --- |
 | M1-01 / CP1-A | Import PDF/file, bản gốc + text theo trang, ingestion status/version | Hai project riêng; chọn file vừa import làm context; agent đọc qua đường dẫn | Đã bàn giao local, 2026-10-08 |
-| M1-02 / CP1-B | Trao đổi/approval/artifacts tiếp tục qua restart, UI khôi phục/lỗi | Restart không replay agent/notebook; source mới làm proposal chờ duyệt cần xem lại | Chưa bắt đầu |
+| M1-02 / CP1-B | Trao đổi/approval/artifacts tiếp tục qua restart, UI khôi phục/lỗi | Restart không replay agent/notebook; source mới làm proposal chờ duyệt cần xem lại | Đã bàn giao local, 2026-10-08 |
 | M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Chưa bắt đầu |
 | M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Chưa nghiệm thu |
 
@@ -62,7 +62,8 @@ mốc sau, không thêm vào MVP1.
   Bản sao SQLite trước migration: `.workbench/backups/mvp1-imports-2026-10-08/`.
 - Kiểm thử planner/Working dùng fixture; chưa chạy Codex/Kaggle thật với PDF.
   Nghiệm thu toàn MVP1 và chạy biến thể thật thuộc M1-04.
-- M1-02 và M1-03 chưa triển khai trong checkpoint này.
+- Tại thời điểm bàn giao M1-01, M1-02 và M1-03 chưa triển khai;
+  tiến độ mới nhất nằm ở bảng task và các mục bàn giao bên dưới.
 
 ### Tinh chỉnh Library theo yêu cầu
 
@@ -77,3 +78,45 @@ mốc sau, không thêm vào MVP1.
 - Chặn xóa trong lúc agent làm việc. Proposal chưa duyệt dùng nguồn bị xóa cần
   lập lại. Lịch sử/report của run giữ nguyên; chạy lại với nguồn bị xóa bị chặn
   trước khi mở phiên Kaggle và cần nhập nguồn/lập proposal mới.
+
+## M1-02 — Tiếp tục phiên đã lưu
+
+### Luồng sử dụng
+
+- GUI nhớ tab, idea, nguồn đang chọn và run đang mở riêng cho mỗi project trong
+  browser đang dùng. Đổi project rồi quay lại hoặc tải lại trang sẽ mở đúng lựa
+  chọn đó. Dữ liệu trao đổi, approval và artifacts vẫn do backend/SQLite lưu;
+  browser chỉ lưu lựa chọn màn hình.
+- Mất kết nối hiển thị thông báo và nút “Kết nối lại”, giữ dữ liệu đã tải để xem.
+  App thử đọc lại sau 4 giây và tiếp tục theo dõi khi backend trở lại. Các thao
+  tác làm việc đang mất kết nối bị khóa; app không tự gửi lại POST hoặc gọi agent.
+- Câu trả lời đã bấm “Lưu câu trả lời” vẫn còn sau restart. Nút “Tiếp tục lập
+  proposal vN” yêu cầu một lượt Codex mới với trao đổi đã lưu. Proposal bị gián
+  đoạn có lỗi và nút “Tiếp tục lập proposal”; không tự chạy lại khi backend mở.
+- Thay hoặc xóa nguồn chỉ làm cũ proposal chưa duyệt có dùng nguồn đó. Card idea
+  hiện “Cần xem lại nguồn”, proposal nêu nguồn đã đổi và có nút lập lại từ các
+  nguồn hiện đang chọn. Thêm một nguồn chưa chọn không làm cũ proposal khác.
+  Proposal đã duyệt và nguồn đã ghim cho run giữ nguyên phiên bản.
+- Run Working đang chạy khi backend dừng được khôi phục bằng kiểm tra/dừng
+  phiên Kaggle cũ. Không tự mở SSH để chạy lại agent, không gửi notebook mới.
+  Chỉ kết thúc run sau khi có xác nhận Kaggle dừng. Kết quả đã thu đủ được giữ;
+  lượt bị ngắt chưa thu đủ được đánh dấu thất bại, có report/log và thao tác tạo
+  lượt Working mới do người dùng quyết định.
+- Form chưa bấm lưu không thuộc dữ liệu trao đổi đã lưu; cần bấm lưu trước khi
+  đóng trang. Lựa chọn màn hình được nhớ theo browser, không đồng bộ giữa máy.
+
+### Kiểm chứng
+
+- **185 kiểm thử Workbench passed**, build frontend thành công. Sáu trường hợp
+  M1-02 mới chạy toàn bộ lifespan app qua nhiều restart: câu hỏi/câu trả lời,
+  duyệt lại không trùng run, đọc artifacts, source/version/project isolation,
+  planning gián đoạn và Working bị ngắt ở ba giai đoạn. Runtime/MCP/SSH giả lập
+  ghi số lần gọi để chứng minh restart không phát sinh agent/notebook mới.
+- Browser trên backend thật `8011`: tải lại giữ idea/proposal/ba nguồn; chuyển
+  Paper ↔ Soil giữ lựa chọn riêng; dừng/mở backend hiển thị mất kết nối rồi tự
+  khôi phục đúng run, report và artifacts.
+- Browser trên môi trường local giả lập `8012`: lưu câu trả lời, restart, tiếp
+  tục tạo v2; duyệt rồi đổi nguồn v2; proposal đã duyệt giữ v1, proposal chờ
+  duyệt cần xem lại và có thao tác lập bản mới. Không gọi Codex/Kaggle thật.
+- Bằng chứng local: `.workbench/acceptance/m1-02-recovery-2026-10-08/`.
+  Nghiệm thu với phiên Kaggle mới và biến thể thật vẫn thuộc M1-04.

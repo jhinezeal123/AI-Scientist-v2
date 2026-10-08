@@ -26,11 +26,22 @@ export type Proposal = {id:string;idea_id:string;version:number;state:string;bod
   context_sha256:string;context_snapshot:Context['snapshot'];approved_at:string|null};
 
 export async function api<T>(path: string, method='GET', body?: unknown): Promise<T> {
-  const response = await fetch('/api' + path, {method,
-    headers: body === undefined ? {} : {'Content-Type': 'application/json'},
-    body: body === undefined ? undefined : JSON.stringify(body)});
-  return responseJson<T>(response);
+  const controller=new AbortController();
+  const timer=method==='GET' ? window.setTimeout(()=>controller.abort(),15000) : undefined;
+  try {
+    const response = await fetch('/api' + path, {method,signal:controller.signal,
+      headers: body === undefined ? {} : {'Content-Type': 'application/json'},
+      body: body === undefined ? undefined : JSON.stringify(body)});
+    return await responseJson<T>(response);
+  } finally {window.clearTimeout(timer);}
 }
+
+export class ApiError extends Error {
+  constructor(message:string,public status:number) {super(message);}
+}
+export const connectionFailure=(error:unknown)=>error instanceof TypeError
+  || (error instanceof DOMException && error.name==='AbortError')
+  || (error instanceof ApiError && error.status>=500);
 
 async function responseJson<T>(response:Response):Promise<T> {
   await checkResponse(response);
@@ -41,7 +52,7 @@ async function checkResponse(response:Response):Promise<void> {
   if (!response.ok) {
     let detail: unknown;
     try {detail = (await response.json()).detail;} catch {detail = response.statusText;}
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    throw new ApiError(typeof detail === 'string' ? detail : JSON.stringify(detail),response.status);
   }
 }
 

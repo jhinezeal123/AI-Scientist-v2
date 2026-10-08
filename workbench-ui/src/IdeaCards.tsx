@@ -3,7 +3,7 @@ import {Idea,ideaTitle} from './api';
 
 const labels:Record<string,string>={
   DRAFT:'Bản nháp', PLANNING:'Đang lập proposal', NEEDS_CLARIFICATION:'Cần trả lời',
-  AWAITING_APPROVAL:'Chờ duyệt', APPROVED:'Đã duyệt', FAILED:'Có lỗi',
+  AWAITING_APPROVAL:'Chờ duyệt', APPROVED:'Đã duyệt', FAILED:'Có lỗi', NEEDS_REVIEW:'Cần xem lại nguồn',
 };
 
 function TitleEditor({idea,busy,onRename}:{idea:Idea;busy:boolean;onRename:(idea:Idea,title:string)=>Promise<void>}) {
