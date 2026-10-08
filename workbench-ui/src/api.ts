@@ -1,4 +1,6 @@
 export type Project = {id: string; name: string; created_at: string; directory_name:string;library_path:string};
+export type RunMode = 'training_research'|'etc';
+export const modeLabel=(mode?:RunMode,legacy=false)=>legacy || !mode ? 'Phiên bản cũ' : mode==='etc' ? 'Etc' : 'Training/Research';
 export type Resource = {id: string; kind: 'text'|'url'|'dataset'|'pdf'|'file'; title: string; url: string|null;
   content: string; status: string; version: number; content_sha256: string;
   file_path?:string;file_sha256?:string;file_bytes?:number;
@@ -16,14 +18,16 @@ export type Variant = {project_id:string;idea_id:string;parent_run_id:string;par
     result:Record<string,unknown>;artifact_refs:{path:string;bytes:number;sha256:string;kind?:string}[];
     text_files:{path:string;stage_path:string;kind:string;available:boolean;bytes?:number;sha256?:string;reason?:string}[]}};
 export type Idea = {id: string; title: string; text: string; state: string; error: string|null; created_at: string;deleted_at?:string|null;variant?:Variant|null;
+  mode:RunMode;desired_output:string;mode_legacy?:boolean;
   conversation: ({role:'user';text:string;reply_to:string}|{role:'assistant';proposal_id:string;version:number;body:PlanBody})[]};
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
 export type Working = {phase:string;accelerator:string;ttl_seconds:number;started_at:string;agent_called:number;
   stop_confirmed:boolean;notebook_ref?:string;summary?:{succeeded:boolean;summary:string;limitations:string[];output_files:string[]}|null};
 export type Context = {context_sha256: string; snapshot: {project_id: string;
-  idea: {id: string; text: string}; resources: Omit<Resource,'content'>[];variant?:Variant}};
+  idea: {id: string; text: string;mode?:RunMode;desired_output?:string}; resources: Omit<Resource,'content'>[];variant?:Variant}};
 export type History = {proposals: {id: string; version: number; state: string; context_sha256: string}[];
   runs: {id: string; proposal_id: string; proposal_version?:number; idea_id?:string|null; state: string; error: string|null;deleted_at?:string|null;
+    mode?:RunMode;desired_output?:string;mode_legacy?:boolean;
     purpose?: string; idea_text?:string; proposal_objective?:string; context_sha256?:string;
     variant?:Pick<Variant,'parent_run_id'|'purpose'|'change_summary'>|null;
     source_refs?:{id:string;title:string;kind:string;version:number;content_sha256:string}[];

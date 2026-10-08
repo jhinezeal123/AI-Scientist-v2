@@ -5,6 +5,7 @@ import re
 from pathlib import Path, PurePosixPath
 
 from .store import _safe_variant_source_path
+from .modes import mode_metadata
 from .named_paths import display_path
 
 BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'payload.json', 'checks.json')
@@ -224,6 +225,7 @@ class RunView:
         run['can_retry'] = not run['deleted_at'] and (run['state'] in {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'} or (run['state'] == 'UNKNOWN' and self.allow_unknown_retry()))
         approved = self.store.approved_snapshot(project_id, run_id)
         run['purpose'] = approved['body']['objective']
+        run.update(mode_metadata(approved['snapshot']))
         run['variant'] = approved['snapshot'].get('variant')
         if run['variant']:
             parent = self.store.run(project_id, run['variant']['parent_run_id'])
@@ -261,6 +263,7 @@ class RunView:
             body = approved['body']
             selected_refs = set(body.get('data_refs', []))
             item['purpose'] = detail.get('purpose')
+            item.update({key: detail[key] for key in ('mode', 'desired_output', 'mode_legacy')})
             item['result_metric'] = detail.get('result_metric')
             # History describes the approved inputs as they were pinned at approval time.
             # Current idea/resource rows may be edited or removed later.

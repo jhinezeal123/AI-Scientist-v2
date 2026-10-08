@@ -14,6 +14,7 @@ from .store import StoreConflict
 from .kaggle import decode_result
 from .working_store import WorkingStore, TERMINAL
 from .system_prompt import load_prompt
+from .modes import snapshot_settings
 from .named_paths import display_path
 
 ACCELERATORS = {'cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'}
@@ -118,6 +119,11 @@ class WorkingService:
             if self.planner.worker.closed or self.planner.worker.state.get('status') == 'unknown':
                 raise StoreConflict('Agent worker chưa xác nhận kết thúc lượt trước')
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
+            mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
+            if mode == 'etc':
+                raise StoreConflict('Proposal Etc đã được lưu. Working Etc sẽ được triển khai ở M2-02; chưa mở phiên Kaggle.')
+            if 'mode' in approved['snapshot']['idea'] and not options.enabled:
+                raise StoreConflict('Training/Research sử dụng Agentic Tree Search; tạo proposal Etc mới để đổi mode.')
             await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
             # Fail closed on a changed pinned baseline before starting a Kaggle SSH session.
             await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
@@ -477,10 +483,11 @@ class WorkingService:
                 raise StoreConflict('Kaggle chưa xác nhận dừng; chưa tạo lượt Working mới')
             unknown_ids = []
             for project in self.store.list_projects():
+                unstarted = self.store.unstarted_run_ids(project['id'])
                 for item in self.store.history(project['id'])['runs']:
                     if item['state'] == 'UNKNOWN':
                         unknown_ids.append(item['id'])
-                    elif item['state'] not in TERMINAL | {'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING'}:
+                    elif item['state'] not in TERMINAL | {'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING'} and item['id'] not in unstarted:
                         raise StoreConflict('Một Run khác đang hoạt động; hoàn tất trước khi tạo lượt mới')
             if unknown_ids:
                 await self.check_idle()

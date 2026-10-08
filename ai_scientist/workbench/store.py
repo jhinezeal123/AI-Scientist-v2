@@ -9,13 +9,14 @@ import sqlite3
 import uuid
 
 from .library import LibraryFiles
+from .modes import mode_metadata, request_settings, snapshot_settings
 from .named_paths import PATH_LOCK, checked_child, folder_title, rename_folder, unique_title, filesystem_path
 
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS project_meta(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, schema_version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS resources(id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, url TEXT, content TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, content_sha256 TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY, text TEXT NOT NULL, conversation_json TEXT NOT NULL, state TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', deleted_at TEXT);
+CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY, text TEXT NOT NULL, conversation_json TEXT NOT NULL, state TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', deleted_at TEXT, mode TEXT, desired_output TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, idea_id TEXT NOT NULL REFERENCES ideas(id), version INTEGER NOT NULL, body_json TEXT NOT NULL, context_snapshot_json TEXT NOT NULL, context_sha256 TEXT NOT NULL, state TEXT NOT NULL, approved_at TEXT);
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL REFERENCES proposals(id), node_id TEXT, node_json TEXT, state TEXT NOT NULL, intent_key TEXT UNIQUE NOT NULL, code_sha256 TEXT, identity_json TEXT, artifact_dir TEXT NOT NULL, error TEXT, report_path TEXT, deleted_at TEXT);
 CREATE TABLE IF NOT EXISTS logs(run_id TEXT NOT NULL REFERENCES runs(id), generation INTEGER NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, stream TEXT NOT NULL, UNIQUE(run_id,generation,seq));
@@ -205,7 +206,12 @@ class ProjectStore:
         for table in ('ideas', 'runs'):
             if 'deleted_at' not in {row['name'] for row in connection.execute(f'PRAGMA table_info({table})')}:
                 connection.execute(f'ALTER TABLE {table} ADD COLUMN deleted_at TEXT')
-        connection.execute('UPDATE project_meta SET schema_version=7 WHERE schema_version<7')
+        columns = {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}
+        if 'mode' not in columns:
+            connection.execute('ALTER TABLE ideas ADD COLUMN mode TEXT')
+        if 'desired_output' not in columns:
+            connection.execute("ALTER TABLE ideas ADD COLUMN desired_output TEXT NOT NULL DEFAULT ''")
+        connection.execute('UPDATE project_meta SET schema_version=8 WHERE schema_version<8')
 
     def library(self, project_id):
         return LibraryFiles(self.directory(project_id), lambda resource, version:self.ingestion(project_id, resource, version),
@@ -277,7 +283,7 @@ class ProjectStore:
                 connection.executescript(INGESTION_SCHEMA)
                 connection.executescript(DELETION_SCHEMA)
                 connection.executescript(VARIANT_SCHEMA)
-                connection.execute("INSERT INTO project_meta VALUES(?,?,?,7)",
+                connection.execute("INSERT INTO project_meta VALUES(?,?,?,8)",
                                    (project_id, name, datetime.now(timezone.utc).isoformat()))
                 connection.commit()
             finally:
@@ -449,6 +455,8 @@ class ProjectStore:
             for row in connection.execute("SELECT * FROM ideas" + ('' if include_deleted else ' WHERE deleted_at IS NULL') + " ORDER BY rowid DESC"):
                 item = dict(row)
                 item["conversation"] = json.loads(item.pop("conversation_json"))
+                item['mode_legacy'] = item['mode'] is None
+                item['mode'], item['desired_output'] = request_settings(item['mode'], item['desired_output'])
                 variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?', (item['id'],)).fetchone()
                 item['variant'] = json.loads(variant['variant_json']) if variant else None
                 if item['variant']:
@@ -458,14 +466,15 @@ class ProjectStore:
                 result.append(item)
             return result
 
-    def save_idea(self, project_id, text, title=None):
+    def save_idea(self, project_id, text, title=None, mode='training_research', desired_output=''):
         if not text.strip():
             raise ValueError("Idea must contain text")
         idea_id = uuid.uuid4().hex
         title = idea_title(title) if title is not None else ''
+        mode, desired_output = request_settings(mode, desired_output)
         with self.connection(project_id) as connection:
-            connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title) VALUES(?,?,?,'DRAFT',NULL,?,?)",
-                               (idea_id, text, "[]", datetime.now(timezone.utc).isoformat(), title))
+            connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title,mode,desired_output) VALUES(?,?,?,'DRAFT',NULL,?,?,?,?)",
+                               (idea_id, text, "[]", datetime.now(timezone.utc).isoformat(), title, mode, desired_output))
         return next(item for item in self.ideas(project_id) if item["id"] == idea_id)
 
     @staticmethod
@@ -490,7 +499,7 @@ class ProjectStore:
         return dict(row)
 
     def create_variant_idea(self, project_id, parent_run_id, request_id, title, purpose, change_summary,
-                            captured_baseline, baseline_texts):
+                            captured_baseline, baseline_texts, mode=None, desired_output=None):
         """Create one DRAFT variant idea and pin its bounded baseline in the project database."""
         title = idea_title(title)
         purpose, change_summary = purpose.strip(), change_summary.strip()
@@ -498,8 +507,12 @@ class ProjectStore:
             raise ValueError('Mục đích và thay đổi phải có nội dung (tối đa 20.000 ký tự mỗi ô)')
         if not re.fullmatch(r'[0-9a-f]{32}', request_id):
             raise ValueError('Invalid variant request ID')
-        request_sha256 = digest(canonical({'parent_run_id': parent_run_id, 'title': title,
-                                          'purpose': purpose, 'change_summary': change_summary}))
+        request = {'parent_run_id': parent_run_id, 'title': title,
+                   'purpose': purpose, 'change_summary': change_summary}
+        # Preserve idempotency of requests created before mode fields existed.
+        if mode is not None or desired_output is not None:
+            request.update(mode=mode, desired_output=desired_output)
+        request_sha256 = digest(canonical(request))
         captured_baseline = dict(captured_baseline)
         baseline_texts = dict(baseline_texts)
         with self.connection(project_id) as connection:
@@ -513,6 +526,9 @@ class ProjectStore:
 
             parent = self._variant_parent(connection, parent_run_id)
             parent_snapshot = json.loads(parent['context_snapshot_json'])
+            parent_mode, parent_output = snapshot_settings(parent_snapshot)
+            mode, desired_output = request_settings(mode if mode is not None else parent_mode,
+                                                    desired_output if desired_output is not None else parent_output)
             parent_body = json.loads(parent['body_json'])
             parent_sources = [
                 {key: source[key] for key in ('id', 'title', 'kind', 'version', 'content_sha256')}
@@ -560,8 +576,8 @@ class ProjectStore:
                 'baseline': captured_baseline,
             }
             idea_text = f'Mục đích mới: {purpose}\n\nThay đổi so với run gốc: {change_summary}'
-            connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title) VALUES(?,?,?,'DRAFT',NULL,?,?)",
-                               (idea_id, idea_text, '[]', created_at, title))
+            connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title,mode,desired_output) VALUES(?,?,?,'DRAFT',NULL,?,?,?,?)",
+                               (idea_id, idea_text, '[]', created_at, title, mode, desired_output))
             connection.execute('INSERT INTO variant_ideas VALUES(?,?,?,?,?,?,?,?,?,?)',
                                (idea_id, parent_run_id, parent['parent_proposal_id'], purpose, change_summary,
                                 created_at, request_id, request_sha256, canonical(variant),
@@ -611,9 +627,10 @@ class ProjectStore:
         if len(resource_ids) != len(set(resource_ids)):
             raise ValueError("Selected source IDs must be distinct")
         with self.connection(project_id) as connection:
-            idea = connection.execute("SELECT id,text,conversation_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
+            idea = connection.execute("SELECT id,text,conversation_json,mode,desired_output FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if idea is None:
                 raise KeyError("Idea not found in this project")
+            mode, desired_output = request_settings(idea['mode'], idea['desired_output'])
             resources = []
             for resource_id in resource_ids:
                 row = connection.execute("SELECT * FROM resources WHERE id=? AND id NOT IN (SELECT resource_id FROM source_deletions)", (resource_id,)).fetchone()
@@ -621,6 +638,7 @@ class ProjectStore:
                     raise KeyError("Source not found in this project")
                 resources.append(self.library(project_id).reference(dict(row)))
             context = {"project_id": project_id, "idea": {"id": idea["id"], "text": idea["text"],
+                        "mode": mode, "desired_output": desired_output,
                         "conversation": json.loads(idea["conversation_json"])},
                        "resources": sorted(resources, key=lambda item: item["id"])}
             variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone()
@@ -638,6 +656,7 @@ class ProjectStore:
         serialized = canonical(snapshot)
         if digest(serialized) != context["context_sha256"]:
             raise ValueError("Context hash mismatch")
+        snapshot_settings(snapshot, require_output=True)
         self.library(project_id).agent_snapshot(snapshot)
         self.variant_stage_files(snapshot)
         proposal_id = uuid.uuid4().hex
@@ -659,11 +678,13 @@ class ProjectStore:
 
     @staticmethod
     def _check_context(connection, snapshot):
-        idea = connection.execute("SELECT text,conversation_json FROM ideas WHERE id=? AND deleted_at IS NULL", (snapshot["idea"]["id"],)).fetchone()
+        idea = connection.execute("SELECT text,conversation_json,mode,desired_output FROM ideas WHERE id=? AND deleted_at IS NULL", (snapshot["idea"]["id"],)).fetchone()
         # Assistant proposal messages do not change the human request context.
         human = lambda messages: [message for message in messages if message.get("role") == "user"]
         if idea is None or idea["text"] != snapshot["idea"]["text"] or human(json.loads(idea["conversation_json"])) != human(snapshot["idea"]["conversation"]):
             raise StoreConflict("Idea or answers changed; create a new proposal")
+        if request_settings(idea['mode'], idea['desired_output']) != snapshot_settings(snapshot):
+            raise StoreConflict('Mode hoặc đầu ra đã đổi; lập proposal mới trước khi duyệt')
         variant = snapshot.get('variant')
         current_variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?',
                                               (snapshot['idea']['id'],)).fetchone()
@@ -723,23 +744,31 @@ class ProjectStore:
             connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
         return self.idea(project_id, idea_id)
 
-    def update_idea(self, project_id, idea_id, text, expected_text, title=None, expected_title=None):
+    def update_idea(self, project_id, idea_id, text, expected_text, title=None, expected_title=None,
+                    mode=None, desired_output=None, expected_mode=None, expected_desired_output=None):
         if not text.strip():
             raise ValueError("Idea must contain text")
         title = idea_title(title) if title is not None else None
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT text,state,title FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
+            row = connection.execute("SELECT text,state,title,mode,desired_output FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if row is None:
                 raise KeyError("Idea not found in this project")
-            if connection.execute('SELECT 1 FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone():
+            if text != row['text'] and connection.execute('SELECT 1 FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone():
                 raise StoreConflict('Mục đích và thay đổi của idea biến thể đã được ghi nhận; tạo biến thể mới để đổi phạm vi')
             if row["text"] != expected_text or row["state"] in {"PLANNING", "APPROVED"}:
                 raise StoreConflict("Idea changed, is planning, or was approved; reload or create a new idea")
             if title is not None and row['title'] != expected_title:
                 raise StoreConflict('Tiêu đề đã thay đổi; tải lại idea trước khi lưu')
-            if title is None or text != row['text']:
-                connection.execute("UPDATE ideas SET text=?,conversation_json='[]',state='DRAFT',error=NULL WHERE id=?", (text, idea_id))
+            old_settings = request_settings(row['mode'], row['desired_output'])
+            new_settings = request_settings(mode if mode is not None else old_settings[0],
+                                            desired_output if desired_output is not None else old_settings[1])
+            if mode is not None or desired_output is not None:
+                if expected_mode is None or expected_desired_output is None or old_settings != request_settings(expected_mode, expected_desired_output):
+                    raise StoreConflict('Mode hoặc đầu ra đã thay đổi; tải lại idea trước khi lưu')
+            if title is None or text != row['text'] or new_settings != old_settings:
+                connection.execute("UPDATE ideas SET text=?,mode=?,desired_output=?,conversation_json='[]',state='DRAFT',error=NULL WHERE id=?",
+                                   (text, *new_settings, idea_id))
                 connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
             if title is not None:
                 connection.execute('UPDATE ideas SET title=? WHERE id=?', (title, idea_id))
@@ -786,12 +815,13 @@ class ProjectStore:
             if existing is not None and proposal["state"] == "APPROVED":
                 if existing['deleted_at']:
                     raise StoreConflict('Khôi phục run đã xóa trước khi tiếp tục')
-                return dict(existing)
+                return {**dict(existing), **mode_metadata(json.loads(proposal['context_snapshot_json']))}
             latest = connection.execute("SELECT MAX(version) FROM proposals WHERE idea_id=?", (proposal["idea_id"],)).fetchone()[0]
             idea_state = connection.execute("SELECT state FROM ideas WHERE id=?", (proposal["idea_id"],)).fetchone()[0]
             if proposal["state"] != "AWAITING_APPROVAL" or latest != version or idea_state == "PLANNING":
                 raise StoreConflict("Proposal is not current and awaiting approval")
             self._check_context(connection, json.loads(proposal["context_snapshot_json"]))
+            snapshot_settings(json.loads(proposal['context_snapshot_json']), require_output=True)
             # The exact pinned variant baseline must still be readable before approval.
             if candidate is not None:
                 self.variant_stage_files(candidate['context_snapshot'])
@@ -812,7 +842,7 @@ class ProjectStore:
                                (run_id, proposal_id, intent_key, artifact_dir))
             connection.execute("UPDATE proposals SET state='APPROVED',approved_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), proposal_id))
             connection.execute("UPDATE ideas SET state='APPROVED' WHERE id=?", (proposal["idea_id"],))
-            return dict(connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
+            return {**dict(connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()), **mode_metadata(snapshot)}
 
     def approved_context(self, project_id, run_id):
         # The future coder must use this gate, never a client-supplied proposal body.
@@ -1013,8 +1043,9 @@ class ProjectStore:
                 eligible.add('UNKNOWN')
             if parent['proposal_state'] != 'APPROVED' or parent['state'] not in eligible:
                 raise StoreConflict('Chỉ tạo lượt mới sau khi lượt cũ kết thúc hoặc Kaggle xác nhận account đang rảnh')
-            candidates = connection.execute("SELECT id,state FROM runs WHERE deleted_at IS NULL AND state NOT IN ('FAILED','CANCELLED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
-            if any(row['state'] != 'UNKNOWN' or row['id'] not in idle_unknown_ids for row in candidates):
+            candidates = connection.execute("SELECT * FROM runs WHERE deleted_at IS NULL AND state NOT IN ('FAILED','CANCELLED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
+            if any(not self._is_unstarted_run(connection, row)
+                   and (row['state'] != 'UNKNOWN' or row['id'] not in idle_unknown_ids) for row in candidates):
                 raise StoreConflict('Một run khác đang hoạt động; hoàn tất run đó trước khi tạo lượt mới')
             run_id = uuid.uuid4().hex
             connection.execute("INSERT INTO runs(id,proposal_id,state,intent_key,artifact_dir) VALUES(?,?,'APPROVED',?,?)",

@@ -195,40 +195,60 @@ giữ nguyên 135 artifact mới/125 artifact cha, không replay. Lượt đầu
 
 ## 6. MVP 2 — General Implementation Agent cho workshop và paper
 
-**Bài toán trong nhu cầu gốc được giải quyết:**
-- N01: từ lý thuyết/idea/paper sang code trên nhiệm vụ mới, không chỉ template competition prototype.
-- N01 + N09: giảm bug, sai idea và các rủi ro leak đã xác định bằng checks/feedback cùng lịch sử các lần sửa.
-- N02 + N03: agent tự đọc nguồn, nhận lỗi/test và triển khai; user tập trung làm rõ và duyệt proposal.
-Nghiệm thu fidelity/khả năng sửa lỗi trong phạm vi demo; không bảo đảm mọi idea đều đúng hoặc hết mọi leak.
+**Spec hai mode và plan theo feature:** [IMPLEMENT_MVP2.md](IMPLEMENT_MVP2.md) —
+M2-01 chọn mode/proposal, M2-02 Working Etc/Output, M2-03 Output → Library,
+M2-04 tái sử dụng Training/Research gốc. User tự QA/demo và duyệt sau từng task.
 
-**User làm được:** đưa một nhiệm vụ mới ngoài template prototype, agent làm rõ, lập proposal,
-implement/test/run, sửa lỗi có giới hạn và giải thích độ khớp với idea hoặc nguồn paper.
+**Yêu cầu cập nhật 2026-10-08:** một project có **Training/Research** và **Etc**,
+luân phiên đổi mode và dùng chung Library. Training/Research tận dụng tối đa
+pipeline repo gốc, chỉ thêm điểm nối/tuning cho Codex/Kaggle/project và scope.
+Etc tối giản, không Agentic Tree Search, user bắt buộc mô tả đầu ra mong muốn;
+phần Report của run Etc thành Output. Mode được ghim vào idea/proposal/run,
+đổi lựa chọn GUI không diễn giải lại run lịch sử hoặc đang chạy.
+
+**Bài toán trong nhu cầu gốc được giải quyết:**
+- N01: nghiên cứu workshop/paper bằng pipeline gốc và triển khai công việc linh hoạt bằng Etc.
+- N02 + N03: agent đọc Library chung theo đường dẫn; kết quả Etc copy thành nguồn để dùng ở cả hai mode.
+- N01 + N09: giữ scope/approval, log/kết quả và feedback khi sửa lỗi; xác nhận phiên dừng.
+Nghiệm thu theo nhiệm vụ cụ thể; không bảo đảm mọi idea đều đúng hoặc hết mọi leak.
+
+**User làm được:** chọn mode trong project, nhập idea/nguồn và đầu ra (bắt buộc
+ở Etc), duyệt proposal rồi Working. Research có cây/report; Etc có Output và
+thao tác copy kết quả sang Library, không cần chuyển code hoặc stderr thủ công.
 
 **Bàn giao:**
-- Proposal cho preprocessing, training, evaluation/inference hoặc tái hiện một phần paper.
-- Context từ Library, baseline/reference code nếu có; không yêu cầu user tự viết template experiment.py.
-- Vòng draft/debug/feedback dùng execution evidence, có budget và lý do thay đổi.
-- Checks đối chiếu mục tiêu, data/split/preprocessing và output contract theo nhiệm vụ.
-- Report tách implementation fidelity, số đo và điều chưa tái hiện.
+- Hai mode dùng chung project/Library/approval/lifecycle Kaggle, prompt theo alias riêng.
+- Training/Research: engine/feedback/journal/report gốc, experiment nằm trong project/experiment.
+- Etc: execution trực tiếp, source/log/nội dung/file kết quả trong project/output, không ép metric hoặc artifact training.
+- Copy kết quả Etc thành nguồn Library độc lập, có provenance và ingestion status hiện có.
+- Stop/recovery/approval/version có hiệu lực ở cả hai; không quota tổng số lượt user.
 
 | Checkpoint | Bàn giao dùng được |
 | --- | --- |
-| CP2-A: task ngoài template | Một workshop khác, proposal → implementation → run/report qua cùng GUI |
-| CP2-B: paper implementation | Một hypothesis/module từ paper được implement trên data đã xác định, so với baseline trong cùng protocol |
-| CP2-C: repair + nghiệm thu general | Gặp một lỗi triển khai cụ thể, sửa trong scope; nếu phải đổi idea/split thì quay lại approval |
+| CP2-A: workshop ngoài prototype | Training/Research dùng pipeline gốc, proposal → run/report qua GUI |
+| CP2-B: paper implementation | Module/hypothesis từ paper so với baseline trong cùng protocol |
+| CP2-C: repair và hai mode | Sửa lỗi đúng scope; Etc → Output → copy Library → dùng nguồn ở mode còn lại |
 
 **Tiêu chí nghiệm thu:**
-- P2-01: ít nhất hai nhiệm vụ mới ngoài prototype, gồm một workshop và một phần paper; không hardcode vào competition/template đầu.
-- P2-02: proposal chỉ rõ mục tiêu, nguồn, data/split, evaluation, checks, resource và phần còn mơ hồ.
-- P2-03: coder chạy sau approval; sửa proposal/context khiến approval cũ không cấp quyền cho bản mới.
-- P2-04: agent xử lý một lỗi thực thi thật hoặc lỗi chủ động cài có chủ đích; giữ các lần thử và dừng đúng budget.
-- P2-05: với demo ML, kiểm train/validation disjoint và preprocessing fit trên train;
-  grouping được kiểm khi dữ liệu cần; lỗi phát hiện phải chặn run hoặc sửa trước khi chạy.
-- P2-06: báo cáo đối chiếu từng phần quan trọng của proposal/paper với code/run, ghi rõ approximation và scope chưa tái hiện.
-- P2-07: user không phải mang stderr/test/code qua lại giữa agent và notebook.
+- P2-01: một workshop và một phần paper mới ngoài prototype, không hardcode competition/template đầu.
+- P2-02: proposal bám mục tiêu/nguồn/resource; Training/Research nêu protocol cần thiết;
+  Etc giữ mô tả đầu ra user đã nhập, không tự ép data/split/metric/checkpoint.
+- P2-03: code chạy sau approval; mode/context/đầu ra mới không được cấp quyền bởi approval cũ.
+- P2-04: lỗi thực thi thật hoặc lỗi QA có chủ đích được sửa đúng scope, lưu evidence và dừng đúng budget.
+- P2-05: với demo ML, kiểm split disjoint, preprocessing fit trên train và grouping khi cần;
+  lỗi protocol phải sửa hoặc dừng. Checks nằm trong nhiệm vụ, không khôi phục preflight notebook cho Etc.
+- P2-06: report Training/Research đối chiếu phương pháp/code/run, approximation và phần chưa tái hiện;
+  Etc trình bày Output có thật, không buộc report AI riêng.
+- P2-07: user không phải chuyển stderr/test/code qua lại giữa agent và Kaggle.
+- P2-08: Etc không gọi Agentic Tree Search; kết quả lưu ở project/output, xem/tải và mở lại sau restart.
+- P2-09: copy kết quả Etc vào Library giữ bytes/hash khi có file, có provenance;
+  bản copy độc lập và chọn được cho proposal ở cả hai mode.
+- P2-10: đổi mode trong cùng project dùng chung Library, không đổi mode/snapshot/run cũ;
+  lifecycle xác nhận Kaggle dừng trước hoàn tất, restart không replay.
 
-**Demo chốt:** chọn workshop/paper/data cụ thể trước CP2-A; scope nhỏ, đọc được và chạy bằng tài nguyên hiện có.
-Không coi một metric tốt hay LLM tự đánh giá là bằng chứng đầy đủ implementation đúng.
+**User QA/demo sau từng feature:** workshop/paper nhỏ trên tài nguyên hiện có
+và một journey Etc có Output → Library → dùng ở mode còn lại. Không tách demo
+thành task phát triển, không coi fixture/metric tốt/LLM tự review là đầy đủ evidence.
 
 ## 7. MVP 3 — Quản lý nhiều thí nghiệm và tối ưu đường Kaggle
 

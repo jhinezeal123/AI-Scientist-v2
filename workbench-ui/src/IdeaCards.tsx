@@ -1,9 +1,9 @@
 import {useState} from 'react';
-import {Idea,ideaTitle} from './api';
+import {Idea,ideaTitle,modeLabel} from './api';
 
 const labels:Record<string,string>={
   DRAFT:'Bản nháp', PLANNING:'Đang lập proposal', NEEDS_CLARIFICATION:'Cần trả lời',
-  AWAITING_APPROVAL:'Chờ duyệt', APPROVED:'Đã duyệt', FAILED:'Có lỗi', NEEDS_REVIEW:'Cần xem lại nguồn',
+  AWAITING_APPROVAL:'Chờ duyệt', APPROVED:'Đã duyệt', FAILED:'Có lỗi', NEEDS_REVIEW:'Cần xem lại proposal',
 };
 
 function TitleEditor({idea,busy,onRename}:{idea:Idea;busy:boolean;onRename:(idea:Idea,title:string)=>Promise<void>}) {
@@ -37,6 +37,7 @@ export default function IdeaCards({ideas,selectedId,busy,onSelect,onEdit,onRenam
         aria-expanded={selectedId===idea.id} aria-controls="idea-detail"
         onClick={()=>idea.deleted_at ? void onRestore(idea.id) : onSelect(selectedId===idea.id ? '' : idea.id)}>
         <span className="idea-alias" title={ideaTitle(idea)}>{ideaTitle(idea)}</span>
+        <span className="mode-tag" data-mode={idea.mode}>{modeLabel(idea.mode,idea.mode_legacy)}</span>
         {!idea.title && <small className="idea-preview" title={idea.text.slice(0,160)}>{idea.text.slice(0,80)}</small>}
         <span className="idea-card-status" data-state={idea.state}>
           <span className="idea-status-dot" aria-hidden="true"/>{idea.deleted_at ? 'Đã xóa · bấm để khôi phục' : labels[idea.state] || idea.state}
@@ -50,10 +51,12 @@ export default function IdeaCards({ideas,selectedId,busy,onSelect,onEdit,onRenam
         <button type="button" onClick={()=>onSelect('')}>Đóng chi tiết</button></div>
       <TitleEditor key={`${selected.id}:${selected.title}`} idea={selected} busy={busy} onRename={onRename}/>
       <p className="source-meta">{labels[selected.state] || selected.state} · {new Date(selected.created_at).toLocaleString('vi-VN')}</p>
+      <p className="mode-tag" data-mode={selected.mode}>{modeLabel(selected.mode,selected.mode_legacy)}</p>
+      {selected.mode==='etc' && <><h3>Đầu ra mong muốn</h3><pre>{selected.desired_output || 'Chưa nhập'}</pre></>}
       {selected.variant && <p className="muted">Biến thể từ Run {selected.variant.parent_run_id.slice(0,8)} · {selected.variant.purpose}</p>}
       <pre>{selected.text}</pre><code className="source-id">{selected.id}</code>
-      {!selected.variant && <button type="button" disabled={busy || selected.state==='PLANNING' || selected.state==='APPROVED'}
-        onClick={()=>onEdit(selected)}>Sửa idea</button>}
+      <button type="button" disabled={busy || selected.state==='PLANNING' || selected.state==='APPROVED'}
+        onClick={()=>onEdit(selected)}>{selected.variant ? 'Sửa mode / đầu ra' : 'Sửa idea'}</button>
       <button type="button" className="danger-button" disabled={busy || selected.state==='PLANNING'}
         onClick={()=>void onDelete(selected.id)}>Xóa idea</button>
     </article>}

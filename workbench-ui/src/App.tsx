@@ -1,11 +1,12 @@
 import {FormEvent, useEffect, useRef, useState} from 'react';
-import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal} from './api';
+import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal, RunMode, modeLabel} from './api';
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import SourceCards from './SourceCards';
 import ProjectDeletion from './ProjectDeletion';
+import ModeFields from './ModeFields';
 import {statusText} from './sourceStatus';
 import {loadProjectData} from './projectData';
 import {forgetProject, lastProject, ProjectSession, readProjectSession, rememberProject, saveProjectSession} from './projectSession';
@@ -29,6 +30,9 @@ export default function App() {
   const firstRestore=useRef(true);
   const [ideaText, setIdeaText] = useState('');
   const [title, setTitle] = useState('');
+  const [mode,setMode] = useState<RunMode>(()=>readProjectSession(projectId).mode);
+  const [editingMode,setEditingMode] = useState<RunMode>('training_research');
+  const [desiredOutput,setDesiredOutput] = useState('');
   const [editingIdea,setEditingIdea] = useState<Idea|null>(null);
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState<Resource|null>(null);
@@ -65,6 +69,7 @@ export default function App() {
     }
     firstRestore.current=false;
     setTab(saved.tab);setRunId(saved.runId);setSelected(saved.sourceIds);setIdeaId(saved.ideaId);setSessionProject(projectId);
+    setMode(saved.mode);setDesiredOutput('');
     setContext(null);setEditing(null);setForm(blank);setReplacing(null);
     setIdeaText(''); setTitle(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
     setError('');
@@ -72,14 +77,14 @@ export default function App() {
 
   useEffect(()=>{
     if (sessionProject!==projectId)return;
-    if (projectId)saveProjectSession(projectId,{tab,ideaId,sourceIds:selected,runId});
+    if (projectId)saveProjectSession(projectId,{tab,ideaId,sourceIds:selected,runId,mode});
     const url=new URL(window.location.href);
     if (projectId)url.searchParams.set('project',projectId);
     else url.searchParams.delete('project');
     if (projectId && tab==='Run' && runId)url.searchParams.set('run',runId);
     else url.searchParams.delete('run');
     if (url.href!==window.location.href)window.history.replaceState(null,'',url);
-  },[sessionProject,projectId,tab,ideaId,selected,runId]);
+  },[sessionProject,projectId,tab,ideaId,selected,runId,mode]);
 
   useEffect(()=>{
     if (!connectionError)return;
@@ -169,6 +174,8 @@ export default function App() {
   const project = projects.find(p => p.id === projectId);
   const unavailable=loading || !!connectionError;
   const selectedIdea=ideas.find(idea=>idea.id===ideaId);
+  const outputMissing=selectedIdea?.mode==='etc' && !selectedIdea.desired_output.trim();
+  const formMode=editingIdea ? editingMode : mode;
   const parentSources=selectedIdea?.variant?.baseline.parent.sources || [];
   const changedParentSources=parentSources.filter(parent=>{
     const current=resources.find(source=>source.id===parent.id && !source.deletion_pending);
@@ -194,11 +201,12 @@ export default function App() {
     else if (nextIdea?.variant)setSelected(oldSources.map(source=>source.id)
       .filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
   }
-  async function createVariant(id:string,requestId:string,variantTitle:string,purpose:string,changeSummary:string):Promise<Idea|undefined> {
+  async function createVariant(id:string,requestId:string,variantTitle:string,purpose:string,changeSummary:string,variantMode:RunMode,variantOutput:string):Promise<Idea|undefined> {
     let created:Idea|undefined;
     await action(async()=>{
       created=await api<Idea>(`/projects/${projectId}/runs/${id}/variants`,'POST',{
         request_id:requestId,title:variantTitle,purpose,change_summary:changeSummary,
+        mode:variantMode,desired_output:variantOutput,
       });
       const sources=created.variant?.baseline.parent.sources || [];
       setSelected(sources.map(source=>source.id).filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
@@ -208,6 +216,7 @@ export default function App() {
       });
       setReviewedVariantSources(hasChanged ? '' : created.id);
       setIdeaId(created.id);setEditingIdea(null);setIdeaText('');setTitle('');setContext(null);setTab('Idea');
+      setDesiredOutput('');
       setRevision(n=>n+1);setNotice('Đã lưu idea biến thể ở trạng thái bản nháp. Chưa gọi planner hoặc tạo run.');
     });
     return created;
@@ -221,6 +230,9 @@ export default function App() {
         {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
       {project && <ProjectDeletion key={project.id} project={project} busy={busy} disabled={busy || unavailable || planning || implementing} onDelete={deleteProject}/>}</div>
+      {project && <div className="mode-picker"><label>Mode cho idea mới<select aria-label="Mode cho idea mới" value={mode} disabled={busy}
+        onChange={event=>setMode(event.target.value as RunMode)}><option value="training_research">Training/Research</option><option value="etc">Etc</option></select></label>
+        <small>Hai mode dùng chung Library. Idea và run đã lưu giữ mode riêng.</small></div>}
       <form className="new-project" onSubmit={createProject}><label>Tên project mới<input value={projectName} required maxLength={120} onChange={e => setProjectName(e.target.value)}/></label>
         <button disabled={busy || unavailable || !projectName.trim()}>Tạo project</button></form>
       <nav aria-label="Workbench">{(['Library', 'Idea', 'Run'] as const).map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
@@ -267,22 +279,27 @@ export default function App() {
               onCancel={()=>setReplacing(null)} onUpload={action} onSaved={source=>{setReplacing(null);setContext(null);setRevision(n=>n+1);
                 setNotice(`Đã nhập ${source.title} · v${source.version}: ${statusText(source.status)}.`);}}/></section>
         </div>}
-        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Code và training chỉ thực hiện sau approval.</p>
+        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Working chỉ thực hiện sau approval.</p>
           <form className="stack" onSubmit={event => {event.preventDefault(); void action(async () => {
             const path = `/projects/${projectId}/ideas` + (editingIdea ? `/${editingIdea.id}` : '');
-            const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {title,text: ideaText,...(editingIdea ? {expected_text:editingIdea.text,expected_title:editingIdea.title} : {})});
+            const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {title,text: ideaText,mode:formMode,desired_output:desiredOutput,
+              ...(editingIdea ? {expected_text:editingIdea.text,expected_title:editingIdea.title,expected_mode:editingIdea.mode,expected_desired_output:editingIdea.desired_output} : {})});
             setIdeaId(idea.id); setIdeaText(''); setTitle(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea.');
+            setDesiredOutput('');
           });}}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
-          <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');setTitle('');}}>Hủy sửa idea</button>}</div></form>
+          <ModeFields mode={formMode} desiredOutput={desiredOutput} disabled={busy || unavailable}
+            onMode={editingIdea ? setEditingMode : setMode} onOutput={setDesiredOutput}/>
+          <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} readOnly={!!editingIdea?.variant} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput('');}}>Hủy sửa idea</button>}</div></form>
           <IdeaCards key={projectId} ideas={ideas} selectedId={ideaId} busy={busy || unavailable} onSelect={selectIdea}
             onDelete={async id=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${id}`,'DELETE');setIdeaId('');setContext(null);setEditingIdea(null);setIdeaText('');setTitle('');
+              setDesiredOutput('');
               setRevision(n=>n+1);setNotice('Đã xóa idea khỏi danh sách. Có thể khôi phục trong mục Đã xóa.');
             });}}
             onRestore={async id=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục idea.');
             });}}
-            onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);}}
+            onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);setEditingMode(idea.mode);setDesiredOutput(idea.desired_output);}}
             onRename={async (idea,newTitle)=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${idea.id}/title`,'PATCH',{title:newTitle,expected_title:idea.title});
               setRevision(n=>n+1);setNotice('Đã lưu tiêu đề idea.');
@@ -301,11 +318,13 @@ export default function App() {
             </div>}
             {resources.filter(resource=>!resource.deletion_pending).map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);setReviewedVariantSources('');}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || unavailable || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
-            <button className="primary" disabled={busy || unavailable || planning || variantSourceReviewRequired || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
+            {selectedIdea && <p className="muted">Idea đang chọn: {modeLabel(selectedIdea.mode,selectedIdea.mode_legacy)}.</p>}
+            {outputMissing && <p role="status" className="alert">Etc cần đầu ra mong muốn. Bấm Sửa idea để nhập trước khi lập proposal.</p>}
+            <button className="primary" disabled={busy || unavailable || planning || outputMissing || variantSourceReviewRequired || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
               await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
             })}>Lập proposal bằng Codex</button>
           </div>{context && <div className="context"><h3>Context snapshot</h3><code className="source-id">SHA256 {context.context_sha256}</code>{context.snapshot.resources.map(resource => <div className="context-source" key={resource.id}><strong>{resource.title}</strong><small>v{resource.version} · {statusText(resource.status)}</small><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>)}<details><summary>Xem context và đường dẫn nguồn</summary><pre>{JSON.stringify(context.snapshot,null,2)}</pre></details></div>}
-        </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={selectedIdea} proposals={proposals} resources={resources} busy={busy || unavailable || planning || variantSourceReviewRequired}
+        </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={selectedIdea} proposals={proposals} resources={resources} busy={busy || unavailable || planning || outputMissing || variantSourceReviewRequired}
           onOpenParent={openRun}
           onReplan={async()=>{await action(async()=>{
             await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected});
@@ -323,6 +342,7 @@ export default function App() {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
         {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning || implementing}
+          defaultMode={mode}
           onCreateVariant={createVariant}
           onDelete={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRevision(n=>n+1);setNotice('Đã xóa run khỏi danh sách. Artifacts được giữ để khôi phục.');

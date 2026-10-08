@@ -1,0 +1,292 @@
+# MVP2 — hai mode Training/Research và Etc
+
+Cập nhật: **2026-10-08**, Asia/Saigon. Nền bàn giao: `mvp1-2026-10-08`.
+Roadmap: [PRODUCT_ROADMAP.md, mục 6](PRODUCT_ROADMAP.md#6-mvp-2--general-implementation-agent-cho-workshop-và-paper).
+
+## 1. Yêu cầu đã chốt
+
+Một project có hai mode dùng chung Library:
+
+- **Training/Research:** tái sử dụng tối đa pipeline nghiên cứu của repo gốc,
+  gồm Agentic Tree Search, implementation/tuning/research/ablation, execution
+  feedback, journal và report. Chỉ tuning và bổ sung điểm nối cần cho Codex,
+  Kaggle SSH, workspace project, nguồn và budget đã duyệt.
+- **Etc:** Working trực tiếp, linh hoạt, không Agentic Tree Search. User bắt
+  buộc mô tả đầu ra mong muốn. Run giữ thông tin/status/log/Stop/artifacts như
+  hiện tại; phần Report được thay bằng **Output**. Kết quả lưu trong thư mục
+  `output/` của project và có thể được copy thành nguồn Library.
+
+User luân phiên đổi mode trong cùng project. Mode là lựa chọn hiển thị/tạo
+công việc mới; mỗi idea/proposal/run phải giữ mode của nó. Đổi mode trên GUI
+không đổi mode của run đang chạy hoặc lịch sử và không làm mất Library.
+
+Task chia theo feature; **user tự QA/demo sau mỗi task**. Agent bàn giao code,
+hướng dẫn thao tác và checklist, chờ user duyệt trước khi làm task tiếp theo.
+M2-01 đã triển khai để user QA; M2-02 đến M2-04 vẫn là kế hoạch. Chưa nghiệm thu
+luồng MVP2 trọn vẹn hoặc chạy demo Kaggle mới.
+
+## 2. So sánh hành vi
+
+| Thành phần | Training/Research | Etc |
+| --- | --- | --- |
+| Library | Chung của project | Chung của project |
+| Idea/proposal | Hypothesis/method, data/evaluation và thí nghiệm theo yêu cầu | Mục tiêu, nguồn, cách thực hiện và mô tả đầu ra user đã nhập |
+| Approval | User duyệt proposal trước Working | Cùng approval hiện có |
+| Execution | Tree Search gốc, bốn stage | Agent làm trực tiếp qua terminal Kaggle |
+| Debug | Draft/debug/improve và feedback gốc | Agent đọc lỗi và sửa trong cùng Working; không tạo cây |
+| Tiêu chí | Protocol/method và evidence của thí nghiệm | Đầu ra user yêu cầu và thực thi có thật |
+| Metric/split/checkpoint | Theo thí nghiệm được duyệt | Không bắt buộc; chỉ dùng nếu nhiệm vụ yêu cầu |
+| Phần kết quả trong run | Report, cây và artifacts | Output: nội dung/kết quả và file tải/xem được |
+| Thư mục run | `project/experiment/<lượt>/` | `project/output/<lượt>/` |
+| Chọn kết quả làm nguồn | Các khả năng hiện có | Nút copy một kết quả sang Library |
+
+Etc không cần bảng phân loại task, recipe/template training, DSL checks,
+preflight notebook, chữ ký run/emit, metric/seed cố định hoặc bộ artifact
+bắt buộc. Mô tả đầu ra do user nhập không được thay bằng đầu ra do planner tự
+đoán. Agent có thể hỏi rõ nội dung đó nếu còn mơ hồ.
+
+Các cơ chế chung tiếp tục áp dụng: approval đúng version/scope, account,
+phiên SSH, log và thu file, xác nhận Kaggle dừng, project ownership và recovery.
+Không có quota tổng số lượt code/submit. User quyết định từng lượt, budget
+thời gian/tài nguyên là thiết lập của phiên. Không thêm gate nghiệp vụ cho Etc
+ngoài mô tả đầu ra và approval hiện có; kiểm tra đường dẫn/hash phục vụ lưu
+đúng file, không phải preflight triển khai.
+
+## 3. Mode và proposal
+
+- GUI có lựa chọn rõ **Training/Research / Etc** trong project, nhớ lựa chọn
+  đang dùng. Idea/run cards có nhãn mode để phân biệt lịch sử trong project.
+- Idea mới lấy mode đang chọn. Khi mở idea/run cũ, nội dung và nhãn thể hiện
+  mode đã lưu, không dùng mode đang chọn để diễn giải lại dữ liệu.
+- Etc có ô **Đầu ra mong muốn**: mô tả tự do của user, không buộc tên file hay
+  JSON schema. Đầu ra có thể là nội dung trả lời, bảng, CSV, ảnh, dataset, code,
+  PDF hoặc kết quả khác. Mô tả không rỗng trước khi lập/duyệt proposal.
+- Mode và mô tả đầu ra nằm trong context đã ghim của proposal/approval/run.
+  Sửa mode hoặc đầu ra của một idea cần lập/duyệt proposal mới; không dùng
+  approval cũ cho mode khác.
+- Retry giữ mode/proposal/đầu ra đã duyệt. Variant mới có thể chọn mode mới
+  trong cùng project và phải có proposal/approval mới; parent giữ nguyên.
+- Dữ liệu cũ thiếu mode có đường đọc tương thích, giữ layout và report hiện
+  có; không sửa snapshot/approval/hash lịch sử để gán lại hành vi.
+- Prompt cho hai mode nằm trong `ai_scientist/workbench/system_prompt/`,
+  backend gọi qua alias. Prompt Etc tối giản, không ghép instructions research.
+
+## 4. Lưu Output của Etc
+
+```text
+.workbench/projects/<tên project>/
+├── project.sqlite
+├── library/
+│   └── <tiêu đề nguồn>/vN/...
+├── experiment/
+│   └── <lượt Training-Research>/...
+└── output/
+    └── <lượt Etc>/...
+```
+
+Mỗi lượt Etc có thư mục riêng, tên dễ đọc theo tiêu đề/ngày/attempt theo cách
+đặt tên hiện tại, không ghi đè lượt khác. Project `output/` là nơi chứa run
+bundle Etc và kết quả đã thu; thư mục `output/` của agent trong Kaggle là nơi
+agent tạo file trước khi backend thu. Không chuyển experiment cũ sang output.
+
+SQLite giữ liên kết tương đối tới thư mục run. Bundle Etc dùng lại lưu
+proposal/context, source, log, manifest và file kết quả hiện có; không tạo
+journal cây/stage/token research hoặc `report.md` bắt buộc. Metadata/log cần
+để xem lại và retry cùng nằm trong bundle, không lưu thêm bản sao kết quả ở
+một workspace riêng ngoài project.
+
+Trong Run Etc:
+
+- Giữ card, trạng thái, account/phiên, log, ngân sách phiên, Stop và retry.
+- Phần **Output** hiển thị kết quả dạng nội dung và các file đã thu. Tái sử
+  dụng artifact page cho danh sách file dài và download; chỉ preview loại file
+  hiện hỗ trợ. File khác vẫn xuất/tải được.
+- Kết quả lỗi/partial đã thu có trạng thái rõ, không nhận là hoàn thành chỉ vì
+  tồn tại file. Không tạo report AI riêng nếu user chỉ cần đầu ra công việc.
+- Backend chỉ công bố kết thúc khi đã xác nhận Kaggle dừng. Restart đọc lại
+  kết quả/log đã lưu và không tự chạy lại agent hoặc mở phiên mới.
+
+## 5. Copy Output thành nguồn Library
+
+User chọn một kết quả đã lưu của run Etc → **Thêm vào Library** → đặt tiêu đề
+nguồn → backend copy kết quả vào Library của chính project.
+
+- Copy server-side từ kết quả đã thu, không bắt user download rồi upload.
+- Là bản sao thật, không move/symlink hoặc chỉ lưu đường dẫn tới output gốc.
+  Xóa output/run sau đó không làm mất nguồn Library đã copy; xóa nguồn không
+  xóa file output gốc.
+- Với file: giữ bytes và tên/định dạng gốc; dùng Library versioning/hash,
+  naming và ingestion hiện có. Với output là nội dung text: lưu thành nguồn
+  text bằng luồng Library hiện có.
+- Lưu provenance tối thiểu: run nguồn, đường dẫn kết quả và hash khi có file.
+  Nguồn mới không mang quyền truy cập session/credential của run.
+- File không trích được text vẫn được lưu và hiển thị đúng ingestion status;
+  không yêu cầu nó phải là paper/PDF hoặc được coi là đã hiểu.
+- Không đặt quota mới cho kết quả. Nếu giới hạn intake hiện tại cản copy file
+  thực tế, xử lý ở điểm nhập/copy này, không thay copy bằng URL/reference.
+- Nguồn mới có thể được chọn cho proposal ở cả hai mode như nguồn Library
+  bình thường. Chưa tự động thêm nguồn đó vào proposal hoặc tự chạy agent.
+
+## 6. Trách nhiệm và tái sử dụng
+
+Chỉ một hệ thống project/approval/run và một lifecycle Kaggle chung.
+WorkingService quản lý connect/SSH/log/thu file/Stop/recovery; mode quyết định
+đường thực hiện và nơi lưu kết quả. Tái sử dụng hai đường execution hiện đã có:
+TreeSearchRun và Working trực tiếp (`search.enabled=false`). Mode do proposal
+đã duyệt quyết định, không nhận một cờ từ client để đổi mode sau approval.
+
+| Phần gốc/hiện có | Cách sử dụng |
+| --- | --- |
+| AgentManager, ParallelAgent/chính sách draft-debug-improve | Training/Research; tránh viết lại thuật toán và pipeline stage |
+| Node/Journal, MetricValue, save_run, bfts_utils | Experiment Training/Research và viewer/layout gốc |
+| MinimalAgent execution feedback, interpreter.ExecutionResult | Training/Research; chỉ đổi điểm nối execution/provider cần thiết |
+| log_summarization, journal2report, plotting/writeup/review | Tận dụng cho Training/Research theo outputs đã duyệt; không chạy trong Etc mặc định |
+| perform_ideation_temp_free, Semantic Scholar | Nền cho Ideathon human + agent sau này; không thêm ideation tự động vào MVP2 |
+| Codex worker, SSH bridge, Working lifecycle, log/manifest/recovery | Chung cả hai mode |
+| LibraryFiles, import_file/ingestion/versioning/named_paths | Library chung và copy kết quả Etc thành nguồn |
+| RunView/artifact page và GUI card/detail | Run chung, render Report hoặc Output theo mode |
+
+Bê nguyên logic gốc khi môi trường/contract tương thích. Phần gắn provider API,
+GPU/process pool local và đường dẫn workspace cần điểm nối phù hợp Codex/SSH;
+không chạy launcher nguyên bản để tạo thêm session hoặc provider trả phí.
+Nguồn và budget được duyệt tiếp tục là scope của Training/Research. Các bước
+plotting/writeup/review/multi-seed chỉ chạy khi được yêu cầu/duyệt; không tuyên
+bố đã tích hợp chỉ vì file/module còn trong fork.
+
+## 7. Task theo feature
+
+| Task | Feature | Bàn giao cho user QA | Trạng thái |
+| --- | --- | --- | --- |
+| **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Chưa bắt đầu |
+| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Chưa bắt đầu |
+| **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Chưa bắt đầu |
+| **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Chưa bắt đầu |
+
+Thứ tự M2-01 → M2-02 → M2-03 → M2-04. Mỗi task có code/hướng dẫn và commit
+riêng; user QA rồi duyệt task tiếp. Refactor cấu trúc cần thiết giữ hành vi,
+kiểm chứng và commit riêng trước behavior theo skill pattern-design. Không
+tách QA/demo thành task phát triển; không tự mở phiên Kaggle hoặc chạy tests
+khi chưa được yêu cầu. Khi user yêu cầu kiểm thử, ưu tiên browser workflow và
+regression nhỏ theo phần bị tác động.
+
+### M2-01 — Hai mode, proposal và prompt
+
+**Phạm vi:** GUI chọn mode/đầu ra, metadata idea/context/proposal/run, approval,
+prompt alias và read compatibility. Chưa đổi engine execution ở task này;
+Etc chưa có đường chạy thì GUI phải nói rõ và không phát research thay thế.
+
+**Bàn giao M2-01 (2026-10-08):** có chọn mode theo project (lưu tại browser),
+mode/đầu ra của idea, snapshot approval và nhãn run; hai prompt planner đọc theo
+alias. Database lên schema 8 chỉ thêm cột idea, không sửa JSON/hash proposal cũ.
+Run cũ hiển thị “Phiên bản cũ” và giữ đường chạy/artifacts. Etc được lưu nháp,
+lập/duyệt proposal; backend và GUI chặn Working cho tới M2-02. Retry tiếp tục
+dùng cùng proposal; variant cho chọn mode mới. Các approval chưa mở phiên không
+khóa việc retry run đã kết thúc. Build frontend và compile Python đã thành công;
+QA tính năng do user thực hiện theo hướng dẫn bên dưới. Backend đã khởi động
+lại tại `http://127.0.0.1:8011/`, health OK; cả 6 project lên schema 8. Fingerprint
+của body/snapshot/hash của 13 proposal cũ giống nhau trước và sau migration.
+
+**Cách QA trên GUI:**
+
+1. Mở project, ghi nhận nguồn đang có ở Library. Đổi “Mode cho idea mới” ở bên
+   trái sang Etc, chuyển project rồi quay lại/refresh: lựa chọn vẫn là Etc và
+   Library giữ nguyên. Mode này chỉ dùng làm mặc định khi tạo idea/variant.
+2. Tạo idea “Tạo dữ liệu mẫu”, nội dung “Tạo 100 dòng dữ liệu bán hàng giả”, để
+   đầu ra trống rồi lưu. Nút lập proposal bị khóa và có hướng dẫn nhập đầu ra.
+3. Bấm “Sửa idea”, nhập đầu ra “Một CSV gồm 100 dòng với các cột ngày, sản phẩm,
+   số lượng, đơn giá; kèm mô tả ngắn bằng tiếng Việt”, lưu và lập proposal.
+   Kiểm tra proposal phản ánh mô tả, không tự thêm bốn stage hay protocol training.
+4. Khi proposal chờ duyệt, sửa mô tả thành 200 dòng. Proposal v1 phải thành
+   STALE, không còn nút duyệt; lập lại để có version/hash mới. Thử đổi mode của
+   draft cũng phải làm proposal chờ duyệt thành STALE.
+5. Duyệt proposal Etc hợp lệ, mở Run: nhãn Etc, đầu ra đúng snapshot, nút Working
+   vô hiệu và nêu M2-02. Đổi mode ở sidebar không đổi nhãn/nội dung run này.
+6. Tạo idea Training/Research mới: so sánh LogisticRegression và SVC trên
+   make_moons, chọn bằng validation rồi đánh giá test. Kiểm tra proposal bám
+   phương pháp, dữ liệu và đánh giá. Sau duyệt, form Working vẫn có bốn stage.
+7. Mở run/idea cũ: nhãn “Phiên bản cũ”, report và artifacts vẫn mở được. Từ run
+   đã kết thúc, tạo variant Etc: được chọn mode/đầu ra và phải lập/duyệt proposal
+   mới. Tạo lượt Working mới (retry) vẫn dùng proposal/mode đã duyệt của parent.
+
+Idea đã APPROVED không sửa phạm vi tại chỗ: tạo idea mới hoặc variant từ run đã
+kết thúc. Đổi tiêu đề chỉ đổi tên hiển thị, không làm proposal stale. Lưu thay
+đổi phạm vi draft làm sạch trao đổi cũ; các proposal cũ vẫn còn trong lịch sử.
+Các thao tác lập proposal dùng Codex thật; M2-01 QA không cần mở Kaggle.
+
+**User QA:**
+
+- [ ] Đổi Training/Research ↔ Etc trong project, Library giữ nguyên; chuyển
+  project rồi quay lại vẫn đọc đúng idea/run của project.
+- [ ] Etc thiếu mô tả đầu ra không lập/duyệt proposal; nhập mô tả thì planner
+  phản ánh đúng yêu cầu và không tự thêm protocol training/Tree Search.
+- [ ] Training/Research proposal bám hypothesis/method/data/evaluation.
+- [ ] Sửa mode/đầu ra làm proposal chờ duyệt cần lập lại; approval cũ không
+  cấp quyền cho mode mới. Đổi lựa chọn GUI không đổi run đang chạy/lịch sử.
+- [ ] Retry/variant và dữ liệu cũ đọc được, không ghi lại snapshots/hash cũ.
+
+### M2-02 — Working Etc và Output
+
+**Phạm vi:** dùng lại execution trực tiếp, cấp thư mục project/output, thu
+file và trình bày Output. Giữ lifecycle/Stop/recovery. Chưa cần copy Library.
+
+**User QA:**
+
+- [ ] Idea Etc có đầu ra đã mô tả → proposal → approval → Working trực tiếp.
+- [ ] Không gọi AgentManager, không stage tuning/research/ablation, không hiện
+  ngân sách bốn stage hay cây trên run Etc.
+- [ ] Kết quả/nội dung/files nằm đúng project/output/<lượt>; mở/tải qua Output.
+- [ ] Run Etc tiếp theo có thư mục riêng; run Training/Research vẫn ở experiment.
+- [ ] Log/Stop/retry/timeout/restart giữ trạng thái thật và xác nhận dừng;
+  không cần report.md/metric/checkpoint để hoàn thành Etc.
+- [ ] Chỉ mode/scope đã duyệt được chạy; swap GUI không đổi execution hiện hành.
+
+### M2-03 — Copy Output sang Library
+
+**Phạm vi:** thao tác chọn kết quả/đặt tiêu đề, copy server-side, Library
+metadata/ingestion/provenance. Tận dụng import/version/naming hiện có.
+
+**User QA:**
+
+- [ ] Chọn file hoặc output text → Thêm vào Library → nguồn xuất hiện đúng tên.
+- [ ] File copy giữ bytes/hash; mở nguồn và chọn vào proposal ở cả hai mode.
+- [ ] Bản copy độc lập: xóa một run QA không cần thiết không làm mất nguồn đã
+  copy; không dùng project/run thật của user để thử xóa khi chưa được yêu cầu.
+- [ ] Nguồn không có text vẫn có bản gốc/trạng thái đúng; tên trùng xử lý theo
+  Library hiện có, không ghi đè nguồn/phiên bản khác.
+- [ ] Copy không gọi agent, mở Kaggle, tự duyệt hoặc tự chọn nguồn cho proposal.
+
+### M2-04 — Training/Research dùng lại repo gốc
+
+**Phạm vi:** đối chiếu đường research hiện tại với toàn pipeline upstream;
+nối lại thành phần cần thiết, giữ logic gốc tối đa. Chỉ tuning nguồn/budget,
+provider/SSH và đường dẫn project. Report/cây và thí nghiệm tiếp tục chuyên biệt
+cho Training/Research; không general hóa bốn stage để ép dùng cho Etc.
+
+**User QA:**
+
+- [ ] Training/Research chạy đủ bốn stage bằng engine gốc trên một phiên SSH.
+- [ ] Draft/debug/improve, selection, feedback và code/output/parent được lưu
+  đúng; protocol/budget user đã duyệt được giữ.
+- [ ] Mỗi phần được nối (summary/plot/writeup/review/multi-seed) có bảng trạng
+  thái thực và cách gọi; phần ngoài outputs đã duyệt không tự chạy.
+- [ ] Report/cây/artifacts mở được, experiment đúng project, node cũ không bị
+  ghi đè và restart không replay.
+- [ ] Sau đó đổi sang Etc trong cùng project vẫn dùng Library chung, không
+  chạy research prompts/engine và Output → Library vẫn dùng được.
+
+## 8. Điều kiện đóng MVP2
+
+User QA/demo sau từng feature; ghi evidence thực trong run/Output/experiment
+và cập nhật trạng thái đã triển khai/đã nghiệm thu theo bằng chứng. Dùng lại
+bằng chứng MVP1 còn hợp lệ, không yêu cầu chạy lại toàn pipeline chỉ để đóng mốc.
+
+- Training/Research: workshop và phần paper ngoài prototype, proposal đúng
+  scope, debug có evidence, report đối chiếu phương pháp/kết quả/giới hạn.
+- Etc: user mô tả đầu ra → proposal/approval → Working trực tiếp → Output,
+  xác nhận dừng → copy một kết quả sang Library → dùng nguồn đó ở mode còn lại.
+- Mode/version/approval/project isolation/restart có hiệu lực ở cả hai.
+- Chưa có run thật hoặc chưa được user QA thì ghi chưa nghiệm thu; không tính
+  fixture hoặc sự tồn tại module upstream thành khả năng đã hoàn thành.
+
+Ideathon hybrid human + agent vẫn là bước sau; mode Training/Research giữ
+nền pipeline upstream để nối ideation vào idea/proposal/approval dùng chung.

@@ -1,8 +1,10 @@
 import {useCallback, useEffect, useState} from 'react';
-import {api, History, Idea, Variant, Working} from './api';
+import {api, History, Idea, Variant, Working, RunMode, modeLabel} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
+import ModeFields from './ModeFields';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
+  mode:RunMode;mode_legacy:boolean;desired_output:string;
   execution_mode:'ssh'|'legacy';working?:Working;
   search?:{experiment:string;directory?:string;stages:{name:string;nodes:number}[];tree_path:string|null};
   can_retry:boolean;parent_run_id:string|null;
@@ -16,11 +18,12 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
 
 const newRequestId=()=>crypto.randomUUID().replaceAll('-','');
 
-export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore, onCreateVariant}: {
+export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, defaultMode, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore, onCreateVariant}: {
+  defaultMode:RunMode;
   projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,stageIterations:number[])=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>;
-  onCreateVariant:(id:string,requestId:string,title:string,purpose:string,changeSummary:string)=>Promise<Idea|undefined>}) {
+  onCreateVariant:(id:string,requestId:string,title:string,purpose:string,changeSummary:string,mode:RunMode,desiredOutput:string)=>Promise<Idea|undefined>}) {
   const [showDeleted,setShowDeleted]=useState(false);
   const visible=runs.filter(run=>Boolean(run.deleted_at)===showDeleted);
   const deletedCount=runs.filter(run=>run.deleted_at).length;
@@ -34,6 +37,8 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
   const [variantTitle,setVariantTitle]=useState('');
   const [variantPurpose,setVariantPurpose]=useState('');
   const [variantChanges,setVariantChanges]=useState('');
+  const [variantMode,setVariantMode]=useState<RunMode>(defaultMode);
+  const [variantOutput,setVariantOutput]=useState('');
   const [variantRequestId,setVariantRequestId]=useState(newRequestId);
   const [variantAttempted,setVariantAttempted]=useState(false);
   const selectedId = visible.some(run => run.id===selectedRunId && !run.deleted_at) ? selectedRunId : null;
@@ -79,6 +84,7 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         aria-expanded={selectedId === run.id} aria-controls="run-detail"
         onClick={() => run.deleted_at ? void onRestore(run.id) : onSelect(selectedId === run.id ? '' : run.id)}>
         <span className="run-alias">Run {run.id.slice(0,8)}</span>
+        <span className="mode-tag" data-mode={run.mode}>{modeLabel(run.mode,run.mode_legacy)}</span>
         <span className="run-card-status" data-state={observations[run.id] || run.state}>
           <span className="run-status-dot" aria-hidden="true"/>{run.deleted_at ? 'Đã xóa · bấm để khôi phục' : run.state === 'COLLECTING' && details.find(item => item.id === run.id)?.collection?.phase === 'retry_exhausted'
             ? 'Report cần xử lý' : labels[observations[run.id] || run.state] || observations[run.id] || run.state}
@@ -94,9 +100,17 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
           onClick={()=>void onDelete(run.id)}>Xóa run</button>
         <button type="button" onClick={() => onSelect('')}>Đóng chi tiết</button></div></div>
       <div className="panel-head"><code className="source-id">{run.id}</code><span className="state-tag">{observations[run.id] || run.state}</span></div>
-      {run.state === 'APPROVED' && <p>Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.</p>}
+      <p className="mode-tag" data-mode={run.mode}>{modeLabel(run.mode,run.mode_legacy)}</p>
+      {run.mode_legacy && <p className="muted">Run trước MVP2: giữ nguyên proposal, artifacts và đường chạy đã có.</p>}
+      {run.state === 'APPROVED' && <p>{run.mode==='etc'
+        ? 'Proposal Etc đã duyệt. Working Etc sẽ được triển khai ở M2-02.'
+        : 'Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.'}</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
-      {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
+      {run.mode==='etc' && !run.working && <div className="context"><h3>Working Etc</h3>
+        <p>Đường chạy trực tiếp và mục Output sẽ có ở M2-02. Run này chưa mở phiên Kaggle.</p>
+        <button type="button" disabled>Bắt đầu Working · chờ M2-02</button>
+      </div>}
+      {run.mode!=='etc' && !run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
         <h3>Working</h3>
         <p>Agentic Tree Search: implementation → tuning → research → ablation. Cả cây dùng chung một phiên Kaggle.</p>
         <label>Phần cứng<select value={accelerator} disabled={busy} onChange={e=>setAccelerator(e.target.value)}>
@@ -159,6 +173,7 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         {['REMOTE_SUCCEEDED','COLLECTING'].includes(observations[run.id] || run.state) && <p className="muted">Run thuộc phiên bản cũ. Kết quả đã lưu vẫn có thể xem; tạo lượt Working mới để tiếp tục.</p>}
       </div>}
       <div className="context"><h3>Mục tiêu</h3><p>{run.purpose}</p><code className="source-id">Proposal {run.proposal_id} · v{run.proposal_version}</code>
+        {run.mode==='etc' && <><h3>Đầu ra user yêu cầu</h3><pre>{run.desired_output}</pre></>}
         {!!run.expected_outputs?.length && <p className="muted">Đầu ra đã duyệt: {run.expected_outputs.join(' · ')}</p>}
         {run.result_metric && <p>Kết quả đo được: {run.result_metric.name} · {run.result_metric.direction} · cuối {run.result_metric.final_value} · tốt nhất {run.result_metric.best_value}</p>}
       </div>
@@ -173,15 +188,19 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         {run.report_preview && <pre className="report-preview">{run.report_preview}</pre>}</>}
       {['COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED'].includes(run.state)
         && !run.deleted_at && (run.execution_mode!=='ssh' || run.working?.stop_confirmed) && <div className="context stack">
-          {!variantOpen ? <button type="button" disabled={busy} onClick={()=>setVariantOpen(true)}>Tạo biến thể idea</button>
+          {!variantOpen ? <button type="button" disabled={busy} onClick={()=>{setVariantMode(defaultMode);
+            setVariantOutput(defaultMode==='etc' && run.mode==='etc' ? run.desired_output : '');setVariantOpen(true);}}>Tạo biến thể idea</button>
             : <form className="stack" onSubmit={event=>{event.preventDefault();setVariantAttempted(true);
-              void onCreateVariant(run.id,variantRequestId,variantTitle.trim(),variantPurpose.trim(),variantChanges.trim()).then(idea=>{
+              void onCreateVariant(run.id,variantRequestId,variantTitle.trim(),variantPurpose.trim(),variantChanges.trim(),variantMode,variantOutput.trim()).then(idea=>{
                 if (idea) {setVariantOpen(false);resetVariant();}
               });}}>
               <h3>Tạo biến thể idea</h3><p>Run cha: {run.id}</p>
               <p><strong>Mục tiêu cũ: </strong>{run.purpose}</p>
               <label>Tiêu đề<input required maxLength={80} value={variantTitle} disabled={busy}
                 onChange={event=>editVariant(setVariantTitle,event.target.value)}/></label>
+              <ModeFields mode={variantMode} desiredOutput={variantOutput} disabled={busy}
+                onMode={value=>{setVariantMode(value);if (variantAttempted) {setVariantRequestId(newRequestId());setVariantAttempted(false);}}}
+                onOutput={value=>editVariant(setVariantOutput,value)}/>
               <label>Mục đích mới<textarea required rows={3} maxLength={20000} value={variantPurpose} disabled={busy}
                 onChange={event=>editVariant(setVariantPurpose,event.target.value)}/></label>
               <label>Thay đổi so với run gốc<textarea required rows={4} maxLength={20000} value={variantChanges} disabled={busy}

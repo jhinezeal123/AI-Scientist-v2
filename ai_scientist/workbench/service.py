@@ -8,6 +8,7 @@ import uuid
 from pydantic import ValidationError
 
 from .models import WorkingProposal
+from .modes import snapshot_settings
 from .prompts import planning_prompt
 from .store import StoreConflict
 
@@ -27,16 +28,18 @@ class PlanningService:
             if self.closed or (self.task is not None and not self.task.done()):
                 raise StoreConflict("An agent job is active; wait before requesting another proposal")
             context = await asyncio.to_thread(self.store.context_snapshot, project_id, idea_id, resource_ids)
+            snapshot_settings(context['snapshot'], require_output=True)
             await asyncio.to_thread(self.store.reserve_plan, project_id, idea_id)
             self.task = asyncio.create_task(self._plan(project_id, idea_id, context))
             return {"idea_id": idea_id, "state": "PLANNING"}
 
-    async def create_variant(self, project_id, parent_run_id, request_id, title, purpose, change_summary):
+    async def create_variant(self, project_id, parent_run_id, request_id, title, purpose, change_summary,
+                             mode=None, desired_output=None):
         if self.view is None:
             raise RuntimeError('Run view is required to capture a safe variant baseline')
         baseline, texts = await asyncio.to_thread(self.view.variant_baseline, project_id, parent_run_id)
         return await asyncio.to_thread(self.store.create_variant_idea, project_id, parent_run_id, request_id,
-                                       title, purpose, change_summary, baseline, texts)
+                                       title, purpose, change_summary, baseline, texts, mode, desired_output)
 
     async def _plan(self, project_id, idea_id, context):
         try:

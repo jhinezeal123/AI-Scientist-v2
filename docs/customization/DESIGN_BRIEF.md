@@ -71,11 +71,19 @@ Việc nghĩ idea mặc định thuộc người dùng. Ideathon chỉ hoạt đ
 
 ## 5. Phạm vi theo lần bàn giao
 
+**Cập nhật MVP2, 2026-10-08:** mỗi project dùng chung Library cho hai mode
+Training/Research và Etc. Training/Research tái sử dụng tối đa pipeline gốc;
+Etc không Tree Search, user bắt buộc mô tả đầu ra, phần kết quả của run là
+Output và lưu tại `project/output/`, cùng cấp `library/` và `experiment/`.
+User có thể copy kết quả Etc thành nguồn Library độc lập. Mode được ghim
+trong idea/proposal/run; đổi mode trên GUI không đổi lịch sử hoặc phiên đang
+chạy. Spec và task theo feature: [IMPLEMENT_MVP2.md](IMPLEMENT_MVP2.md).
+
 | Chặng | Khả năng dùng được sau bàn giao |
 | --- | --- |
 | MVP 0 — Prototype <8 giờ | Library text/URL → idea/proposal → approval → Codex → notebook Kaggle thật → report/history qua GUI |
 | MVP 1 — Workbench cá nhân | Nhiều project, Library PDF/file/source version, context và discussion/history qua nhiều phiên |
-| MVP 2 — Implementation tổng quát | Workshop/paper ngoài template prototype, fidelity checks, tự sửa lỗi đúng scope/budget |
+| MVP 2 — Implementation tổng quát | Training/Research gốc và Etc linh hoạt; Output → Library, scope/approval và kết quả bền vững |
 | MVP 3 — Quản lý thí nghiệm | Nhiều run/account, status/live curves/ETA, queue/cancel/recovery, compare và tối ưu MCP/logs |
 | MVP 4 — Retrieval/RAG | Tìm source/run bằng ngôn ngữ tự nhiên, evidence refs và context cho proposal mới |
 | MVP 5 — Đa harness | Codex và harness thứ hai thật qua cùng AgentPort/GUI/approval/history |

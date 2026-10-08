@@ -1,4 +1,6 @@
 {
+  "planner.training_research": "planner_training_research.md",
+  "planner.etc": "planner_etc.md",
   "working.agent": "working_agent.md",
   "working.instructions": "working_instructions.md",
   "search.node": "search_node.md",
