@@ -20,7 +20,7 @@ mốc sau, không thêm vào MVP1.
 | M1-01 / CP1-A | Import PDF/file, bản gốc + text theo trang, ingestion status/version | Hai project riêng; chọn file vừa import làm context; agent đọc qua đường dẫn | Đã bàn giao local, 2026-10-08 |
 | M1-02 / CP1-B | Trao đổi/approval/artifacts tiếp tục qua restart, UI khôi phục/lỗi | Restart không replay agent/notebook; source mới làm proposal chờ duyệt cần xem lại | Đã bàn giao local, 2026-10-08 |
 | M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Đã nghiệm thu local, 2026-10-08 |
-| M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Chưa nghiệm thu |
+| M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Đạt nghiệm thu thật; MVP1 đóng ngày 2026-10-08 |
 
 ### Mở rộng đã yêu cầu sau M1-03
 
@@ -30,8 +30,25 @@ ablation. Các lượt mới lưu theo
 `.workbench/projects/<tên project>/experiment/YYYY-MM-DD_<idea>_attempt_N/`,
 cùng cấp với Library; SQLite giữ đường dẫn tương đối trong project. Ngân sách từng
 stage do user chọn; một phiên SSH cho cả cây. Đã nghiệm thu browser local với
-provider/terminal giả lập, chưa tạo phiên Kaggle thật; M1-04 vẫn chưa nghiệm thu.
+provider/terminal giả lập; M1-04 đã nghiệm thu biến thể thật bằng Codex/Kaggle.
 Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_TREE_SEARCH.md).
+
+## M1-04 — Demo thật
+
+Spec, checklist và quan sát từng bước: [M1_04_ACCEPTANCE.md](M1_04_ACCEPTANCE.md).
+Demo dùng PDF Scikit-learn JMLR 2011, project competition cũ và biến thể từ run
+make_moons đã lưu. Hai lần restart giữ dữ liệu/approval/artifacts và không
+replay; source v2 làm proposal chờ duyệt stale, proposal đã duyệt vẫn ghim v1.
+
+Lượt CPU đầu `bdf66597…` đã dừng, FAILED do Codex hết thời gian 15 phút trước
+payload cuối. Phép đo test có thật được tải lại riêng vào evidence; không sửa
+DB hoặc biến run đó thành COMPLETED. Đã sửa thu file trước STOP khi lỗi và
+prompt đọc gọn. User duyệt lượt xác minh `f7a63749…`, cùng proposal, một bước
+mỗi stage, Working tối đa 25 phút trong TTL 30 phút. Lượt này COMPLETED:
+bốn node/ba cạnh, validation 0.9475, test 0.9325 trên 400 mẫu, source/output
+19 file/57.272 bytes, report và bằng chứng Kaggle dừng. Restart giữ 135
+artifact mới và 125 artifact cha, không replay. P1-01…P1-06 đều đạt;
+xem [MVP1_RELEASE.md](MVP1_RELEASE.md) để mở demo/hướng dẫn bàn giao.
 
 ## M1-01
 
@@ -71,8 +88,8 @@ Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_T
   nguồn cũ. Text không xuất hiện trong context.
 - Bằng chứng local: `.workbench/acceptance/mvp1-imports-2026-10-08/`.
   Bản sao SQLite trước migration: `.workbench/backups/mvp1-imports-2026-10-08/`.
-- Kiểm thử planner/Working dùng fixture; chưa chạy Codex/Kaggle thật với PDF.
-  Nghiệm thu toàn MVP1 và chạy biến thể thật thuộc M1-04.
+- Tại checkpoint M1-01, planner/Working dùng fixture. PDF và biến thể bằng
+  Codex/Kaggle thật đã được nghiệm thu sau đó ở M1-04.
 - Tiến độ hiện tại nằm ở bảng task và các mục bàn giao bên dưới.
 
 ### Tinh chỉnh Library theo yêu cầu
@@ -143,7 +160,7 @@ Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_T
   tục tạo v2; duyệt rồi đổi nguồn v2; proposal đã duyệt giữ v1, proposal chờ
   duyệt cần xem lại và có thao tác lập bản mới. Không gọi Codex/Kaggle thật.
 - Bằng chứng local: `.workbench/acceptance/m1-02-recovery-2026-10-08/`.
-  Nghiệm thu với phiên Kaggle mới và biến thể thật vẫn thuộc M1-04.
+  Bằng chứng restart với phiên Kaggle mới/biến thể thật nằm ở M1-04.
 
 ## M1-03 — Tạo idea biến thể từ kết quả đã lưu
 
@@ -214,6 +231,6 @@ Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_T
   [source-deleted-proposal-dom.txt](../../.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-proposal-dom.txt).
 - Inventory CUA của worker vẫn trống; browser journey trên do root task thực
   hiện sau khi user mở tab. Counters và hash evidence chỉ thuộc fixture local.
-- Backend thật `8011` được kiểm tra health; smoke test chỉ đọc dữ liệu đang có.
-  Luồng Working toàn browser dùng fixture giả lập, chưa xác minh với Codex/Kaggle
-  thật. Chạy biến thể thật và nghiệm thu trọn MVP1 vẫn thuộc M1-04.
+- Tại checkpoint M1-03, backend thật `8011` chỉ được smoke test đọc dữ liệu;
+  journey Working toàn browser dùng fixture. Biến thể thật và nghiệm thu trọn
+  MVP1 bằng Codex/Kaggle đã hoàn tất ở M1-04.

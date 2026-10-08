@@ -140,11 +140,11 @@ Workbench; launcher gốc vẫn giữ các mặc định riêng của nó.
   `.workbench/acceptance/tree-search-2026-10-08/`.
 - Kiểm thử node thất bại và người dùng dừng: lưu checkpoint failed/interrupted,
   hủy worker, thu proof dừng, không mở phiên thứ hai.
-- Chưa chạy Codex/Kaggle thật qua bốn stage; chưa chạy toàn launcher gốc với
-  process pool/GPU local. Nghiệm thu remote thật vẫn thuộc M1-04.
+- Tại checkpoint local này chưa chạy Codex/Kaggle thật qua bốn stage hoặc
+  toàn launcher gốc với process pool/GPU local. Kết quả remote M1-04 ở cuối tài liệu.
 
 Ngoài phạm vi: tự động viết/review PDF không được yêu cầu trong proposal;
-điều phối nhiều phiên Kaggle song song; chạy Kaggle thật để nghiệm thu.
+điều phối nhiều phiên Kaggle song song và toàn launcher với GPU/process pool local.
 
 ## Đóng gói theo project — 2026-10-08
 
@@ -180,3 +180,25 @@ Ngoài phạm vi: tự động viết/review PDF không được yêu cầu tron
 - 9 kiểm tra local đạt; kiểm tra browser trên run thật đã hoàn tất `20070c81`
   thấy đúng 4 node/3 cạnh, bốn màu stage, chọn node/code/node cha hoạt động và
   chi tiết nằm dưới cây. Không mở lại phiên Kaggle.
+
+## Nghiệm thu Codex/Kaggle thật — M1-04, 2026-10-08
+
+- Biến thể `f7a637498ab54bb8853dda5fcd432590` COMPLETED trên Kaggle CPU:
+  AgentManager gốc điều phối đủ implementation/tuning/research/ablation, một
+  bootstrap/SSH, bốn node và ba cạnh. Bảy Codex calls gồm bốn node và ba query.
+- Đọc PDF Scikit-learn JMLR 2011, áp dụng Pipeline trên make_moons; final
+  validation 0.9475, test 0.9325/400 mẫu. Node Ablation hiển thị delta
+  validation +0.0025; không dùng test chọn mô hình. Có đủ source, metrics,
+  comparison, dự đoán test, paper notes, report và proof dừng.
+- 19 file source/output đều khớp manifest SHA256. Restart giữ nguyên 135
+  artifact công khai của lượt mới và 125 artifact cha, không replay.
+- Lượt đầu chạm Working 900 giây trước JSON cuối, FAILED và đã dừng. Exception
+  path hiện thu file có hash qua SSH rảnh trước STOP, không coi file đơn thuần
+  là node thành công. Prompt yêu cầu đọc từng phần cần thiết và trả kết quả
+  ngay khi đủ bằng chứng; regression tree/working 13 passed.
+- Lượt xác minh có approval riêng cho Working 1.500 giây trong TTL 1.800 giây.
+  Sau demo khôi phục config thời gian cũ. Thời gian agent suy luận/đọc/tool cũng
+  thuộc `working_seconds`, ngoài thời gian fit; ngân sách từng fit không thay
+  thế ngân sách toàn Working. Nếu tác vụ cần lâu hơn, cấu hình ngân sách trước
+  khi bấm Working và giữ nó trong TTL đã chọn.
+- Bằng chứng/giới hạn đầy đủ: [M1_04_ACCEPTANCE.md](M1_04_ACCEPTANCE.md).

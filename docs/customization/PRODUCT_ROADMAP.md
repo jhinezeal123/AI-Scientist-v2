@@ -185,11 +185,13 @@ mà không giải thích lại toàn bộ đề bài hoặc tìm lại kết qu�
 **Demo chốt:** project competition và một project paper, restart giữa hai phiên rồi chạy một biến thể.
 OCR mọi dạng PDF, semantic search và team chưa thuộc cửa này.
 
-**Tiến độ local (2026-10-08):** M1-01/CP1-A, M1-02/CP1-B và M1-03/CP1-C đã
-được nghiệm thu cục bộ, gồm journey browser nguồn cha đã xóa, proposal mới,
-approval và Working fixture/report. M1-03 không dùng phiên Kaggle hay Codex
-thật; demo chốt đầy đủ và nghiệm thu các tiêu chí P1 còn lại vẫn chưa xong,
-thuộc M1-04.
+**Nghiệm thu MVP1 (2026-10-08):** M1-01…M1-04 và P1-01…P1-06 đạt. Demo
+competition + paper dùng PDF JMLR thật, source v1/v2, stale proposal, approval,
+restart và biến thể chạy bằng Codex/Kaggle CPU. Run `f7a63749…` COMPLETED:
+bốn stage, 400 dự đoán test, accuracy 0.9325 và xác nhận Kaggle dừng. Restart
+giữ nguyên 135 artifact mới/125 artifact cha, không replay. Lượt đầu timeout
+được giữ FAILED; bản sửa và lượt xác minh được user duyệt riêng. Bằng chứng:
+[M1_04_ACCEPTANCE.md](M1_04_ACCEPTANCE.md); bàn giao: [MVP1_RELEASE.md](MVP1_RELEASE.md).
 
 ## 6. MVP 2 — General Implementation Agent cho workshop và paper
 
@@ -456,7 +458,8 @@ tab Run. Các bảng T09 dưới đây giữ bằng chứng của luồng notebo
 | T07 / P0-05 | Đạt trong scope demo T09 | Run `f45680b3…`: live session_stream khi RUNNING nhận22 records/cursor1:22; terminal đối soát21 records/cursor2:21/gap=false. Lỗi đọc đầu hồi phục tự động; GUI đọc cache và vẫn đổi tab được. Cursor/generation/repeated-line/restart fixtures và restart thật giữ log; không bắt buộc chart/ETA. Xem bằng chứng T09 trong MVP0_RUN_GUIDE.md. |
 | CP0-C / T08 | Đạt, giữ scope training ban đầu | Golden path T09 `f45680b3…`:4outputs đúng manifest/hash,3metric points, terminal gap=false, report đo EMD70.26776872201779/4validationgroups/19ảnh, AI assistance và refs có thật; app COMPLETED. Counter report4 gồm3lỗi và1thành công được user duyệt repair. Run cũ e2545599 cũng COMPLETED; tổng calls trước counter bền vững của run cũ vẫn chưa xác minh. General implement mở rộng sau MVP0. |
 | CP0-D: bàn giao prototype | Đạt | Guide một lệnh/config/GUI/recovery đã cập nhật. 78backend +12donor wrapper/worker +5runtime fixtures và frontend build đạt. Restart sau golden path COMPLETED giữ28artifacts/report/context/log/counters coder1/submit1/report4; GUI History mở lại report đúng run, không replay. |
-| MVP 1–6 / CP-PERSONAL | Chưa nghiệm thu | Chưa có sản phẩm cá nhân đầy đủ |
+| MVP 1 / CP1-A…C | Đạt P1-01…06, 2026-10-08 | Library PDF thật, source version/stale/approval, biến thể `f7a63749…` chạy đủ bốn stage Codex/Kaggle CPU, report/test CSV/stop và restart không replay; xem M1_04_ACCEPTANCE.md. |
+| MVP 2–6 / CP-PERSONAL | Chưa nghiệm thu | General implementation và toàn bộ sản phẩm cá nhân còn ở các mốc sau |
 | MVP 7 / CP-TEAM | Chưa bắt đầu | Phụ thuộc CP-PERSONAL |
 
 ### Bảng tám tiêu chí MVP0 — nghiệm thu T09
