@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import {api, History, Working} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
+import ArtifactLinks from './ArtifactLinks';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   execution_mode:'ssh'|'legacy';working?:Working;
@@ -132,8 +133,7 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
         {attempt.error && <p>{attempt.error}</p>}
       </div>)}
       {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
-      {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><div className="stack">{run.artifacts.map(name =>
-        <a key={name} href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${name}`} target="_blank" rel="noreferrer">{name} ↗</a>)}</div></>}
+      {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><ArtifactLinks projectId={projectId} runId={run.id} names={run.artifacts}/></>}
       {run.report_path === 'report.md' && <><h3>Report</h3><a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>
         {run.report_preview && <pre className="report-preview">{run.report_preview}</pre>}</>}
     </article>)}
