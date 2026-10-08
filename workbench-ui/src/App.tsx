@@ -4,12 +4,10 @@ import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
-import ImportedSource from './ImportedSource';
+import SourceDetails from './SourceDetails';
+import {statusText} from './sourceStatus';
 
 const blank = {title: '', url: '', content: ''};
-const statusText = (status: string) => ({reference_only:'Chỉ có liên kết · chưa đọc',provided_text:'Có nội dung được cung cấp',
-  extracted:'Đã trích text',partial:'Text trích một phần',no_text:'Không có text · có thể cần OCR',locked:'PDF khóa mật khẩu',
-  error:'Trích text lỗi',file_reference:'Có file gốc · chưa trích text'}[status] || status);
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -140,18 +138,10 @@ export default function App() {
             <p className="muted">Nguồn được lưu thành file riêng theo phiên bản. Agent nhận đường dẫn và tự tìm, đọc phần cần thiết.</p>
             <code className="source-id">{project.library_path}</code>
             {!resources.length && <p className="empty">Chưa có nguồn. Thêm nguồn ở form bên cạnh hoặc nhập bản đọc T01.</p>}
-            {resources.map(resource => <article className="resource" key={resource.id}>
-              <div className="panel-head"><h3>{resource.title}</h3><button disabled={busy} onClick={() => {
+            {resources.map(resource => <SourceDetails key={resource.id} projectId={projectId} resource={resource} busy={busy} onEdit={resource=>{
                 if (resource.attachment){setReplacing(resource);return;}
                 setEditing(resource); setForm({title: resource.title,url: resource.url || '',content: resource.content});
-              }}>{resource.attachment ? 'Thay file' : 'Sửa nguồn'}</button></div>
-              <p className="source-meta">{resource.kind} · v{resource.version} · {statusText(resource.status)}</p>
-              <code className="source-id">{resource.id}</code>
-              {resource.file_path && <div className="stack"><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>}
-              {resource.url && <a href={resource.url} target="_blank" rel="noreferrer">Mở nguồn ↗</a>}
-              {resource.attachment && <ImportedSource key={`${resource.id}:${resource.version}`} projectId={projectId} resource={resource}/>}
-              <details><summary>Xem nội dung và dấu kiểm tra</summary><pre>{resource.content || 'Chưa cung cấp nội dung nguồn. App chưa tải trang này.'}</pre><code className="source-id">SHA256 {resource.content_sha256}</code></details>
-            </article>)}
+              }}/>) }
           </section>
           <section className="panel"><h2>{editing ? `Sửa nguồn · v${editing.version}` : 'Thêm nguồn'}</h2>
             <form onSubmit={saveResource} className="stack">

@@ -230,7 +230,7 @@ class ProjectStore:
 
     @staticmethod
     def _write_resource(connection, row):
-        connection.execute("INSERT INTO resources VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
+        connection.execute("INSERT INTO resources(id,kind,title,url,content,status,version,content_sha256) VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
                            "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
         connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
 
