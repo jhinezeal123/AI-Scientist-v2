@@ -31,6 +31,11 @@ run_id TEXT PRIMARY KEY REFERENCES runs(id), parent_run_id TEXT NOT NULL REFEREN
 request_id TEXT NOT NULL UNIQUE);
 """
 
+INGESTION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS source_ingestions(resource_id TEXT NOT NULL REFERENCES resources(id),
+version INTEGER NOT NULL, metadata_json TEXT NOT NULL, PRIMARY KEY(resource_id,version));
+"""
+
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -107,6 +112,7 @@ class ProjectStore:
     def _migrate_schema(connection):
         """Keep upgrades of existing project databases in one place."""
         connection.executescript(IMPLEMENTATION_SCHEMA)
+        connection.executescript(INGESTION_SCHEMA)
         if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
             connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
@@ -114,10 +120,16 @@ class ProjectStore:
         for table in ('ideas', 'runs'):
             if 'deleted_at' not in {row['name'] for row in connection.execute(f'PRAGMA table_info({table})')}:
                 connection.execute(f'ALTER TABLE {table} ADD COLUMN deleted_at TEXT')
-        connection.execute('UPDATE project_meta SET schema_version=4 WHERE schema_version<4')
+        connection.execute('UPDATE project_meta SET schema_version=5 WHERE schema_version<5')
 
     def library(self, project_id):
-        return LibraryFiles(self.directory(project_id))
+        return LibraryFiles(self.directory(project_id), lambda resource, version:self.ingestion(project_id, resource, version))
+
+    def ingestion(self, project_id, resource_id, version):
+        with self.connection(project_id) as connection:
+            row = connection.execute('SELECT metadata_json FROM source_ingestions WHERE resource_id=? AND version=?',
+                                     (resource_id, version)).fetchone()
+            return json.loads(row[0]) if row else None
 
     def directory(self, project_id):
         """Resolve all project files through the same ownership-checked path."""
@@ -164,7 +176,8 @@ class ProjectStore:
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.executescript(SCHEMA)
                 connection.executescript(IMPLEMENTATION_SCHEMA)
-                connection.execute("INSERT INTO project_meta VALUES(?,?,?,4)",
+                connection.executescript(INGESTION_SCHEMA)
+                connection.execute("INSERT INTO project_meta VALUES(?,?,?,5)",
                                    (project_id, name, datetime.now(timezone.utc).isoformat()))
                 connection.commit()
             finally:
@@ -220,6 +233,38 @@ class ProjectStore:
         connection.execute("INSERT INTO resources VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
                            "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
         connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
+
+    def import_file(self, project_id, title, filename, data, resource_id=None, expected_version=None):
+        from .ingestion import ingest, source_summary
+        self.project(project_id)
+        kind, metadata, files = ingest(filename, data)
+        with PATH_LOCK:
+            published = None
+            library = self.library(project_id)
+            try:
+                with self.connection(project_id) as connection:
+                    connection.execute('BEGIN IMMEDIATE')
+                    if resource_id is None:
+                        resource_id, version = uuid.uuid4().hex, 1
+                    else:
+                        existing = connection.execute('SELECT version FROM resources WHERE id=?', (resource_id,)).fetchone()
+                        if existing is None:
+                            raise KeyError('Source not found in this project')
+                        if existing['version'] != expected_version:
+                            raise StoreConflict('Nguồn đã thay đổi; tải lại trước khi thay file')
+                        version = existing['version'] + 1
+                    title = library.register({'id':resource_id, 'title':title.strip() or Path(metadata['filename']).stem})
+                    row = {'id':resource_id, 'kind':kind, 'title':title, 'url':None, 'content':source_summary(metadata),
+                           'status':metadata['status'], 'version':version, 'content_sha256':digest(canonical({'metadata':metadata,'title':title}))}
+                    published = library.write_import(resource_id, version, {**files, 'source.md':library.document(row)})
+                    self._write_resource(connection, row)
+                    connection.execute('INSERT INTO source_ingestions VALUES(?,?,?)', (resource_id, version, canonical(metadata)))
+                    reference = library.reference({**row, '_ingestion':metadata})
+                return {**row, **reference}
+            except BaseException:
+                if published is not None:
+                    library.discard_import(published)
+                raise
 
     def ideas(self, project_id, include_deleted=False):
         with self.connection(project_id) as connection:

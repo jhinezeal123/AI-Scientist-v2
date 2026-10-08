@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import queue
 import secrets
+import shlex
 import subprocess
 import threading
 import time
@@ -14,6 +15,35 @@ import uuid
 
 class TerminalDisconnected(RuntimeError):
     pass
+
+
+def transfer_library_file(terminal, name, data):
+    """Respect the donor's 1 MB write limit while retaining exact original bytes."""
+    if len(data) <= 1_000_000:
+        receipt = terminal.request('write', path=name, data=base64.b64encode(data).decode('ascii'))
+        if receipt.get('bytes') != len(data):
+            raise ValueError('Selected Library file was not transferred completely')
+        return
+    import hashlib
+    part = name.rsplit('/', 1)[0] + '/.transfer-' + uuid.uuid4().hex
+    script = ('from pathlib import Path;import sys;'
+              'part=Path(sys.argv[1]);destination=Path(sys.argv[2]);'
+              'destination.parent.mkdir(parents=True,exist_ok=True);'
+              'out=destination.open(sys.argv[3]);out.write(part.read_bytes());out.close();part.unlink()')
+    for offset in range(0, len(data), 512_000):
+        chunk = data[offset:offset + 512_000]
+        receipt = terminal.request('write', path=part, data=base64.b64encode(chunk).decode('ascii'))
+        if receipt.get('bytes') != len(chunk):
+            raise ValueError('Incomplete Library chunk transfer')
+        command = shlex.join(['python3', '-c', script, part, name, 'wb' if offset == 0 else 'ab'])
+        if terminal.request('exec', command=command, timeout=30).get('returncode') != 0:
+            raise ValueError('Library chunk assembly failed')
+    verify = ('from pathlib import Path;import hashlib,sys;'
+              'p=Path(sys.argv[1]);assert p.stat().st_size==int(sys.argv[2]);'
+              'f=p.open("rb");assert hashlib.file_digest(f,"sha256").hexdigest()==sys.argv[3]')
+    command = shlex.join(['python3', '-c', verify, name, str(len(data)), hashlib.sha256(data).hexdigest()])
+    if terminal.request('exec', command=command, timeout=30).get('returncode') != 0:
+        raise ValueError('Remote Library file hash mismatch')
 
 
 class DonorSession:

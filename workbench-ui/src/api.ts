@@ -1,7 +1,9 @@
 export type Project = {id: string; name: string; created_at: string; directory_name:string;library_path:string};
-export type Resource = {id: string; kind: 'text'|'url'|'dataset'; title: string; url: string|null;
+export type Resource = {id: string; kind: 'text'|'url'|'dataset'|'pdf'|'file'; title: string; url: string|null;
   content: string; status: string; version: number; content_sha256: string;
-  file_path?:string;file_sha256?:string;file_bytes?:number};
+  file_path?:string;file_sha256?:string;file_bytes?:number;
+  attachment?:{filename:string;original_file_path:string;original_sha256:string;original_bytes:number;
+    manifest_file_path:string;manifest_sha256:string;page_count:number|null;processed_pages:number;text_pages:number;issues:string[]}};
 export type PlanBody = {needs_clarification: boolean; questions: string[]; paraphrase: string;
   objective?: string; data_refs?: string[]; split?: string|Record<string,unknown>;
   metric?: string|Record<string,unknown>; implementation_steps?: string[];
@@ -30,10 +32,27 @@ export async function api<T>(path: string, method='GET', body?: unknown): Promis
 }
 
 async function responseJson<T>(response:Response):Promise<T> {
+  await checkResponse(response);
+  return response.json();
+}
+
+async function checkResponse(response:Response):Promise<void> {
   if (!response.ok) {
     let detail: unknown;
     try {detail = (await response.json()).detail;} catch {detail = response.statusText;}
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
   }
-  return response.json();
+}
+
+export async function sourceText(projectId:string,resource:Resource,part:string):Promise<string> {
+  const response=await fetch(`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}/${part}`);
+  await checkResponse(response);
+  return response.text();
+}
+
+export async function uploadSource(projectId:string,file:File,title:string,replacing?:Resource):Promise<Resource> {
+  const body = new FormData();body.append('file',file);body.append('title',title);
+  if (replacing)body.append('expected_version',String(replacing.version));
+  const path = `/api/projects/${projectId}/resources/` + (replacing ? `${replacing.id}/import` : 'import');
+  return responseJson<Resource>(await fetch(path,{method:replacing ? 'PUT':'POST',body}));
 }

@@ -1,6 +1,5 @@
 """One user-started Working action: connect, implement, execute, collect, stop."""
 import asyncio
-import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -194,11 +193,9 @@ class WorkingService:
             terminal = await asyncio.to_thread(self.donor.open, run_id,
                 lambda text: self.records.append_log(*key, text))
             self.terminals[key] = terminal
+            from .ssh_terminal import transfer_library_file
             for name, data in self.store.library(project_id).selected_files(approved['snapshot']):
-                receipt = await asyncio.to_thread(terminal.request, 'write', path=name,
-                                                 data=base64.b64encode(data).decode('ascii'))
-                if receipt.get('bytes') != len(data):
-                    raise ValueError('Selected Library file was not transferred completely')
+                await asyncio.to_thread(transfer_library_file, terminal, name, data)
             if key in self.stop_requests:
                 outcome = 'CANCELLED'
                 return

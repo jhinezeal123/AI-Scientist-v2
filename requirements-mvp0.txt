@@ -16,3 +16,5 @@ funcy
 openai
 anthropic
 pytest>=8,<9
+pypdf>=6,<7
+python-multipart>=0.0.20,<1

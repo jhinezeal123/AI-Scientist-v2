@@ -3,13 +3,16 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
+import tempfile
 
 from .named_paths import PATH_LOCK, checked_child, folder_title, rename_folder, unique_title
 
 
 class LibraryFiles:
-    def __init__(self, project_directory):
+    def __init__(self, project_directory, ingestion_lookup=None):
         self.project_directory = Path(project_directory).resolve()
+        self.ingestion_lookup = ingestion_lookup
 
     def _folders(self):
         library = checked_child(self.project_directory, 'library')
@@ -77,7 +80,7 @@ class LibraryFiles:
             return title
 
     def path(self, name):
-        match = re.fullmatch(r'library/([^/\\]+)/v([1-9][0-9]*)/source\.md', name)
+        match = re.fullmatch(r'library/([^/\\]+)/v([1-9][0-9]*)/(source\.md|ingestion\.json|text\.md|original(?:\.[a-z0-9]{1,16})?|pages/page-[0-9]{4}\.md)', name)
         if not match:
             raise ValueError('Invalid Library file path')
         library = checked_child(self.project_directory, 'library')
@@ -88,7 +91,7 @@ class LibraryFiles:
                 raise ValueError('Ambiguous Library folder alias')
             if aliases:
                 directory = aliases[0]
-        path = directory / f'v{match[2]}' / 'source.md'
+        path = directory / f'v{match[2]}' / match[3]
         if not path.resolve().is_relative_to(self.project_directory) or any(
                 parent.is_symlink() or parent.is_junction() for parent in (path, *path.parents) if parent.is_relative_to(self.project_directory)):
             raise ValueError('Linked Library path refused')
@@ -131,8 +134,60 @@ class LibraryFiles:
             data = path.read_bytes()
             if hashlib.sha256(data).hexdigest() != source.get('file_sha256'):
                 raise ValueError('Pinned Library file hash mismatch')
-        return {key: value for key, value in source.items() if key != 'content'} | {
+        result = {key: value for key, value in source.items() if key not in {'content','_ingestion','attachment'}} | {
             'file_path': name, 'file_sha256': hashlib.sha256(data).hexdigest(), 'file_bytes': len(data)}
+        metadata = self._metadata(source)
+        if metadata:
+            prefix = name.rsplit('/', 1)[0] + '/'
+            manifest = self.path(prefix + 'ingestion.json').read_bytes()
+            attachment = {'filename':metadata['filename'], 'original_file_path':prefix + metadata['original']['path'],
+                          'original_sha256':metadata['original']['sha256'], 'original_bytes':metadata['original']['bytes'],
+                          'manifest_file_path':prefix + 'ingestion.json', 'manifest_sha256':hashlib.sha256(manifest).hexdigest(),
+                          'page_count':metadata['page_count'], 'processed_pages':len(metadata['pages']),
+                          'text_pages':metadata['text_pages'], 'issues':metadata['issues']}
+            if source.get('attachment') and source['attachment'].get('manifest_sha256') != attachment['manifest_sha256']:
+                raise ValueError('Pinned ingestion manifest hash mismatch')
+            result['attachment'] = attachment
+        return result
+
+    def _metadata(self, source):
+        metadata = source.get('_ingestion')
+        if metadata is None and self.ingestion_lookup:
+            metadata = self.ingestion_lookup(source['id'], source['version'])
+        if metadata:
+            name = self.source_name(source['id'], source['version']).rsplit('/', 1)[0] + '/ingestion.json'
+            expected = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+            if self.path(name).read_bytes() != expected:
+                raise ValueError('Ingestion manifest differs from saved provenance')
+        return metadata
+
+    def write_import(self, resource_id, version, files):
+        prefix = self.source_name(resource_id, version).rsplit('/', 1)[0] + '/'
+        destination = self.path(prefix + 'source.md').parent
+        if destination.exists():
+            raise ValueError('Imported source version already exists; restore the saved version')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=f'.v{version}-import-', dir=destination.parent))
+        try:
+            for name, data in files.items():
+                self.path(prefix + name)  # Validate every imported relative path before publishing it.
+                self._write_version_file(temporary / name, data)
+            temporary.rename(destination)
+        finally:
+            if temporary.exists():
+                self.discard_import(temporary)
+        return destination
+
+    def discard_import(self, directory):
+        directory = Path(directory)
+        library = self.project_directory / 'library'
+        if (directory.parent.parent != library
+                or not re.fullmatch(r'v[1-9][0-9]*|\.v[1-9][0-9]*-import-[a-z0-9_]+', directory.name)
+                or not directory.resolve().is_relative_to(library) or directory.resolve() == library or any(
+                parent.is_symlink() or parent.is_junction() for parent in (directory, *directory.parents)
+                if parent.is_relative_to(self.project_directory))):
+            raise ValueError('Unsafe import cleanup path')
+        shutil.rmtree(directory)
 
     @staticmethod
     def _write_version_file(path, data):
@@ -150,6 +205,16 @@ class LibraryFiles:
         for source in snapshot['resources']:
             ref = self.reference(source)
             yield ref['file_path'], self.path(ref['file_path']).read_bytes()
+            metadata = self._metadata(source)
+            if metadata:
+                prefix = ref['file_path'].rsplit('/', 1)[0] + '/'
+                yield prefix + 'ingestion.json', self.path(prefix + 'ingestion.json').read_bytes()
+                for file in [metadata['original'], *metadata['pages'], *([metadata['text']] if metadata.get('text') else [])]:
+                    name = prefix + file['path']
+                    data = self.path(name).read_bytes()
+                    if len(data) != file['bytes'] or hashlib.sha256(data).hexdigest() != file['sha256']:
+                        raise ValueError('Imported Library file hash mismatch')
+                    yield name, data
 
     def stage(self, snapshot, workspace):
         workspace = Path(workspace).resolve()

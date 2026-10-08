@@ -3,9 +3,13 @@ import {api, Context, History, Idea, ideaTitle, Project, Resource, Proposal} fro
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
+import FileImport from './FileImport';
+import ImportedSource from './ImportedSource';
 
 const blank = {kind: 'text' as Resource['kind'], title: '', url: '', content: ''};
-const statusText = (status: string) => status === 'reference_only' ? 'Chỉ có liên kết · chưa đọc' : 'Có nội dung được cung cấp';
+const statusText = (status: string) => ({reference_only:'Chỉ có liên kết · chưa đọc',provided_text:'Có nội dung được cung cấp',
+  extracted:'Đã trích text',partial:'Text trích một phần',no_text:'Không có text · có thể cần OCR',locked:'PDF khóa mật khẩu',
+  error:'Trích text lỗi',file_reference:'Có file gốc · chưa trích text'}[status] || status);
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -23,6 +27,7 @@ export default function App() {
   const [editingIdea,setEditingIdea] = useState<Idea|null>(null);
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState<Resource|null>(null);
+  const [replacing,setReplacing] = useState<Resource|null>(null);
   const [context, setContext] = useState<Context|null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -39,7 +44,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('workbench.project', projectId);
-    setSelected([]); setContext(null); setIdeaId(''); setEditing(null); setForm(blank);
+    setSelected([]); setContext(null); setIdeaId(''); setEditing(null); setForm(blank);setReplacing(null);
     setIdeaText(''); setTitle(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
   }, [projectId]);
 
@@ -136,11 +141,15 @@ export default function App() {
             <code className="source-id">{project.library_path}</code>
             {!resources.length && <p className="empty">Chưa có nguồn. Thêm nguồn ở form bên cạnh hoặc nhập bản đọc T01.</p>}
             {resources.map(resource => <article className="resource" key={resource.id}>
-              <div className="panel-head"><h3>{resource.title}</h3><button disabled={busy} onClick={() => {setEditing(resource); setForm({kind: resource.kind,title: resource.title,url: resource.url || '',content: resource.content});}}>Sửa nguồn</button></div>
+              <div className="panel-head"><h3>{resource.title}</h3><button disabled={busy} onClick={() => {
+                if (resource.attachment){setReplacing(resource);return;}
+                setEditing(resource); setForm({kind: resource.kind,title: resource.title,url: resource.url || '',content: resource.content});
+              }}>{resource.attachment ? 'Thay file' : 'Sửa nguồn'}</button></div>
               <p className="source-meta">{resource.kind} · v{resource.version} · {statusText(resource.status)}</p>
               <code className="source-id">{resource.id}</code>
               {resource.file_path && <div className="stack"><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>}
               {resource.url && <a href={resource.url} target="_blank" rel="noreferrer">Mở nguồn ↗</a>}
+              {resource.attachment && <ImportedSource key={`${resource.id}:${resource.version}`} projectId={projectId} resource={resource}/>}
               <details><summary>Xem nội dung và dấu kiểm tra</summary><pre>{resource.content || 'Chưa cung cấp nội dung nguồn. App chưa tải trang này.'}</pre><code className="source-id">SHA256 {resource.content_sha256}</code></details>
             </article>)}
           </section>
@@ -151,7 +160,9 @@ export default function App() {
               <label>Nội dung / mô tả<textarea rows={10} maxLength={60000} value={form.content} onChange={e => setForm({...form,content:e.target.value})}/></label>
               <small className="muted">Chỉ lưu URL sẽ được đánh dấu “chưa đọc”. Nhập text không chứng minh app đã tải URL.</small>
               <div className="actions"><button className="primary" disabled={busy || loading}>Lưu nguồn</button>{editing && <button type="button" onClick={() => {setEditing(null);setForm(blank);}}>Hủy sửa</button>}</div>
-            </form></section>
+            </form><FileImport key={`${projectId}:${replacing?.id || 'new'}`} projectId={projectId} busy={busy || loading} replacing={replacing}
+              onCancel={()=>setReplacing(null)} onUpload={action} onSaved={source=>{setReplacing(null);setContext(null);setRevision(n=>n+1);
+                setNotice(`Đã nhập ${source.title} · v${source.version}: ${statusText(source.status)}.`);}}/></section>
         </div>}
         {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Code và training chỉ thực hiện sau approval.</p>
           <form className="stack" onSubmit={event => {event.preventDefault(); void action(async () => {

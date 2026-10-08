@@ -1,6 +1,7 @@
 """Library, approval and remote Working endpoints."""
 from typing import Literal
-from fastapi import APIRouter, HTTPException, Request
+import asyncio
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import Field, field_validator
 
 from .models import StrictModel
@@ -122,6 +123,29 @@ def library_router(store, workspace_root):
         return call(store.save_resource, project_id, body.model_dump(exclude={"expected_version"}),
                     resource_id, body.expected_version)
 
+    async def receive_file(project_id, file, title, resource_id=None, expected_version=None):
+        from .ingestion import MAX_FILE_BYTES
+        call(store.project, project_id)
+        data = bytearray()
+        try:
+            while chunk := await file.read(64_000):
+                data.extend(chunk)
+                if len(data) > MAX_FILE_BYTES:
+                    raise HTTPException(413, 'File vượt quá 25 MB; dùng dataset reference cho dữ liệu lớn')
+        finally:
+            await file.close()
+        return await asyncio.to_thread(call, store.import_file, project_id, title, file.filename or 'document',
+                                       bytes(data), resource_id, expected_version)
+
+    @router.post('/projects/{project_id}/resources/import', status_code=201)
+    async def import_file(project_id: str, file: UploadFile = File(...), title: str = Form('', max_length=240)):
+        return await receive_file(project_id, file, title)
+
+    @router.put('/projects/{project_id}/resources/{resource_id}/import')
+    async def replace_file(project_id: str, resource_id: str, file: UploadFile = File(...),
+                           title: str = Form('', max_length=240), expected_version: int = Form(..., ge=1)):
+        return await receive_file(project_id, file, title, resource_id, expected_version)
+
     @router.post("/projects/{project_id}/import-readiness")
     def import_readiness(project_id: str):
         call(store.project, project_id)
@@ -149,6 +173,44 @@ def library_router(store, workspace_root):
         path = call(store.library(project_id).source_path, resource_id, version)
         if not path.is_file():
             raise HTTPException(404, 'Source version not found')
+        return PlainTextResponse(path.read_text(encoding='utf-8'))
+
+    def imported_path(project_id, resource_id, version, kind, page=None):
+        call(store.project, project_id)
+        metadata = call(store.ingestion, project_id, resource_id, version)
+        if metadata is None:
+            raise HTTPException(404, 'Imported source version not found')
+        info = metadata['original'] if kind == 'original' else metadata.get('text') if kind == 'text' else next(
+            (item for item in metadata['pages'] if item['page'] == page), None)
+        if info is None:
+            raise HTTPException(404, 'Source text/page not found')
+        library = store.library(project_id)
+        prefix = library.source_name(resource_id, version).rsplit('/', 1)[0] + '/'
+        path = call(library.path, prefix + info['path'])
+        import hashlib
+        if not path.is_file() or path.stat().st_size != info['bytes']:
+            raise HTTPException(409, 'Imported file changed; restore the original version')
+        with path.open('rb') as stream:
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != info['sha256']:
+                raise HTTPException(409, 'Imported file hash mismatch')
+        return path, metadata
+
+    @router.get('/projects/{project_id}/library/{resource_id}/versions/{version}/original')
+    def original_file(project_id: str, resource_id: str, version: int):
+        from fastapi.responses import FileResponse
+        path, metadata = imported_path(project_id, resource_id, version, 'original')
+        return FileResponse(path, media_type='application/octet-stream', filename=metadata['filename'])
+
+    @router.get('/projects/{project_id}/library/{resource_id}/versions/{version}/text')
+    def extracted_text(project_id: str, resource_id: str, version: int):
+        from fastapi.responses import PlainTextResponse
+        path, _ = imported_path(project_id, resource_id, version, 'text')
+        return PlainTextResponse(path.read_text(encoding='utf-8'))
+
+    @router.get('/projects/{project_id}/library/{resource_id}/versions/{version}/pages/{page}')
+    def pdf_page(project_id: str, resource_id: str, version: int, page: int):
+        from fastapi.responses import PlainTextResponse
+        path, _ = imported_path(project_id, resource_id, version, 'page', page)
         return PlainTextResponse(path.read_text(encoding='utf-8'))
 
     async def change_deleted(request, project_id, kind, item_id, deleted):
