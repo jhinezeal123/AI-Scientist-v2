@@ -23,6 +23,8 @@ export type Idea = {id: string; title: string; text: string; state: string; erro
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
 export type Working = {phase:string;accelerator:string;ttl_seconds:number;started_at:string;agent_called:number;
   stop_confirmed:boolean;notebook_ref?:string;summary?:{succeeded:boolean;summary:string;limitations:string[];output_files:string[]}|null};
+export type RunOutput = {directory:string|null;status:'completed'|'partial'|'pending';summary:string;limitations:string[];
+  stop_confirmed:boolean;files:{path:string;bytes:number;sha256:string}[]};
 export type Context = {context_sha256: string; snapshot: {project_id: string;
   idea: {id: string; text: string;mode?:RunMode;desired_output?:string}; resources: Omit<Resource,'content'>[];variant?:Variant}};
 export type History = {proposals: {id: string; version: number; state: string; context_sha256: string}[];

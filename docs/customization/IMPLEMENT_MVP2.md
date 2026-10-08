@@ -22,7 +22,7 @@ không đổi mode của run đang chạy hoặc lịch sử và không làm m�
 
 Task chia theo feature; **user tự QA/demo sau mỗi task**. Agent bàn giao code,
 hướng dẫn thao tác và checklist, chờ user duyệt trước khi làm task tiếp theo.
-M2-01 đã triển khai để user QA; M2-02 đến M2-04 vẫn là kế hoạch. Chưa nghiệm thu
+M2-01 và M2-02 đã triển khai; M2-02 chờ user QA. M2-03/M2-04 vẫn là kế hoạch. Chưa nghiệm thu
 luồng MVP2 trọn vẹn hoặc chạy demo Kaggle mới.
 
 ## 2. So sánh hành vi
@@ -157,8 +157,8 @@ bố đã tích hợp chỉ vì file/module còn trong fork.
 
 | Task | Feature | Bàn giao cho user QA | Trạng thái |
 | --- | --- | --- | --- |
-| **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Chưa bắt đầu |
-| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Chưa bắt đầu |
+| **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Đã bàn giao (`28d7342`); user cho phép tiếp tục M2-02 |
+| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai; chờ user QA |
 | **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Chưa bắt đầu |
 | **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Chưa bắt đầu |
 
@@ -174,6 +174,9 @@ regression nhỏ theo phần bị tác động.
 **Phạm vi:** GUI chọn mode/đầu ra, metadata idea/context/proposal/run, approval,
 prompt alias và read compatibility. Chưa đổi engine execution ở task này;
 Etc chưa có đường chạy thì GUI phải nói rõ và không phát research thay thế.
+
+Ghi chú hiện hành: giới hạn chưa mở Working Etc của M2-01 đã được gỡ ở M2-02.
+Đoạn bàn giao M2-01 bên dưới mô tả phiên bản tại commit `28d7342`.
 
 **Bàn giao M2-01 (2026-10-08):** có chọn mode theo project (lưu tại browser),
 mode/đầu ra của idea, snapshot approval và nhãn run; hai prompt planner đọc theo
@@ -228,6 +231,72 @@ Các thao tác lập proposal dùng Codex thật; M2-01 QA không cần mở Kag
 
 **Phạm vi:** dùng lại execution trực tiếp, cấp thư mục project/output, thu
 file và trình bày Output. Giữ lifecycle/Stop/recovery. Chưa cần copy Library.
+
+**Bàn giao M2-02 (2026-10-08):** backend chọn execution bằng mode đã ghim;
+Etc bỏ qua cấu hình Tree Search từ client và dùng một Working agent qua bridge
+SSH hiện có. Prompt riêng qua alias `working.etc` → `working_etc.md`, không ghép
+instructions research. Etc không tạo Node/Journal, `logs/0-run`, token tracker
+hoặc report nghiên cứu. Training/Research và run cũ tiếp tục đường chạy có sẵn.
+
+Mỗi project có `output/`; lần bấm Working đầu tiên cấp thư mục
+`output/YYYY-MM-DD_<tiêu đề>_attempt_N/`. Retry Etc cấp bundle mới, giữ proposal
+và chuyển feedback/source đã thu vào bundle đó. `context.json` giữ input được
+duyệt; `source/` và `output/` chứa file thu qua SSH; `output.json` giữ nội dung,
+trạng thái, giới hạn và bằng chứng Stop; `working-manifest.json`, `working-stop.json`
+và `working.log` giữ bằng chứng. Monitor tiếp tục đọc log từ SQLite của project.
+Workspace agent nằm trong chính bundle, không tạo workspace bên ngoài project.
+
+GUI Run Etc có form phần cứng/thời hạn, Log/Stop/retry và mục **Output**. Nội
+dung text xuất hiện trực tiếp; một link mở trang file Output (gồm kết quả và
+source đã thu), dùng lại artifact page. Text/CSV/JSON/code, ảnh PNG/JPEG/GIF/WebP
+và PDF mở xem được; mọi file đã thu vẫn tải được. Định dạng khác chỉ tải file.
+Etc không cần report.md, metric, checkpoint hoặc file kết quả theo mẫu để hoàn tất;
+nội dung-only có thể nằm trong summary và danh sách file rỗng. Summary thành công
+vẫn phải khớp các file/lệnh SSH đã xác minh. Kiểm tra này chỉ xác nhận việc thực
+thi/thu file, không tự đánh giá được chất lượng mọi đầu ra user yêu cầu.
+
+File chỉ được đưa vào manifest sau khi tải đủ và khớp SHA256. Nếu lỗi/Stop, giữ
+file đã thu được khi terminal còn đọc được; hiển thị chưa hoàn tất. Terminal bận
+hoặc mất kết nối có thể không thu thêm được file trước Stop. Chỉ công bố COMPLETED
+khi summary thành công, collection hoàn tất và có receipt đúng phiên Kaggle đã
+dừng. Restart đọc metadata/log đã lưu và chỉ đối soát/dừng phiên còn mở; không
+chạy lại agent hoặc submit. Việc copy Output → Library dành cho M2-03.
+
+**Cách QA trên GUI:**
+
+1. Refresh `http://127.0.0.1:8011/`. Dùng một project QA, chọn Etc và tạo idea:
+   “Dùng Python standard library tạo 100 dòng dữ liệu bán hàng giả, seed 42.
+   Ngày nằm trong tháng 10/2026; số lượng và đơn giá dương. Tính tổng doanh thu.”
+   Đầu ra mong muốn: “CSV 100 dòng gồm date, product, quantity, unit_price,
+   revenue; JSON tổng hợp số dòng và tổng doanh thu; source Python và tóm tắt
+   tiếng Việt dựa trên kết quả thực thi. Không cần train model hoặc report PDF.”
+2. Lập proposal, xem rồi duyệt. Trong Run chọn CPU, thời hạn 30 phút và bấm
+   Bắt đầu Working. Etc chỉ có phần cứng/thời hạn; không có ngân sách bốn stage.
+3. Xem log remote Python/code/thực thi. Trong lúc chạy, đổi mode sidebar sang
+   Training/Research: run này vẫn Etc. Sau cùng chỉ được COMPLETED khi có dòng
+   xác nhận Kaggle dừng. Output phải có tóm tắt và CSV/JSON/source xem/tải được.
+4. Xem đường dẫn bundle trong Output: thuộc project/output, có context, manifest,
+   Stop, log và file đã thu; không có journal/cây/report nghiên cứu do backend tạo.
+   CSV đủ 100 dòng; tổng doanh thu JSON phải khớp các dòng CSV.
+5. Bấm Tạo lượt Working mới: proposal/mode giữ nguyên, bundle attempt khác và
+   feedback/source từ lượt cũ. Chỉ mở thêm phiên khi bạn bấm Bắt đầu Working.
+6. Kiểm tra nội dung-only với idea “Đọc một nguồn text đã chọn, dùng terminal
+   Kaggle đếm số dòng và từ, giải thích kết quả”; đầu ra “Trả số dòng, số từ và
+   giải thích ngắn bằng tiếng Việt; không cần tạo file kết quả”. Output được
+   hiển thị mà không cần metric/report/file theo mẫu.
+7. Với run QA không cần hoàn tất, bấm Stop trong lúc Working: phải qua STOPPING,
+   chờ xác nhận dừng rồi CANCELLED. Output ghi chưa hoàn tất; file thu được vẫn
+   mở/tải được. Không dùng sự tồn tại của một file để báo COMPLETED.
+8. Sau một run đã kết thúc, refresh hoặc restart backend bằng lệnh thường dùng:
+   Output/log/đường dẫn không đổi, không submit lại. Mở run Research cũ: vẫn có
+   cây/report và experiment tương ứng.
+
+QA trên đây dùng Codex/Kaggle thật do user chủ động chạy. Agent triển khai chỉ
+build frontend/compile Python, đọc lại code và trạng thái backend; chưa chạy
+pipeline Kaggle hoặc bộ kiểm thử tính năng cho M2-02.
+Backend đã khởi động lại tại port 8011, health OK và không có job đang chạy.
+Cả 6 project hiện có đã có thư mục output; nội dung/hash của 13 proposal cũ
+giữ nguyên sau restart.
 
 **User QA:**
 

@@ -10,6 +10,7 @@ không cần restart backend sau khi tính năng này đã được nạp.
 | `planner.etc` | `planner_etc.md` | Proposal triển khai trực tiếp theo đầu ra user mô tả |
 | `working.agent` | `working_agent.md` | Prompt trực tiếp gửi cho Codex CLI |
 | `working.instructions` | `working_instructions.md` | Hướng dẫn được lưu vào `working-request.json` |
+| `working.etc` | `working_etc.md` | Prompt hoàn chỉnh cho Working Etc trực tiếp, không cây/report nghiên cứu |
 | `search.node` | `search_node.md` | Tạo/chạy node Tree Search |
 | `search.node_instructions` | `search_node_instructions.md` | Hướng dẫn thực hiện node |
 | `search.query` | `search_query.md` | Đọc kết quả của node |
@@ -23,7 +24,10 @@ Muốn dùng bản prompt khác, sửa tên file trong ánh xạ. Backend vẫn 
 - Hai file planner chứa prompt hoàn chỉnh cho từng mode; backend chọn alias từ
   snapshot của idea. Giữ `{{ready_schema}}` và `{{context}}` để chèn schema và
   context gồm đường dẫn Library, mode và đầu ra nguyên gốc. Không ghép prompt
-  research vào Etc. Working Etc chưa được mở trong M2-01.
+  research vào Etc.
+- `working_etc.md` là prompt riêng hoàn chỉnh của Etc. Giữ `{{workdir}}`; phần
+  context nằm trong `working-request.json` gồm proposal/mode/đầu ra đã duyệt và
+  terminal helper. Etc không nạp `working.instructions` hoặc prompt Tree Search.
 - `working_agent.md` gồm cả lời nhắc đọc yêu cầu và thực hiện công việc. Giữ biến
   `{{workdir}}` để agent nhận thư mục của run. Biến chưa được cung cấp sẽ báo lỗi.
 - Trong `working_instructions.md`, mỗi đoạn cách nhau bằng một dòng trống sẽ trở

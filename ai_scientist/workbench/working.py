@@ -104,7 +104,6 @@ class WorkingService:
 
     async def start(self, project_id, run_id, accelerator=None, ttl_seconds=None, search=None):
         from .models import SearchOptions
-        options = SearchOptions.model_validate(search or {'enabled': getattr(self.config, 'tree_search_enabled', False)})
         accelerator = accelerator or getattr(self.config, 'kaggle_accelerator', 'cpu')
         ttl = ttl_seconds or getattr(self.config, 'kaggle_session_seconds', 1800)
         if accelerator not in ACCELERATORS or type(ttl) is not int or ttl < 60:
@@ -121,15 +120,21 @@ class WorkingService:
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
             mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
             if mode == 'etc':
-                raise StoreConflict('Proposal Etc đã được lưu. Working Etc sẽ được triển khai ở M2-02; chưa mở phiên Kaggle.')
-            if 'mode' in approved['snapshot']['idea'] and not options.enabled:
-                raise StoreConflict('Training/Research sử dụng Agentic Tree Search; tạo proposal Etc mới để đổi mode.')
+                # Etc never validates or runs research stages supplied by a client.
+                options = SearchOptions(enabled=False)
+            elif 'mode' in approved['snapshot']['idea']:
+                options = SearchOptions.model_validate({**(search or {}), 'enabled': True})
+            else:
+                options = SearchOptions.model_validate(search or {'enabled': getattr(self.config, 'tree_search_enabled', False)})
             await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
             # Fail closed on a changed pinned baseline before starting a Kaggle SSH session.
             await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
             # Validate editable prompt files before opening a paid Kaggle session.
-            load_prompt('working.instructions')
-            load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
+            if mode == 'etc':
+                load_prompt('working.etc', workdir=self.view.root(project_id, run_id) / 'working-agent')
+            else:
+                load_prompt('working.instructions')
+                load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
             if options.enabled:
                 from .tree_search import TreeSearchRun
                 for alias in ('search.node', 'search.query'):
@@ -147,7 +152,10 @@ class WorkingService:
                     if item['state'] not in allowed and item['id'] not in unstarted:
                         raise StoreConflict('Một Run khác đang hoạt động')
             await self.check_idle()
-            if options.enabled:
+            if mode == 'etc':
+                from .outputs import prepare_output
+                await asyncio.to_thread(prepare_output, self.store, project_id, run_id, approved)
+            elif options.enabled:
                 from .experiments import prepare_experiment
                 await asyncio.to_thread(prepare_experiment, self.store, self.config.workspace_root, project_id, run_id, approved)
             root = self.view.root(project_id, run_id)
@@ -183,6 +191,7 @@ class WorkingService:
                          'wait_seconds': 60}
 
     def _request(self, key, approved, descriptor, workdir):
+        mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
         helper = str(Path(sys.executable))
         library = self.store.library(key[0])
         baseline_files = self.store.variant_stage_files(approved['snapshot'])
@@ -190,7 +199,7 @@ class WorkingService:
         agent_approved = {**approved, 'snapshot': library.agent_snapshot(approved['snapshot'])}
         data = {'approved': agent_approved, 'remote_directory': descriptor['remote_directory'],
                 'terminal_command': f'& "{helper}" .\\terminal.py' if sys.platform == 'win32' else shlex.quote(helper) + ' ./terminal.py',
-                'instructions': load_prompt('working.instructions').split('\n\n')}
+                'instructions': [] if mode == 'etc' else load_prompt('working.instructions').split('\n\n')}
         if approved['snapshot'].get('variant'):
             data['instructions'].append(
                 'Đây là Working của một biến thể đã được duyệt. Đọc baseline/manifest.json và các file baseline có available=true được liệt kê; '
@@ -205,16 +214,26 @@ class WorkingService:
             data['previous_source'] = source.read_text(encoding='utf-8')
         (workdir / 'working-request.json').write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         return self.planner.bindings.request_type(key[1], 'mvp0_working',
-            load_prompt('working.agent', workdir=workdir), workdir,
+            load_prompt('working.etc' if mode == 'etc' else 'working.agent', workdir=workdir), workdir,
             timeout_seconds=min(getattr(self.config, 'working_seconds', 900), max(1, descriptor['ttl_seconds'] - 60)),
             max_output_bytes=3_000_000)
+
+    def _collect_etc(self, key, terminal, root, approved):
+        # Persist each verified file so a later transfer failure keeps partial results.
+        def progress(manifest):
+            self.records.update(*key, manifest=manifest)
+        manifest = collect_files(terminal, root, approved['body'].get('budget', {}).get('output_bytes'), progress)
+        manifest['complete'] = True
+        return manifest
 
     async def _work(self, key, approved, accelerator, ttl, options):
         project_id, run_id = key
         root = self.view.root(*key)
+        is_etc = snapshot_settings(approved['snapshot'])[0] == 'etc'
         terminal, gateway = None, None
         outcome = 'FAILED'
         no_submit = False
+        collection_attempted = False
         try:
             self.records.append_log(*key, 'Đang mở phiên Kaggle và kết nối SSH…\n', 'backend')
             descriptor = await self._connect(key, approved, accelerator, ttl)
@@ -251,14 +270,15 @@ class WorkingService:
                 return
             self.records.update(*key, phase='collecting', summary=payload.model_dump())
             if not options.enabled:
-                manifest = await asyncio.to_thread(collect_files, terminal, root,
-                    approved['body'].get('budget', {}).get('output_bytes'))
+                collection_attempted = True
+                manifest = (await asyncio.to_thread(self._collect_etc, key, terminal, root, approved) if is_etc
+                    else await asyncio.to_thread(collect_files, terminal, root, approved['body'].get('budget', {}).get('output_bytes')))
             names = {item['path'] for item in manifest['files']}
             if not set(payload.output_files).issubset(names) or (payload.succeeded and manifest['command_count'] < 1):
                 raise ValueError('Agent result does not match verified SSH commands/files')
             (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
             self.records.update(*key, manifest=manifest)
-            if not options.enabled:
+            if not options.enabled and not is_etc:
                 source = root / 'source/workload.py'
                 code = source.read_text(encoding='utf-8') if source.is_file() and not source.is_symlink() else ''
                 node = Node(plan=json.dumps(approved['body'], ensure_ascii=False), code=code)
@@ -267,10 +287,11 @@ class WorkingService:
                 journal = Journal()
                 journal.append(node)
                 (root / 'journal.json').write_text(json.dumps(journal_snapshot(journal), ensure_ascii=False, indent=2), encoding='utf-8')
-            code = (root / 'source/workload.py').read_text(encoding='utf-8') if (root / 'source/workload.py').is_file() else ''
-            with self.store.connection(project_id) as connection:
-                connection.execute('UPDATE runs SET node_id=?,node_json=?,code_sha256=? WHERE id=?',
-                    (node.id, json.dumps(node.to_dict()), hashlib.sha256(code.encode()).hexdigest() if code else None, run_id))
+            if not is_etc:
+                code = (root / 'source/workload.py').read_text(encoding='utf-8') if (root / 'source/workload.py').is_file() else ''
+                with self.store.connection(project_id) as connection:
+                    connection.execute('UPDATE runs SET node_id=?,node_json=?,code_sha256=? WHERE id=?',
+                        (node.id, json.dumps(node.to_dict()), hashlib.sha256(code.encode()).hexdigest() if code else None, run_id))
             outcome = 'COMPLETED' if payload.succeeded else 'FAILED'
         except BaseException as exc:
             if key in self.stop_requests or isinstance(exc, asyncio.CancelledError):
@@ -283,8 +304,9 @@ class WorkingService:
             if terminal and outcome != 'CANCELLED' and not (saved or {}).get('manifest') and terminal.lock.acquire(blocking=False):
                 terminal.lock.release()
                 try:
-                    manifest = await asyncio.to_thread(collect_files, terminal, root,
-                        approved['body'].get('budget', {}).get('output_bytes'))
+                    collection_attempted = True
+                    manifest = (await asyncio.to_thread(self._collect_etc, key, terminal, root, approved) if is_etc
+                        else await asyncio.to_thread(collect_files, terminal, root, approved['body'].get('budget', {}).get('output_bytes')))
                     (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
                     self.records.update(*key, manifest=manifest)
                     self.records.append_log(*key, 'Đã thu file có SHA256 trước khi dừng; kết quả agent chưa được xác minh hoàn tất.\n', 'backend')
@@ -298,6 +320,8 @@ class WorkingService:
                                                   'limitations': ['Chưa hoàn thành công việc đã duyệt.'], 'output_files': []})
             elif record:
                 summary = record['summary']
+                if is_etc:
+                    summary['succeeded'] = False
                 summary['limitations'].append(f'Backend chưa xác minh đủ kết quả ({type(exc).__name__}). Xem log Working.')
                 self.records.update(*key, summary=summary)
         finally:
@@ -305,6 +329,15 @@ class WorkingService:
                 await asyncio.to_thread(gateway.close)
             if key in self.stop_requests:
                 outcome = 'CANCELLED'
+            if is_etc and terminal and not collection_attempted and terminal.lock.acquire(blocking=False):
+                terminal.lock.release()
+                try:
+                    manifest = await asyncio.to_thread(self._collect_etc, key, terminal, root, approved)
+                    (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                    self.records.update(*key, manifest=manifest)
+                    self.records.append_log(*key, 'Đã lưu file thu được trước khi dừng; công việc chưa được coi là hoàn tất.\n', 'backend')
+                except Exception:
+                    self.records.append_log(*key, 'Chỉ giữ file đã thu đủ và kiểm tra SHA256; tiếp tục dừng Kaggle.\n', 'backend')
             self.records.update(*key, state='STOPPING', phase='stopping', outcome=outcome)
             receipt = None
             if no_submit:
@@ -362,6 +395,16 @@ class WorkingService:
         (root / 'working-stop.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
         summary = record['summary'] or {'summary': 'User dừng Working trước khi agent hoàn thành.', 'limitations': []}
         outcome = record['outcome'] or 'FAILED'
+        if snapshot_settings(approved['snapshot'])[0] == 'etc':
+            from .outputs import save_output
+            if not record['summary']:
+                record['summary'] = {'succeeded': False, 'summary': summary['summary'],
+                                     'limitations': ['Chưa hoàn thành công việc đã duyệt.'], 'output_files': []}
+                self.records.update(*key, summary=record['summary'])
+            save_output(self.store, root, *key, approved, record, receipt, outcome)
+            self.records.finish(*key, receipt, outcome)
+            self.records.append_log(*key, 'Đã xác nhận Kaggle dừng. Output đã lưu.\n', 'backend')
+            return
         lines = ['# Working report', '', '## Tóm tắt từ agent', '', summary['summary'], '',
                  '## Bằng chứng backend', '', f'- Project: {project["name"]} ({key[0]})', f'- Run: {key[1]}',
                  f'- Kết quả Working: {outcome}',
@@ -452,14 +495,21 @@ class WorkingService:
             detail['can_retry'] = record['stop_confirmed'] and not detail['deleted_at']
             detail['coder_calls'] = record['agent_called']
             root = self.view.root(project_id, run_id)
-            for name in ('working-manifest.json', 'working-stop.json', 'report.md'):
+            for name in ('working-manifest.json', 'working-stop.json', 'report.md', 'output.json', 'working.log'):
                 if (root / name).is_file() and not (root / name).is_symlink():
                     detail['artifacts'].append(name)
             for item in (record['manifest'] or {}).get('files', []):
                 path = root / item['path']
-                if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(root.resolve()):
+                if (path.is_file() and not path.is_symlink() and not path.is_junction()
+                        and path.stat().st_size == item['bytes'] and path.resolve().is_relative_to(root.resolve())
+                        and not any(parent.is_symlink() or parent.is_junction() for parent in path.parents if parent.is_relative_to(root))):
                     detail['artifacts'].append(item['path'])
             detail['artifacts'] = sorted(set(detail['artifacts']))
+        if detail['mode'] == 'etc':
+            from .outputs import output_detail
+            detail['output'] = output_detail(root, record, detail['artifact_dir'], detail['state'], detail['artifacts'])
+            if detail['output']['directory']:
+                detail['output']['directory'] = display_path(root)
         return detail
 
     def history(self, project_id, include_deleted=False):
@@ -467,7 +517,8 @@ class WorkingService:
         for run in history['runs']:
             detail = self.detail(project_id, run['id'])
             run.update(execution_mode=detail['execution_mode'], working=detail.get('working'),
-                       artifacts=detail['artifacts'], report_available=detail['report_path'] == 'report.md')
+                       artifacts=detail['artifacts'], report_available=detail['report_path'] == 'report.md',
+                       output_available=bool(detail.get('output', {}).get('summary') or detail.get('output', {}).get('files')))
         return history
 
     async def retry(self, project_id, parent_run_id, request_id):
@@ -493,6 +544,10 @@ class WorkingService:
                 await self.check_idle()
             run, created = self.store.reserve_retry(project_id, parent_run_id, request_id, tuple(unknown_ids))
             if created:
+                approved = self.store.approved_snapshot(project_id, run['id'])
+                if snapshot_settings(approved['snapshot'])[0] == 'etc':
+                    from .outputs import prepare_output
+                    prepare_output(self.store, project_id, run['id'], approved)
                 root = self.view.root(project_id, run['id'])
                 root.mkdir(parents=True, exist_ok=True)
                 feedback = {'parent_run_id': parent_run_id, 'summary': record['summary'] if record else None,

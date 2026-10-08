@@ -371,7 +371,7 @@ def library_router(store, workspace_root):
         return await async_call(request.app.state.working.reconcile, project_id, run_id)
 
     @router.api_route('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}', methods=['GET', 'HEAD'])
-    def artifact(project_id: str, run_id: str, name: str, request: Request):
+    def artifact(project_id: str, run_id: str, name: str, request: Request, download: bool = True):
         from fastapi.responses import FileResponse, PlainTextResponse
         detail = call(request.app.state.working.detail, project_id, run_id)
         if name not in detail['artifacts']:
@@ -402,6 +402,14 @@ def library_router(store, workspace_root):
                 modified = max(modified, state_path.stat().st_mtime)
             return Response(content, media_type=media,
                 headers={'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Last-Modified', 'Last-Modified': formatdate(modified, usegmt=True), 'Content-Security-Policy': "sandbox allow-scripts allow-downloads; default-src 'self' https://cdnjs.cloudflare.com; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'"})
+        preview_types = {'.txt': 'text/plain', '.md': 'text/plain', '.csv': 'text/plain',
+                         '.json': 'application/json', '.py': 'text/plain', '.ipynb': 'text/plain',
+                         '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                         '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf'}
+        if not download and path.suffix.lower() in preview_types:
+            return FileResponse(path, filename=path.name, media_type=preview_types[path.suffix.lower()],
+                content_disposition_type='inline',
+                headers={'Content-Security-Policy': "sandbox; default-src 'none'; frame-ancestors 'self'", 'X-Content-Type-Options': 'nosniff'})
         return FileResponse(path, filename=path.name)
 
     return router

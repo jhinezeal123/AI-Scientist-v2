@@ -6,5 +6,5 @@ import './styles.css';
 
 const page=new URLSearchParams(window.location.search);
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode>
-  {page.get('page')==='artifacts' ? <ArtifactsPage projectId={page.get('project') || ''} runId={page.get('run') || ''}/> : <App/>}
+  {page.get('page')==='artifacts' ? <ArtifactsPage projectId={page.get('project') || ''} runId={page.get('run') || ''} outputOnly={page.get('view')==='output'}/> : <App/>}
 </React.StrictMode>);

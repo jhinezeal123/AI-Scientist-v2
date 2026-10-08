@@ -229,7 +229,7 @@ class AgentTerminalBridge:
         self.access.unlink(missing_ok=True)
 
 
-def collect_files(terminal, root, limit=None):
+def collect_files(terminal, root, limit=None, on_progress=None):
     """Copy only source/output files over the existing SSH connection and verify hashes."""
     import hashlib
     if limit is not None and (type(limit) is not int or limit < 1):
@@ -241,6 +241,9 @@ def collect_files(terminal, root, limit=None):
         raise ValueError('Invalid SSH manifest')
     total = 0
     seen = set()
+    collected = []
+    if on_progress:
+        on_progress({**manifest, 'files': [], 'complete': False})
     for item in files:
         name, size, sha256 = item['path'], item['bytes'], item['sha256']
         path = Path(name)
@@ -253,10 +256,10 @@ def collect_files(terminal, root, limit=None):
         if limit is not None and total > limit:
             raise ValueError('SSH files exceed the approved output budget')
         target = root / path
-        if target.is_symlink() or not target.resolve().is_relative_to(root):
+        if target.is_symlink() or target.is_junction() or not target.resolve().is_relative_to(root):
             raise ValueError('Artifact destination escapes the run')
         target.parent.mkdir(parents=True, exist_ok=True)
-        if any(parent.is_symlink() for parent in target.parents if parent.is_relative_to(root)):
+        if any(parent.is_symlink() or parent.is_junction() for parent in target.parents if parent.is_relative_to(root)):
             raise ValueError('Linked artifact directory')
         temporary = target.with_name(target.name + '.collecting')
         if temporary.is_symlink():
@@ -275,4 +278,7 @@ def collect_files(terminal, root, limit=None):
         if digest.hexdigest() != sha256:
             raise ValueError('SSH artifact hash mismatch')
         temporary.replace(target)
+        collected.append(item)
+        if on_progress:
+            on_progress({**manifest, 'files': list(collected), 'complete': False})
     return manifest

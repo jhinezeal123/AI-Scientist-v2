@@ -76,7 +76,7 @@ export default function ProposalPanel({idea,proposals,resources,busy,onOpenParen
         <code className="source-id">Context SHA256 {latest.context_sha256}</code>
         {latest.state === 'AWAITING_APPROVAL' && <div className="stack"><p className="muted">Duyệt sẽ lưu phạm vi công việc và tạo run đầu tiên. Agent kiểm tra môi trường và thực hiện trong phiên Working.</p><button className="primary" disabled={busy || idea?.state === 'PLANNING'} onClick={() => void onApprove(latest).catch(() => {})}>Duyệt proposal v{latest.version}</button></div>}
         {latest.state === 'APPROVED' && <p className="alert">{pinnedIdea?.mode==='etc'
-          ? 'Đã duyệt proposal Etc. Xem run ở tab Run; Working Etc sẽ có ở M2-02.'
+          ? 'Đã duyệt proposal Etc. Mở tab Run và bấm Bắt đầu Working; kết quả sẽ nằm trong Output.'
           : 'Đã duyệt. Mở tab Run và bấm Bắt đầu Working để thực hiện công việc trên Kaggle.'}</p>}
       </>}
       {answered && <div className="stack"><p className="alert">Câu trả lời đã được lưu. Tiếp tục để Codex đọc câu trả lời và lập proposal v{latest.version + 1} từ các nguồn của v{latest.version}.</p>

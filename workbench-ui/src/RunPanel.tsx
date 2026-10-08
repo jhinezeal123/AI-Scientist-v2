@@ -1,10 +1,11 @@
 import {useCallback, useEffect, useState} from 'react';
-import {api, History, Idea, Variant, Working, RunMode, modeLabel} from './api';
+import {api, History, Idea, Variant, Working, RunMode, RunOutput, modeLabel} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 import ModeFields from './ModeFields';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   mode:RunMode;mode_legacy:boolean;desired_output:string;
+  output?:RunOutput;
   execution_mode:'ssh'|'legacy';working?:Working;
   search?:{experiment:string;directory?:string;stages:{name:string;nodes:number}[];tree_path:string|null};
   can_retry:boolean;parent_run_id:string|null;
@@ -20,7 +21,7 @@ const newRequestId=()=>crypto.randomUUID().replaceAll('-','');
 
 export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, defaultMode, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore, onCreateVariant}: {
   defaultMode:RunMode;
-  projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,stageIterations:number[])=>Promise<void>;
+  projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,stageIterations:number[]|null)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>;
   onCreateVariant:(id:string,requestId:string,title:string,purpose:string,changeSummary:string,mode:RunMode,desiredOutput:string)=>Promise<Idea|undefined>}) {
@@ -103,29 +104,26 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
       <p className="mode-tag" data-mode={run.mode}>{modeLabel(run.mode,run.mode_legacy)}</p>
       {run.mode_legacy && <p className="muted">Run trước MVP2: giữ nguyên proposal, artifacts và đường chạy đã có.</p>}
       {run.state === 'APPROVED' && <p>{run.mode==='etc'
-        ? 'Proposal Etc đã duyệt. Working Etc sẽ được triển khai ở M2-02.'
+        ? 'Proposal Etc đã duyệt. Bắt đầu Working để thực hiện trực tiếp trên Kaggle và lưu Output.'
         : 'Proposal đã duyệt. Bắt đầu Working để agent viết và chạy code trực tiếp trong Kaggle.'}</p>}
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
-      {run.mode==='etc' && !run.working && <div className="context"><h3>Working Etc</h3>
-        <p>Đường chạy trực tiếp và mục Output sẽ có ở M2-02. Run này chưa mở phiên Kaggle.</p>
-        <button type="button" disabled>Bắt đầu Working · chờ M2-02</button>
-      </div>}
-      {run.mode!=='etc' && !run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
+      {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
         <h3>Working</h3>
-        <p>Agentic Tree Search: implementation → tuning → research → ablation. Cả cây dùng chung một phiên Kaggle.</p>
+        <p>{run.mode==='etc' ? 'Agent thực hiện công việc trực tiếp qua cùng một phiên SSH. Kết quả được lưu trong Output của project.'
+          : 'Agentic Tree Search: implementation → tuning → research → ablation. Cả cây dùng chung một phiên Kaggle.'}</p>
         <label>Phần cứng<select value={accelerator} disabled={busy} onChange={e=>setAccelerator(e.target.value)}>
           <option value="cpu">CPU</option><option value="NvidiaT4">GPU · T4 x2</option>
           <option value="TpuV5E8">TPU · v5e-8</option><option value="TpuV6E8">TPU · v6e-8</option>
         </select></label>
         <label>Thời gian tối đa của phiên (phút)<input type="number" min="1" max="720" step="1" value={ttl/60}
           disabled={busy} onChange={e=>setTtl(Number(e.target.value)*60)}/></label>
-        <details><summary>Ngân sách tìm kiếm của phiên</summary>
+        {run.mode!=='etc' && <details><summary>Ngân sách tìm kiếm của phiên</summary>
           <p className="muted">Số bản thử tối đa cho từng giai đoạn. Baseline kế thừa không tính thành bản thử mới. Bạn có thể tạo lượt Working tiếp theo.</p>
           {stageLabels.map((label,index)=><label key={label}>{label} · số bước<input type="number" min="1" step="1"
             value={stageIterations[index]} disabled={busy} onChange={e=>setStageIterations(values=>values.map((value,i)=>i===index ? Number(e.target.value) : value))}/></label>)}
-        </details>
-        <button className="primary" disabled={busy || !Number.isInteger(ttl) || ttl<60 || ttl>43200 || stageIterations.some(n=>!Number.isInteger(n) || n<1)}
-          onClick={()=>void onWorking(run.id,accelerator,ttl,stageIterations)}>Bắt đầu Working</button>
+        </details>}
+        <button className="primary" disabled={busy || !Number.isInteger(ttl) || ttl<60 || ttl>43200 || (run.mode!=='etc' && stageIterations.some(n=>!Number.isInteger(n) || n<1))}
+          onClick={()=>void onWorking(run.id,accelerator,ttl,run.mode==='etc' ? null : stageIterations)}>Bắt đầu Working</button>
       </div>}
       {run.working && <div className="context"><h3>Phiên Working</h3>
         <p>{run.working.accelerator === 'NvidiaT4' ? 'GPU · T4 x2' : run.working.accelerator} · tối đa {run.working.ttl_seconds/60} phút</p>
@@ -137,10 +135,10 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         {run.working.notebook_ref && <a href={`https://www.kaggle.com/code/${run.working.notebook_ref}`} target="_blank" rel="noreferrer">Mở phiên trên Kaggle ↗</a>}
         {!run.working.stop_confirmed && <p><button onClick={()=>void onStop(run.id)}>
           {run.state==='STOPPING' ? 'Yêu cầu dừng / kiểm tra lại' : 'Dừng Working'}</button></p>}
-        {run.working.summary && <><h3>Tóm tắt công việc</h3><p>{run.working.summary.summary}</p></>}
+        {run.mode!=='etc' && run.working.summary && <><h3>Tóm tắt công việc</h3><p>{run.working.summary.summary}</p></>}
       </div>}
       <p className="muted">Mỗi lượt do bạn yêu cầu. Không giới hạn tổng số lượt Working.</p>
-      {run.search && <div className="context"><h3>Agentic Tree Search</h3>
+      {run.mode!=='etc' && run.search && <div className="context"><h3>Agentic Tree Search</h3>
         <code className="source-id">{run.search.directory || run.search.experiment}</code>
         <p>{run.search.stages.map(stage=>`${stageLabels[Number(stage.name[0])-1] || stage.name}: ${stage.nodes} node`).join(' · ')}</p>
         {run.search.tree_path && <a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${run.search.tree_path}`}
@@ -184,7 +182,17 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         href={`/?page=artifacts&project=${projectId}&run=${run.id}`}>
         Artifacts đã lưu · {run.artifacts.length} file ↗
       </a></h3>}
-      {run.report_path === 'report.md' && <><h3>Report</h3><a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>
+      {run.mode==='etc' && run.output && <div className="context output-panel"><div className="panel-head"><h3>Output</h3>
+        <span className="state-tag">{run.output.status==='completed' ? 'Hoàn tất' : run.output.status==='partial' ? 'Chưa hoàn tất' : 'Đang chờ kết quả'}</span></div>
+        {run.output.directory && <code className="source-id">{run.output.directory}</code>}
+        {run.output.summary ? <pre className="report-preview">{run.output.summary}</pre> : <p className="muted">Kết quả sẽ xuất hiện sau khi agent thực hiện công việc.</p>}
+        {!run.output.stop_confirmed && run.working && <p role="status" className="muted">Backend chưa xác nhận Kaggle dừng. Nội dung hoặc file hiện có chưa chứng minh công việc hoàn tất.</p>}
+        {run.output.status==='partial' && <p role="status" className="alert error">Công việc chưa hoàn tất. File đã thu vẫn có thể xem và tải.</p>}
+        {!!run.output.limitations.length && <><h4>Điều còn thiếu / giới hạn</h4><ul>{run.output.limitations.map((value,index)=><li key={index}>{value}</li>)}</ul></>}
+        {!!run.output.files.length && <a href={`/?page=artifacts&view=output&project=${projectId}&run=${run.id}`} target="_blank" rel="noreferrer">
+          Mở các file Output · {run.output.files.length} file ↗</a>}
+      </div>}
+      {run.mode!=='etc' && run.report_path === 'report.md' && <><h3>Report</h3><a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>
         {run.report_preview && <pre className="report-preview">{run.report_preview}</pre>}</>}
       {['COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED'].includes(run.state)
         && !run.deleted_at && (run.execution_mode!=='ssh' || run.working?.stop_confirmed) && <div className="context stack">
