@@ -1,6 +1,6 @@
 # M1-03 — Tạo idea biến thể từ kết quả đã lưu
 
-Ngày: 2026-10-08. Trạng thái: đã bàn giao local, 2026-10-08.
+Ngày: 2026-10-08. Trạng thái: triển khai local; chưa nghiệm thu đầy đủ vì thiếu browser journey cho nhánh nguồn đã xóa.
 Tham chiếu: IMPLEMENT_MVP1.md / CP1-C, PRODUCT_ROADMAP.md / P1-05.
 
 ## 1. Đích đến và phạm vi
@@ -110,9 +110,20 @@ của một variant mất lineage về baseline gốc.
       chặn bởi backend. Thay parent cùng `request_id` không có route UI riêng.
 - [x] Source cha đổi version hiển thị cảnh báo/review; proposal mới ghim version;
       snapshot cha không đổi. Variant dùng được khi parent không có code/report.
-- [ ] Source đã xóa chưa được đi hết một browser journey riêng trong fixture;
-      không xóa dữ liệu project thật để kiểm tra. Luồng source deletion vẫn giữ
-      policy hiện có, nhưng nhánh UI này chưa được nghiệm thu ở M1-03.
+- [ ] Source đã xóa chưa được đi hết một browser journey riêng trong fixture.
+      `8012/health` vẫn trả `ok`, nhưng CUA inventory sau reset và sau khi mở
+      panel fixture đều trả `apps=[]`, `browsers=[]`; không thể thực hiện GUI
+      journey. Chưa xóa nguồn fixture, chưa kiểm tra cảnh báo UI hay proposal
+      mới. Không xóa dữ liệu project thật và không đánh dấu tiêu chí này đạt.
+- [x] Correction tổng quát baseline: dùng manifest đã lưu để stage
+      `source/generate_data.py` đã xác minh, kèm hash/nội dung; assertion nằm
+      trong `test_variants.py`, thuộc targeted suite 34 passed.
+- [x] Correction tài nguyên: Library stage giữ streaming iterator, Working
+      bỏ lần stage Library lặp trước SSH; các test Library/Working trong suite
+      targeted 34 passed.
+- [x] Correction state UI: form biến thể reset khi đổi run; chọn lại DRAFT
+      variant không có proposal lấy lại parent sources còn tồn tại. UI build
+      xanh; browser surface trống nên chưa có browser readback cho hai hành vi.
 - [x] Retry cũ vẫn dùng cùng proposal; variant/retry lineage không lẫn.
 - [x] Parent hidden và project switch/reload không làm mất lineage hay nhầm links.
 - [x] Targeted existing tests green; UI build green. Không có structural
@@ -125,7 +136,8 @@ của một variant mất lineage về baseline gốc.
 Ghi chú evidence: screenshot bytes hiển thị inline qua screenshot API trong
 browser run; môi trường không cung cấp API lưu chúng thành đường dẫn file local
 được hỗ trợ. Counters và parent-hash JSON được lưu trong
-`.workbench/acceptance/m1-03-variants-2026-10-08/`.
+`.workbench/acceptance/m1-03-variants-2026-10-08/`. Source deletion browser
+criterion vẫn pending vì không có browser surface trong CUA inventory.
 
 Browser dùng mcp__cua_repl; đọc skill computer-use và tài liệu API trước thao
 tác. Fixture 8012/workspace acceptance riêng được phép, tái dùng fixture M1-02

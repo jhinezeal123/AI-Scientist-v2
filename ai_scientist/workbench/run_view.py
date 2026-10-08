@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import PurePosixPath
 
+from .store import _safe_variant_source_path
+
 BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'payload.json', 'checks.json')
 ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
                   'submission-intent.json', 'launch-readiness.json', 'remote-identity.json',
@@ -46,7 +48,7 @@ class RunView:
         root = self.root(project_id, run_id).resolve()
         baseline_total = 0
 
-        def read_text(source_path, stage_path, kind):
+        def read_text(source_path, stage_path, kind, expected_bytes=None, expected_sha256=None):
             nonlocal baseline_total
             path = root.joinpath(*PurePosixPath(source_path).parts)
             current = root
@@ -59,6 +61,9 @@ class RunView:
                 return {'path': source_path, 'stage_path': stage_path, 'kind': kind,
                         'available': False, 'reason': 'missing'}
             size = path.stat().st_size
+            if expected_bytes is not None and size != expected_bytes:
+                return {'path': source_path, 'stage_path': stage_path, 'kind': kind,
+                        'available': False, 'bytes': size, 'reason': 'manifest_size_mismatch'}
             if size > 1_048_576:
                 return {'path': source_path, 'stage_path': stage_path, 'kind': kind,
                         'available': False, 'bytes': size, 'reason': 'over_1_mib_limit'}
@@ -75,7 +80,10 @@ class RunView:
                 return {'path': source_path, 'stage_path': stage_path, 'kind': kind,
                         'available': False, 'bytes': len(data), 'reason': 'changed_during_capture'}
             sha256 = hashlib.sha256(data).hexdigest()
-            if kind == 'code' and run['code_sha256'] and sha256 != run['code_sha256']:
+            if expected_sha256 and sha256 != expected_sha256:
+                return {'path': source_path, 'stage_path': stage_path, 'kind': kind,
+                        'available': False, 'bytes': size, 'sha256': sha256, 'reason': 'manifest_hash_mismatch'}
+            if source_path == 'source/workload.py' and run['code_sha256'] and sha256 != run['code_sha256']:
                 return {'path': source_path, 'stage_path': stage_path, 'kind': kind,
                         'available': False, 'bytes': size, 'sha256': sha256, 'reason': 'saved_hash_mismatch'}
             baseline_total += len(data)
@@ -106,6 +114,7 @@ class RunView:
                     baseline['result']['metric'] = {key: metric[key] for key in ('name', 'direction', 'final_value', 'best_value') if key in metric}
             except (OSError, ValueError, TypeError):
                 baseline['result']['metric_status'] = 'unavailable'
+        working_manifest_files = None
         with self.store.connection(project_id) as connection:
             if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='working_runs'").fetchone():
                 record = connection.execute('SELECT summary_json,manifest_json FROM working_runs WHERE run_id=?', (run_id,)).fetchone()
@@ -128,33 +137,55 @@ class RunView:
                             files = manifest.get('files', []) if isinstance(manifest, dict) else []
                             if not isinstance(files, list) or len(files) > 512:
                                 raise ValueError('Invalid saved working manifest')
-                            for item in files:
-                                if not isinstance(item, dict) or not set(('path', 'bytes', 'sha256')).issubset(item):
-                                    continue
-                                relative = item['path']
-                                parsed = PurePosixPath(relative) if isinstance(relative, str) else None
-                                if (parsed is None or not parsed.parts or parsed.is_absolute() or parsed.parts[0] != 'output'
-                                        or parsed.as_posix() != relative or any(part in {'', '.', '..'} for part in parsed.parts)
-                                        or '\\' in relative or type(item['bytes']) is not int or item['bytes'] < 0
-                                        or not re.fullmatch(r'[0-9a-f]{64}', str(item['sha256']))):
-                                    continue
-                                path = root.joinpath(*parsed.parts)
-                                current = root
-                                linked = False
-                                for part in parsed.parts:
-                                    current = current / part
-                                    if current.is_symlink() or current.is_junction():
-                                        linked = True
-                                        break
-                                if (not linked and path.resolve().is_relative_to(root)
-                                        and path.is_file() and path.stat().st_size == item['bytes']):
-                                    baseline['artifact_refs'].append(
-                                        {key: item[key] for key in ('path', 'bytes', 'sha256')})
-                            baseline['artifact_refs'] = baseline['artifact_refs'][:64]
+                            working_manifest_files = files
                         except (TypeError, ValueError):
                             baseline['result']['manifest_status'] = 'unavailable'
                 else:
                     baseline['result']['working_summary_status'] = 'not_saved'
+        if working_manifest_files is not None:
+            source_count = 0
+            source_omitted = 0
+            seen_paths = set()
+            for item in working_manifest_files:
+                if not isinstance(item, dict) or not set(('path', 'bytes', 'sha256')).issubset(item):
+                    continue
+                relative = item['path']
+                parsed = PurePosixPath(relative) if isinstance(relative, str) else None
+                if (parsed is None or not parsed.parts or parsed.as_posix() != relative or parsed.is_absolute()
+                        or any(part in {'', '.', '..'} for part in parsed.parts) or '\\' in relative
+                        or type(item['bytes']) is not int or item['bytes'] < 0
+                        or not re.fullmatch(r'[0-9a-f]{64}', str(item['sha256']))):
+                    continue
+                if relative in seen_paths:
+                    baseline['result']['manifest_status'] = 'duplicate_path'
+                    continue
+                seen_paths.add(relative)
+                if parsed.parts[0] == 'source' and relative != 'source/workload.py' and _safe_variant_source_path(relative):
+                    if source_count >= 32:
+                        source_omitted += 1
+                        continue
+                    source_count += 1
+                    entry = read_text(relative, f'baseline/{relative}', 'code', item['bytes'], item['sha256'])
+                    baseline['text_files'].append(entry)
+                    if entry.get('available'):
+                        baseline['artifact_refs'].append(
+                            {key: entry[key] for key in ('path', 'bytes', 'sha256', 'kind')})
+                if parsed.parts[0] != 'output':
+                    continue
+                path = root.joinpath(*parsed.parts)
+                current = root
+                linked = False
+                for part in parsed.parts:
+                    current = current / part
+                    if current.is_symlink() or current.is_junction():
+                        linked = True
+                        break
+                if (not linked and path.resolve().is_relative_to(root)
+                        and path.is_file() and path.stat().st_size == item['bytes']):
+                    baseline['artifact_refs'].append(
+                        {key: item[key] for key in ('path', 'bytes', 'sha256')})
+            if source_omitted:
+                baseline['result']['source_files_omitted'] = source_omitted
         try:
             from .saved_artifacts import artifact_paths, _read_json
             collection_path = root / 'collection-manifest.json'

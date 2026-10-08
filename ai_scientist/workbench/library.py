@@ -1,5 +1,6 @@
 """Versioned project source files and copies for an agent's request workspace."""
 import hashlib
+from itertools import chain
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -223,9 +224,7 @@ class LibraryFiles:
 
     def stage(self, snapshot, workspace, extra_files=None):
         workspace = Path(workspace).resolve()
-        files = list(self.selected_files(snapshot))
-        files.extend((extra_files or {}).items())
-        for name, data in files:
+        for name, data in chain(self.selected_files(snapshot), (extra_files or {}).items()):
             parsed = PurePosixPath(name) if isinstance(name, str) else None
             if (parsed is None or parsed.is_absolute() or '\\' in name
                     or any(part in {'', '.', '..'} for part in parsed.parts)):

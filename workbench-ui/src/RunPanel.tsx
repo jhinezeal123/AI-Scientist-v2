@@ -53,6 +53,7 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
   function resetVariant() {
     setVariantTitle('');setVariantPurpose('');setVariantChanges('');setVariantRequestId(newRequestId());setVariantAttempted(false);
   }
+  useEffect(()=>{setVariantOpen(false);resetVariant();},[selectedRunId]);
   useEffect(() => {
     let cancelled = false;
     // A fresh history state (including T08 COMPLETED) supersedes earlier local observations.

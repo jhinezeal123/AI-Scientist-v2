@@ -19,7 +19,7 @@ mốc sau, không thêm vào MVP1.
 | --- | --- | --- | --- |
 | M1-01 / CP1-A | Import PDF/file, bản gốc + text theo trang, ingestion status/version | Hai project riêng; chọn file vừa import làm context; agent đọc qua đường dẫn | Đã bàn giao local, 2026-10-08 |
 | M1-02 / CP1-B | Trao đổi/approval/artifacts tiếp tục qua restart, UI khôi phục/lỗi | Restart không replay agent/notebook; source mới làm proposal chờ duyệt cần xem lại | Đã bàn giao local, 2026-10-08 |
-| M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Đã bàn giao local, 2026-10-08 |
+| M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Luồng chính đã bàn giao local; nhánh browser nguồn đã xóa còn chờ nghiệm thu |
 | M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Chưa nghiệm thu |
 
 ## M1-01
@@ -141,14 +141,23 @@ mốc sau, không thêm vào MVP1.
   lineage/purpose phải tồn tại từ DRAFT trước run và retry vẫn riêng, M1-03 thêm
   metadata SQLite `variant_ideas` thay vì đổi ý nghĩa hai cơ chế cũ. Không cần
   structural refactor trước behavior.
+- Correction sau review: code tham khảo tổng quát lấy từ các đường dẫn `source/...`
+  trong working manifest đã lưu và xác minh; UTF-8, tối đa 32 file và 1 MiB.
+  `source/workload.py` legacy vẫn dùng hash code hiện có; file code khác dùng
+  hash manifest. File không phù hợp/oversize được bỏ qua có cảnh báo, không scan
+  thư mục run tùy ý. `LibraryFiles.stage` giữ iterator streaming theo từng file;
+  Working xác minh snapshot/baseline trước khi trả phí rồi chỉ stage Library một
+  lần trong request, không stage cả Library trước SSH rồi stage lại.
+- Form biến thể reset khi đổi run; quay lại DRAFT variant chưa có proposal chỉ
+  chọn lại các nguồn parent còn tồn tại, không mượn lựa chọn của idea khác.
 
 ### Kiểm chứng và bằng chứng
 
-- Targeted backend: `pytest tests/workbench/test_variants.py tests/workbench/test_store.py tests/workbench/test_planning.py tests/workbench/test_working.py`
-  **19 passed**; kiểm tra cuối cho module variant sau assertion bổ sung về
-  approval gate: `pytest tests/workbench/test_variants.py` **2 passed**.
-  Bao gồm replay/conflict, ownership, stop confirmation, baseline hash, dữ liệu
-  cha không đổi, fallback khi không có code/report và chặn Working trước approval.
+- Targeted backend sau correction: `pytest -q tests/workbench/test_variants.py tests/workbench/test_library_files.py tests/workbench/test_working.py tests/workbench/test_generic_working.py tests/workbench/test_planning.py`
+  **34 passed**. Assertion hiện có xác minh `source/generate_data.py` được đọc
+  từ working manifest đã lưu, stage đúng nội dung/hash và không đổi dữ liệu cha.
+  Các kiểm tra khác bao gồm replay/conflict, ownership, stop confirmation,
+  baseline hash, fallback khi thiếu code/report và chặn Working trước approval.
 - Frontend build `npm run build` đạt (`tsc -b && vite build`).
 - Browser fixture local `8012` đi hết draft → source version cần review →
   clarification/restart → proposal mới → approval/run mới → Working qua fake
@@ -162,6 +171,11 @@ mốc sau, không thêm vào MVP1.
   `kaggle_real_sessions=0`; fake planner=2, Working=1, SSH=1, terminal stop=1.
   Screenshot được hiển thị inline trong browser run; API screenshot khả dụng
   không lưu đường dẫn file local nên không ghi path ảnh giả.
+- Nhánh source đã xóa **chưa nghiệm thu bằng browser**. Fixture `8012/health`
+  trả `ok`, nhưng inventory CUA sau reset và sau khi mở panel fixture đều trả
+  `apps=[]`, `browsers=[]`; vì vậy chưa xóa nguồn giả, chưa kiểm tra cảnh báo UI
+  hay proposal mới. Không đánh dấu nhánh này đạt. Các counters bên trên là bằng
+  chứng của luồng giả lập trước correction; lần thử browser này không gọi agent.
 - Backend thật `8011` được kiểm tra health; smoke test chỉ đọc dữ liệu đang có.
   Luồng Working toàn browser dùng fixture giả lập, chưa xác minh với Codex/Kaggle
   thật. Chạy biến thể thật và nghiệm thu trọn MVP1 vẫn thuộc M1-04.

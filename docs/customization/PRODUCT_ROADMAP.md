@@ -185,10 +185,12 @@ mà không giải thích lại toàn bộ đề bài hoặc tìm lại kết qu�
 **Demo chốt:** project competition và một project paper, restart giữa hai phiên rồi chạy một biến thể.
 OCR mọi dạng PDF, semantic search và team chưa thuộc cửa này.
 
-**Tiến độ local (2026-10-08):** M1-01/CP1-A, M1-02/CP1-B và luồng tạo biến thể,
-proposal mới, approval, Working fixture/report của CP1-C đã được bàn giao/kiểm
-chứng cục bộ. M1-03 không dùng phiên Kaggle hay Codex thật; demo chốt đầy đủ và
-nghiệm thu các tiêu chí P1 còn lại vẫn chưa xong, thuộc M1-04.
+**Tiến độ local (2026-10-08):** M1-01/CP1-A, M1-02/CP1-B và luồng chính tạo
+biến thể, proposal mới, approval, Working fixture/report của CP1-C đã được bàn
+giao/kiểm chứng cục bộ. M1-03 chưa nghiệm thu đầy đủ vì nhánh browser nguồn đã
+xóa còn thiếu bằng chứng; CUA không cung cấp browser surface trong phiên sửa.
+M1-03 không dùng phiên Kaggle hay Codex thật; demo chốt đầy đủ và nghiệm thu
+các tiêu chí P1 còn lại vẫn chưa xong, thuộc M1-04.
 
 ## 6. MVP 2 — General Implementation Agent cho workshop và paper
 

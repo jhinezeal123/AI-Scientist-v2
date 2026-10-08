@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sqlite3
 import uuid
@@ -56,6 +56,40 @@ def canonical(value):
 
 def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+_VARIANT_SOURCE_EXTENSIONS = {
+    '.py', '.pyw', '.r', '.jl', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
+    '.sh', '.bash', '.sql', '.java', '.c', '.h', '.cc', '.cpp', '.go', '.rs',
+    '.lua', '.rb', '.swift', '.kt', '.scala',
+}
+_VARIANT_SECRET_NAMES = {
+    '.env', '.env.local', '.env.production', 'terminal-access.json',
+    'credentials.json', 'secrets.json', 'tokens.json', 'id_rsa', 'id_ed25519',
+}
+
+
+def _safe_variant_source_path(value):
+    if not isinstance(value, str) or not value or '\\' in value:
+        return False
+    parsed = PurePosixPath(value)
+    if (parsed.is_absolute() or parsed.parts[0] != 'source' or len(parsed.parts) < 2
+            or parsed.as_posix() != value or any(part in {'', '.', '..'} for part in parsed.parts)):
+        return False
+    lowered = [part.lower() for part in parsed.parts]
+    return (not any(part in {'credentials', 'secrets'} or part in _VARIANT_SECRET_NAMES for part in lowered)
+            and parsed.suffix.lower() in _VARIANT_SOURCE_EXTENSIONS)
+
+
+def _valid_variant_stage(item):
+    if not isinstance(item, dict):
+        return False
+    path, stage_path = item.get('path'), item.get('stage_path')
+    if stage_path == 'baseline/report.md':
+        return path == 'report.md'
+    if stage_path == 'baseline/workload.py':
+        return path == 'source/workload.py'
+    return path != 'source/workload.py' and _safe_variant_source_path(path) and stage_path == f'baseline/{path}'
 
 
 def idea_title(title):
@@ -426,13 +460,12 @@ class ProjectStore:
             if captured_baseline.get('parent') != expected_parent:
                 raise StoreConflict('Thông tin baseline cha đã đổi; tải lại run rồi tạo biến thể')
             files = captured_baseline.get('text_files')
-            if not isinstance(files, list) or len(files) > 4:
+            if not isinstance(files, list) or len(files) > 34:
                 raise ValueError('Baseline text manifest không hợp lệ')
             total = 0
-            allowed_paths = {'baseline/report.md', 'baseline/workload.py'}
             available = set()
             for item in files:
-                if not isinstance(item, dict) or item.get('stage_path') not in allowed_paths:
+                if not _valid_variant_stage(item) or type(item.get('available')) is not bool:
                     raise ValueError('Baseline path không nằm trong allowlist')
                 if item.get('available') is True:
                     path = item['stage_path']
@@ -481,9 +514,14 @@ class ProjectStore:
         if row is None or json.loads(row['variant_json']) != variant:
             raise StoreConflict('Baseline biến thể đã bị đổi hoặc không còn khớp approval')
         texts = json.loads(row['baseline_text_json'])
+        files = variant.get('baseline', {}).get('text_files')
+        if not isinstance(files, list) or len(files) > 34:
+            raise StoreConflict('Baseline manifest biến thể không hợp lệ')
         result = {}
         total = 0
-        for item in variant['baseline']['text_files']:
+        for item in files:
+            if not _valid_variant_stage(item) or type(item.get('available')) is not bool:
+                raise StoreConflict('Baseline path biến thể không nằm trong allowlist')
             if not item.get('available'):
                 continue
             path = item['stage_path']

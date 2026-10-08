@@ -178,6 +178,8 @@ export default function App() {
     const latest=proposals.filter(proposal=>proposal.idea_id===id).sort((a,b)=>b.version-a.version)[0];
     if (latest)setSelected(latest.context_snapshot.resources.map(source=>source.id)
       .filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
+    else if (nextIdea?.variant)setSelected(oldSources.map(source=>source.id)
+      .filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
   }
   async function createVariant(id:string,requestId:string,variantTitle:string,purpose:string,changeSummary:string):Promise<Idea|undefined> {
     let created:Idea|undefined;

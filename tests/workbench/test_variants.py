@@ -1,4 +1,5 @@
 import hashlib
+import json
 
 import pytest
 
@@ -17,18 +18,27 @@ def test_variant_request_ownership_stop_gate_and_pinned_hash(tmp_path):
     root = view.root(project, run['id'])
     (root / 'source').mkdir(parents=True)
     code = b"print('saved parent code')\n"
+    generated_source = b"def make_features(rows):\n    return rows\n"
     report = b'# Saved parent report\n\nscore: 0.8\n'
     (root / 'source/workload.py').write_bytes(code)
+    (root / 'source/generate_data.py').write_bytes(generated_source)
     (root / 'report.md').write_bytes(report)
     code_hash = hashlib.sha256(code).hexdigest()
     with store.connection(project) as connection:
         connection.execute("UPDATE runs SET state='COMPLETED',code_sha256=?,report_path='report.md' WHERE id=?",
                            (code_hash, run['id']))
         connection.executescript(WORKING_SCHEMA)
-        connection.execute("INSERT INTO working_runs(run_id,session_id,phase,accelerator,ttl_seconds,started_at) "
-                           "VALUES(?,?,'stopped','cpu',60,'fixture')", (run['id'], run['id']))
+        saved_manifest = {'files': [{'path': 'source/generate_data.py', 'bytes': len(generated_source),
+                                    'sha256': hashlib.sha256(generated_source).hexdigest()}]}
+        connection.execute("INSERT INTO working_runs(run_id,session_id,phase,accelerator,ttl_seconds,started_at,manifest_json) "
+                           "VALUES(?,?,'stopped','cpu',60,'fixture',?)",
+                           (run['id'], run['id'], json.dumps(saved_manifest)))
 
     baseline, texts = view.variant_baseline(project, run['id'])
+    generated_entry = next(item for item in baseline['text_files'] if item['path'] == 'source/generate_data.py')
+    assert generated_entry['available'] is True
+    assert generated_entry['stage_path'] == 'baseline/source/generate_data.py'
+    assert generated_entry['sha256'] == hashlib.sha256(generated_source).hexdigest()
     request_id = '1' * 32
     args = (project, run['id'], request_id, '  Variant  ', 'new purpose', 'change model')
     with pytest.raises(StoreConflict, match='chưa xác nhận'):
@@ -59,6 +69,7 @@ def test_variant_request_ownership_stop_gate_and_pinned_hash(tmp_path):
     staged = store.variant_stage_files(snapshot)
     assert staged['baseline/report.md'] == report
     assert staged['baseline/workload.py'] == code
+    assert staged['baseline/source/generate_data.py'] == generated_source
     proposal_id = store.save_proposal(project, first['id'], ready(snapshot['resources'][0]['id']),
                                       store.context_snapshot(project, first['id'], [snapshot['resources'][0]['id']]))
     with store.connection(project) as connection:

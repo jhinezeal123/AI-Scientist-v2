@@ -117,7 +117,7 @@ class WorkingService:
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
             await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
             # Fail closed on a changed pinned baseline before starting a Kaggle SSH session.
-            baseline_files = await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
+            await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
             # Validate editable prompt files before opening a paid Kaggle session.
             load_prompt('working.instructions')
             load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
@@ -133,7 +133,6 @@ class WorkingService:
             root.mkdir(parents=True, exist_ok=True)
             workdir = root / 'working-agent'
             workdir.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(self.store.library(project_id).stage, approved['snapshot'], workdir, baseline_files)
             await asyncio.to_thread(self.records.reserve, project_id, run_id, accelerator, ttl)
             key = (project_id, run_id)
             self.tasks[key] = asyncio.create_task(self._work(key, approved, accelerator, ttl))
