@@ -4,10 +4,10 @@ import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
-import SourceDetails from './SourceDetails';
+import SourceCards from './SourceCards';
 import {statusText} from './sourceStatus';
 
-const blank = {title: '', url: '', content: ''};
+const blank = {title: '', content: ''};
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -55,6 +55,7 @@ export default function App() {
       .then(([r, i, h, p]) => {
         if (cancelled) return;
         setResources(r); setIdeas(i); setHistory(h); setProposals(p);
+        setSelected(current=>current.filter(id=>r.some(source=>source.id===id && !source.deletion_pending)));
         setIdeaId(current => i.some(idea => idea.id === current && !idea.deleted_at) ? current : '');
       }).catch(e => {if (!cancelled) setError(e.message);})
       .finally(() => {if (!cancelled) setLoading(false);});
@@ -101,7 +102,7 @@ export default function App() {
     event.preventDefault();
     void action(async () => {
       const path = `/projects/${projectId}/resources` + (editing ? `/${editing.id}` : '');
-      await api(path, editing ? 'PUT' : 'POST', {...form, kind: editing?.kind || (form.url.trim() ? 'url' : 'text'), url: form.url || null,
+      await api(path, editing ? 'PUT' : 'POST', {...form,
         ...(editing ? {expected_version: editing.version} : {})});
       setForm(blank); setEditing(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu nguồn vào project.');
     });
@@ -131,24 +132,31 @@ export default function App() {
       {!project ? <section className="panel welcome"><h2>Tạo project đầu tiên</h2><p>Lưu đề bài, nguồn dữ liệu và idea cùng một project. Bắt đầu bằng form bên trái.</p></section> : <>
         {loading && <p role="status" className="muted">Đang đọc project…</p>}
         {tab === 'Library' && <div className="columns">
-          <section className="panel"><div className="panel-head"><h2>Library <span className="muted">{resources.length} nguồn</span></h2>
-            <button disabled={busy || loading} onClick={() => void action(async () => {
-              await api(`/projects/${projectId}/import-readiness`, 'POST'); setRevision(n => n+1); setNotice('Đã nhập nguồn competition đã đọc ở T01.');
-            })}>Nhập nguồn T01</button></div>
+          <section className="panel"><div className="panel-head"><h2>Library <span className="muted">{resources.length} nguồn</span></h2></div>
             <p className="muted">Nguồn được lưu thành file riêng theo phiên bản. Agent nhận đường dẫn và tự tìm, đọc phần cần thiết.</p>
             <code className="source-id">{project.library_path}</code>
-            {!resources.length && <p className="empty">Chưa có nguồn. Thêm nguồn ở form bên cạnh hoặc nhập bản đọc T01.</p>}
-            {resources.map(resource => <SourceDetails key={resource.id} projectId={projectId} resource={resource} busy={busy} onEdit={resource=>{
+            <SourceCards key={projectId} projectId={projectId} resources={resources} busy={busy || loading}
+              deletionBlocked={planning || implementing} onEdit={resource=>{
                 if (resource.attachment){setReplacing(resource);return;}
-                setEditing(resource); setForm({title: resource.title,url: resource.url || '',content: resource.content});
-              }}/>) }
+                setEditing(resource); setForm({title: resource.title,content: resource.url && !resource.content.includes(resource.url)
+                  ? `${resource.url}\n\n${resource.content}` : resource.content});
+              }} onDelete={async resource=>{await action(async()=>{
+                try {
+                  const result=await api<{removed_files:number;freed_bytes:number}>(`/projects/${projectId}/resources/${resource.id}`,'DELETE');
+                  setSelected(current=>current.filter(id=>id!==resource.id));setContext(null);
+                  if (editing?.id===resource.id){setEditing(null);setForm(blank);}
+                  if (replacing?.id===resource.id)setReplacing(null);
+                  const bytes=result.freed_bytes;
+                  const size=bytes>=1_048_576 ? `${(bytes/1_048_576).toFixed(1)} MB` : bytes>=1024 ? `${(bytes/1024).toFixed(1)} KB` : `${bytes} byte`;
+                  setNotice(`Đã xóa vĩnh viễn nguồn và ${result.removed_files} file (${size}).`);
+                } finally {setContext(null);setRevision(n=>n+1);}
+              });}}/>
           </section>
           <section className="panel"><h2>{editing ? `Sửa nguồn · v${editing.version}` : 'Thêm nguồn'}</h2>
             <form onSubmit={saveResource} className="stack">
               <label>Tiêu đề<input required maxLength={240} value={form.title} onChange={e => setForm({...form,title:e.target.value})}/></label>
-              <label>URL nguồn<input type="url" value={form.url} maxLength={2000} onChange={e => setForm({...form,url:e.target.value})}/></label>
-              <label>Nội dung / mô tả<textarea rows={10} maxLength={60000} value={form.content} onChange={e => setForm({...form,content:e.target.value})}/></label>
-              <small className="muted">Chỉ lưu URL sẽ được đánh dấu “chưa đọc”. Nhập text không chứng minh app đã tải URL.</small>
+              <label>Nội dung / mô tả<textarea rows={10} maxLength={60000} value={form.content} placeholder="Nhập nội dung, mô tả hoặc URL nguồn" onChange={e => setForm({...form,content:e.target.value})}/></label>
+              <small className="muted">Có thể dán một hoặc nhiều URL tại đây. Chỉ lưu URL sẽ được đánh dấu “chưa đọc”; app chưa tải nội dung trang.</small>
               <div className="actions"><button className="primary" disabled={busy || loading}>Lưu nguồn</button>{editing && <button type="button" onClick={() => {setEditing(null);setForm(blank);}}>Hủy sửa</button>}</div>
             </form><FileImport key={`${projectId}:${replacing?.id || 'new'}`} projectId={projectId} busy={busy || loading} replacing={replacing}
               onCancel={()=>setReplacing(null)} onUpload={action} onSaved={source=>{setReplacing(null);setContext(null);setRevision(n=>n+1);
@@ -176,7 +184,7 @@ export default function App() {
             });}}/>
         </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn nguồn để đưa đường dẫn file vào context. Agent tự tìm và đọc phần cần thiết; xem trước không gọi Codex.</p>
           <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.filter(idea=>!idea.deleted_at).map(idea => <option key={idea.id} value={idea.id}>{ideaTitle(idea)}</option>)}</select></label>
-            {resources.map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
+            {resources.filter(resource=>!resource.deletion_pending).map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || loading || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
             <button className="primary" disabled={busy || loading || planning || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
               await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');

@@ -10,9 +10,10 @@ from .named_paths import PATH_LOCK, checked_child, folder_title, rename_folder, 
 
 
 class LibraryFiles:
-    def __init__(self, project_directory, ingestion_lookup=None):
+    def __init__(self, project_directory, ingestion_lookup=None, source_available=None):
         self.project_directory = Path(project_directory).resolve()
         self.ingestion_lookup = ingestion_lookup
+        self.source_available = source_available
 
     def _folders(self):
         library = checked_child(self.project_directory, 'library')
@@ -114,7 +115,9 @@ class LibraryFiles:
                 f"URL: {source.get('url') or '(none)'}\n\n"
                 f"{source['content'] or 'Reference only. The URL has not been fetched.'}\n").encode('utf-8')
 
-    def reference(self, source):
+    def reference(self, source, *, saving=False):
+        if not saving and self.source_available and not self.source_available(source['id']):
+            raise FileNotFoundError('Nguồn đã bị xóa; nhập nguồn và lập proposal mới trước khi chạy lại')
         try:
             self._source_folder(source['id'])
         except FileNotFoundError:
@@ -136,6 +139,8 @@ class LibraryFiles:
                 raise ValueError('Pinned Library file hash mismatch')
         result = {key: value for key, value in source.items() if key not in {'content','_ingestion','attachment'}} | {
             'file_path': name, 'file_sha256': hashlib.sha256(data).hexdigest(), 'file_bytes': len(data)}
+        from .resources import source_urls
+        result['urls'] = source_urls({'url':source.get('url'), 'content':data.decode('utf-8')})
         metadata = self._metadata(source)
         if metadata:
             prefix = name.rsplit('/', 1)[0] + '/'

@@ -1,5 +1,36 @@
-"""Import only the fixed local T01 source snapshots; never browse donor files."""
+"""Source URL references and import of fixed local readiness snapshots."""
 import json
+import re
+from urllib.parse import urlsplit
+
+
+def source_urls(source):
+    """Read HTTP(S) references supplied explicitly or inside a source description."""
+    candidates = [source.get('url'), *(source.get('urls') or []),
+                  *re.findall(r'https?://[^\s<>"\x00-\x20]+', source.get('content') or '')]
+    result = []
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        candidate = candidate.rstrip('.,;!\'')
+        for opening, closing in [('(', ')'), ('[', ']'), ('{', '}')]:
+            while candidate.endswith(closing) and candidate.count(closing) > candidate.count(opening):
+                candidate = candidate[:-1]
+        try:
+            parsed = urlsplit(candidate)
+            if (len(candidate) <= 2000 and parsed.scheme in {'http', 'https'} and parsed.hostname
+                    and not parsed.username and not parsed.password and candidate not in result):
+                result.append(candidate)
+        except ValueError:
+            continue
+    return result
+
+
+def source_has_text(content, urls):
+    remainder = content
+    for url in urls:
+        remainder = remainder.replace(url, '')
+    return bool(remainder.strip(' \t\r\n.,;!()[]{}<>\'"'))
 
 
 def readiness_sources(workspace_root):

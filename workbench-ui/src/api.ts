@@ -2,6 +2,7 @@ export type Project = {id: string; name: string; created_at: string; directory_n
 export type Resource = {id: string; kind: 'text'|'url'|'dataset'|'pdf'|'file'; title: string; url: string|null;
   content: string; status: string; version: number; content_sha256: string;
   file_path?:string;file_sha256?:string;file_bytes?:number;
+  urls?:string[];deletion_pending?:boolean;deletion_error?:string|null;
   attachment?:{filename:string;original_file_path:string;original_sha256:string;original_bytes:number;
     manifest_file_path:string;manifest_sha256:string;page_count:number|null;processed_pages:number;text_pages:number;issues:string[]}};
 export type PlanBody = {needs_clarification: boolean; questions: string[]; paraphrase: string;

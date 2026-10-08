@@ -15,7 +15,7 @@ class ProjectInput(StrictModel):
 
 
 class ResourceInput(StrictModel):
-    kind: Literal["text", "url", "dataset"]
+    kind: Literal["text", "url", "dataset"] | None = None
     title: str = Field(min_length=1, max_length=240)
     url: str | None = Field(default=None, max_length=2000)
     content: str = Field(default="", max_length=60_000)
@@ -167,9 +167,8 @@ def library_router(store, workspace_root):
     def source_file(project_id: str, resource_id: str, version: int):
         from fastapi.responses import PlainTextResponse
         call(store.project, project_id)
-        with store.connection(project_id) as connection:
-            if not connection.execute('SELECT 1 FROM resources WHERE id=?', (resource_id,)).fetchone():
-                raise HTTPException(404, 'Source not found in this project')
+        if not call(store.source_available, project_id, resource_id):
+            raise HTTPException(404, 'Source was deleted or is being deleted')
         path = call(store.library(project_id).source_path, resource_id, version)
         if not path.is_file():
             raise HTTPException(404, 'Source version not found')
@@ -177,6 +176,8 @@ def library_router(store, workspace_root):
 
     def imported_path(project_id, resource_id, version, kind, page=None):
         call(store.project, project_id)
+        if not call(store.source_available, project_id, resource_id):
+            raise HTTPException(404, 'Source was deleted or is being deleted')
         metadata = call(store.ingestion, project_id, resource_id, version)
         if metadata is None:
             raise HTTPException(404, 'Imported source version not found')
@@ -219,6 +220,16 @@ def library_router(store, workspace_root):
             async with service.lock:
                 return call(store.set_deleted, project_id, kind, item_id, deleted)
         return call(store.set_deleted, project_id, kind, item_id, deleted)
+
+    @router.delete('/projects/{project_id}/resources/{resource_id}')
+    async def delete_source(project_id: str, resource_id: str, request: Request):
+        service = getattr(request.app.state, 'service', None)
+        if service:
+            async with service.lock:
+                if service.worker.future is not None and not service.worker.future.done():
+                    raise HTTPException(409, 'Chờ agent kết thúc trước khi xóa nguồn')
+                return await asyncio.to_thread(call, store.delete_resource, project_id, resource_id)
+        return await asyncio.to_thread(call, store.delete_resource, project_id, resource_id)
 
     @router.delete('/projects/{project_id}/ideas/{idea_id}')
     async def delete_idea(project_id: str, idea_id: str, request: Request):

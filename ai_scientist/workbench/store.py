@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS source_ingestions(resource_id TEXT NOT NULL REFERENCE
 version INTEGER NOT NULL, metadata_json TEXT NOT NULL, PRIMARY KEY(resource_id,version));
 """
 
+DELETION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS source_deletions(resource_id TEXT PRIMARY KEY REFERENCES resources(id),
+plan_json TEXT NOT NULL, error TEXT);
+"""
+
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -66,7 +71,14 @@ class ProjectStore:
             self._name_project_directory(project['id'])
             with self.connection(project['id']) as connection:
                 self._migrate_schema(connection)
-                sources = [dict(row) for row in connection.execute('SELECT * FROM resources')]
+                pending = [row[0] for row in connection.execute('SELECT resource_id FROM source_deletions')]
+            for resource_id in pending:
+                try:
+                    self.delete_resource(project['id'], resource_id)
+                except (StoreConflict, ValueError):
+                    pass  # Keep a visible retry action; never recreate files from a pending deletion.
+            with self.connection(project['id']) as connection:
+                sources = [dict(row) for row in connection.execute('SELECT * FROM resources WHERE id NOT IN (SELECT resource_id FROM source_deletions)')]
             for source in sources:
                 title = self.library(project['id']).register(source)
                 if title != source['title']:
@@ -113,6 +125,7 @@ class ProjectStore:
         """Keep upgrades of existing project databases in one place."""
         connection.executescript(IMPLEMENTATION_SCHEMA)
         connection.executescript(INGESTION_SCHEMA)
+        connection.executescript(DELETION_SCHEMA)
         if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
             connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
@@ -120,10 +133,16 @@ class ProjectStore:
         for table in ('ideas', 'runs'):
             if 'deleted_at' not in {row['name'] for row in connection.execute(f'PRAGMA table_info({table})')}:
                 connection.execute(f'ALTER TABLE {table} ADD COLUMN deleted_at TEXT')
-        connection.execute('UPDATE project_meta SET schema_version=5 WHERE schema_version<5')
+        connection.execute('UPDATE project_meta SET schema_version=6 WHERE schema_version<6')
 
     def library(self, project_id):
-        return LibraryFiles(self.directory(project_id), lambda resource, version:self.ingestion(project_id, resource, version))
+        return LibraryFiles(self.directory(project_id), lambda resource, version:self.ingestion(project_id, resource, version),
+                            lambda resource:self.source_available(project_id, resource))
+
+    def source_available(self, project_id, resource_id):
+        with self.connection(project_id) as connection:
+            return connection.execute('SELECT 1 FROM resources WHERE id=? AND id NOT IN (SELECT resource_id FROM source_deletions)',
+                                      (resource_id,)).fetchone() is not None
 
     def ingestion(self, project_id, resource_id, version):
         with self.connection(project_id) as connection:
@@ -177,7 +196,8 @@ class ProjectStore:
                 connection.executescript(SCHEMA)
                 connection.executescript(IMPLEMENTATION_SCHEMA)
                 connection.executescript(INGESTION_SCHEMA)
-                connection.execute("INSERT INTO project_meta VALUES(?,?,?,5)",
+                connection.executescript(DELETION_SCHEMA)
+                connection.execute("INSERT INTO project_meta VALUES(?,?,?,6)",
                                    (project_id, name, datetime.now(timezone.utc).isoformat()))
                 connection.commit()
             finally:
@@ -199,13 +219,17 @@ class ProjectStore:
 
     def resources(self, project_id):
         with self.connection(project_id) as connection:
-            return [{**dict(row), **self.library(project_id).reference(dict(row))}
+            pending = {row['resource_id']:row['error'] for row in connection.execute('SELECT * FROM source_deletions')}
+            return [({**dict(row), 'deletion_pending':True, 'deletion_error':pending[row['id']]}
+                     if row['id'] in pending else {**dict(row), **self.library(project_id).reference(dict(row))})
                     for row in connection.execute("SELECT * FROM resources ORDER BY rowid")]
 
     def save_resource(self, project_id, body, resource_id=None, expected_version=None):
         title, content = body["title"].strip(), body["content"]
-        url = body.get("url") or None
-        status = "provided_text" if content.strip() else "reference_only"
+        from .resources import source_has_text, source_urls
+        urls = source_urls(body)
+        url = body.get("url") or next(iter(urls), None)
+        status = "provided_text" if source_has_text(content, urls) else "reference_only"
         if not title or (not content.strip() and not url):
             raise ValueError("A title and text or URL are required")
         with PATH_LOCK, self.connection(project_id) as connection:
@@ -216,15 +240,18 @@ class ProjectStore:
                 existing = connection.execute("SELECT version FROM resources WHERE id=?", (resource_id,)).fetchone()
                 if existing is None:
                     raise KeyError("Resource not found in this project")
+                if not self.source_available(project_id, resource_id):
+                    raise StoreConflict('Nguồn đang xóa hoặc đã bị xóa')
                 if existing["version"] != expected_version:
                     raise StoreConflict("Resource changed; reload before saving")
                 version = existing["version"] + 1
             title = self.library(project_id).register({'id':resource_id, 'title':title})
-            row = {"id": resource_id, "kind": body["kind"], "title": title, "url": url,
+            kind = body.get('kind') or ('url' if url else 'text')
+            row = {"id": resource_id, "kind": kind, "title": title, "url": url,
                    "content": content, "status": status, "version": version,
-                   "content_sha256": digest(canonical({"kind": body["kind"], "title": title,
+                   "content_sha256": digest(canonical({"kind": kind, "title": title,
                                                        "url": url, "content": content, "status": status}))}
-            reference = self.library(project_id).reference(row)
+            reference = self.library(project_id).reference(row, saving=True)
             self._write_resource(connection, row)
             return {**row, **reference}
 
@@ -233,6 +260,38 @@ class ProjectStore:
         connection.execute("INSERT INTO resources(id,kind,title,url,content,status,version,content_sha256) VALUES(:id,:kind,:title,:url,:content,:status,:version,:content_sha256) "
                            "ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,url=excluded.url,content=excluded.content,status=excluded.status,version=excluded.version,content_sha256=excluded.content_sha256", row)
         connection.execute("UPDATE proposals SET state='STALE' WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')")
+
+    def delete_resource(self, project_id, resource_id):
+        from .source_deletion import deletion_plan, remove_source_files
+        with PATH_LOCK:
+            library = self.library(project_id)
+            with self.connection(project_id) as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                if connection.execute('SELECT 1 FROM resources WHERE id=?', (resource_id,)).fetchone() is None:
+                    raise KeyError('Source not found in this project')
+                if connection.execute("SELECT 1 FROM ideas WHERE state='PLANNING'").fetchone():
+                    raise StoreConflict('Chờ project lập proposal xong trước khi xóa nguồn')
+                for run in connection.execute("SELECT proposals.context_snapshot_json FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.state IN ('STARTING','WORKING','STOPPING','IMPLEMENTING','SUBMITTING')"):
+                    if any(source['id'] == resource_id for source in json.loads(run[0])['resources']):
+                        raise StoreConflict('Nguồn đang được run sử dụng; chờ run kết thúc trước khi xóa')
+                pending = connection.execute('SELECT plan_json FROM source_deletions WHERE resource_id=?', (resource_id,)).fetchone()
+                plan = json.loads(pending[0]) if pending else deletion_plan(library, resource_id)
+                connection.execute('INSERT OR IGNORE INTO source_deletions VALUES(?,?,NULL)', (resource_id, canonical(plan)))
+                for proposal in connection.execute("SELECT id,context_snapshot_json FROM proposals WHERE state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')"):
+                    if any(source['id'] == resource_id for source in json.loads(proposal['context_snapshot_json'])['resources']):
+                        connection.execute("UPDATE proposals SET state='STALE' WHERE id=?", (proposal['id'],))
+            try:
+                remove_source_files(library, resource_id, plan)
+            except (OSError, ValueError) as exc:
+                error = 'Chưa xóa hết file. Đóng file/thư mục đang mở rồi bấm Xóa lại.'
+                with self.connection(project_id) as connection:
+                    connection.execute('UPDATE source_deletions SET error=? WHERE resource_id=?', (error, resource_id))
+                raise StoreConflict(error) from exc
+            with self.connection(project_id) as connection:
+                connection.execute('DELETE FROM source_deletions WHERE resource_id=?', (resource_id,))
+                connection.execute('DELETE FROM source_ingestions WHERE resource_id=?', (resource_id,))
+                connection.execute('DELETE FROM resources WHERE id=?', (resource_id,))
+            return {'id':resource_id, 'deleted':True, 'removed_files':plan['files'], 'freed_bytes':plan['bytes']}
 
     def import_file(self, project_id, title, filename, data, resource_id=None, expected_version=None):
         from .ingestion import ingest, source_summary
@@ -250,6 +309,8 @@ class ProjectStore:
                         existing = connection.execute('SELECT version FROM resources WHERE id=?', (resource_id,)).fetchone()
                         if existing is None:
                             raise KeyError('Source not found in this project')
+                        if not self.source_available(project_id, resource_id):
+                            raise StoreConflict('Nguồn đang xóa hoặc đã bị xóa')
                         if existing['version'] != expected_version:
                             raise StoreConflict('Nguồn đã thay đổi; tải lại trước khi thay file')
                         version = existing['version'] + 1
@@ -259,7 +320,7 @@ class ProjectStore:
                     published = library.write_import(resource_id, version, {**files, 'source.md':library.document(row)})
                     self._write_resource(connection, row)
                     connection.execute('INSERT INTO source_ingestions VALUES(?,?,?)', (resource_id, version, canonical(metadata)))
-                    reference = library.reference({**row, '_ingestion':metadata})
+                    reference = library.reference({**row, '_ingestion':metadata}, saving=True)
                 return {**row, **reference}
             except BaseException:
                 if published is not None:
@@ -294,7 +355,7 @@ class ProjectStore:
                 raise KeyError("Idea not found in this project")
             resources = []
             for resource_id in resource_ids:
-                row = connection.execute("SELECT * FROM resources WHERE id=?", (resource_id,)).fetchone()
+                row = connection.execute("SELECT * FROM resources WHERE id=? AND id NOT IN (SELECT resource_id FROM source_deletions)", (resource_id,)).fetchone()
                 if row is None:
                     raise KeyError("Source not found in this project")
                 resources.append(self.library(project_id).reference(dict(row)))
@@ -339,7 +400,7 @@ class ProjectStore:
         if idea is None or idea["text"] != snapshot["idea"]["text"] or human(json.loads(idea["conversation_json"])) != human(snapshot["idea"]["conversation"]):
             raise StoreConflict("Idea or answers changed; create a new proposal")
         for source in snapshot["resources"]:
-            current = connection.execute("SELECT version,content_sha256 FROM resources WHERE id=?", (source["id"],)).fetchone()
+            current = connection.execute("SELECT version,content_sha256 FROM resources WHERE id=? AND id NOT IN (SELECT resource_id FROM source_deletions)", (source["id"],)).fetchone()
             if current is None or current["version"] != source["version"] or current["content_sha256"] != source["content_sha256"]:
                 raise StoreConflict("Source changed; create a new proposal")
 

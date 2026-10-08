@@ -21,19 +21,21 @@ ACTIVE = {'STARTING', 'WORKING', 'STOPPING'}
 
 def sources(approved):
     from urllib.parse import urlsplit
+    from .resources import source_urls
     selected = set(approved['body'].get('data_refs', []))
     competitions, datasets = [], []
     for resource in approved['snapshot']['resources']:
-        if resource['id'] not in selected or not resource.get('url'):
+        if resource['id'] not in selected:
             continue
-        url = urlsplit(resource['url'])
-        if url.hostname not in {'www.kaggle.com', 'kaggle.com'}:
-            continue
-        parts = url.path.strip('/').split('/')
-        if len(parts) >= 2 and parts[0] == 'competitions':
-            competitions.append(parts[1])
-        if len(parts) >= 3 and parts[0] == 'datasets':
-            datasets.append('/'.join(parts[1:3]))
+        for reference in source_urls(resource):
+            url = urlsplit(reference)
+            if url.hostname not in {'www.kaggle.com', 'kaggle.com'}:
+                continue
+            parts = url.path.strip('/').split('/')
+            if len(parts) >= 2 and parts[0] == 'competitions':
+                competitions.append(parts[1])
+            if len(parts) >= 3 and parts[0] == 'datasets':
+                datasets.append('/'.join(parts[1:3]))
     return sorted(set(competitions)), sorted(set(datasets))
 
 

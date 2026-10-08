@@ -22,7 +22,7 @@ export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,on
     && idea?.conversation.some(message => message.role === 'user' && message.reply_to === latest.id)
     && latest.context_snapshot.idea.text === idea?.text
     && latest.context_snapshot.resources.every(source => resources.some(current =>
-      current.id === source.id && current.version === source.version && current.content_sha256 === source.content_sha256));
+      !current.deletion_pending && current.id === source.id && current.version === source.version && current.content_sha256 === source.content_sha256));
   return <section className="panel proposal-panel"><div className="panel-head"><h2>Trao đổi và proposal</h2>{idea && <span className="state-tag">{idea.state}</span>}</div>
     {!idea && <p className="empty">Chọn một idea đã lưu để lập proposal.</p>}
     {idea?.state === 'PLANNING' && <p role="status" className="alert">Codex đang đọc nguồn và lập proposal. Bạn vẫn có thể xem Library; chưa tạo code hoặc chạy notebook.</p>}

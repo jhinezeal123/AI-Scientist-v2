@@ -10,7 +10,8 @@ duyệt proposal; sau khi đóng/mở app vẫn tiếp tục được; từ kế
 duyệt phạm vi mới rồi chạy Working và lưu report đúng project.
 
 Giữ Library dạng file theo tên, context chứa đường dẫn, Run chứa lịch sử, và
-Working qua SSH. Các nguồn/version đã duyệt giữ nguyên. Người dùng quyết định
+Working qua SSH. Các nguồn/version đã duyệt giữ nguyên đến khi người dùng chủ
+động xóa nguồn vĩnh viễn. Người dùng quyết định
 từng lượt Working. OCR, RAG, nhiều agent/harness và điều phối đồng thời thuộc các
 mốc sau, không thêm vào MVP1.
 
@@ -62,3 +63,17 @@ mốc sau, không thêm vào MVP1.
 - Kiểm thử planner/Working dùng fixture; chưa chạy Codex/Kaggle thật với PDF.
   Nghiệm thu toàn MVP1 và chạy biến thể thật thuộc M1-04.
 - M1-02 và M1-03 chưa triển khai trong checkpoint này.
+
+### Tinh chỉnh Library theo yêu cầu
+
+- Nguồn hiển thị bằng card tiêu đề; chọn card để mở chi tiết. Bỏ nút nhập T01 và
+  ô URL riêng: dán URL vào nội dung/mô tả, kể cả nhiều URL. URL vẫn được đưa vào
+  reference để Working nhận diện Kaggle dataset/competition đã chọn. Chỉ lưu URL
+  không có nghĩa app đã đọc trang.
+- Xóa nguồn là xóa vĩnh viễn file gốc, text đã trích, tất cả version và bản sao
+  Library của nguồn trong thư mục planner/Working của project. Không có thùng rác
+  hay khôi phục nguồn. Nếu file đang mở khiến xóa thất bại, app báo chưa xóa hết
+  và cho thử lại; backend tiếp tục phần đang xóa khi khởi động lại.
+- Chặn xóa trong lúc agent làm việc. Proposal chưa duyệt dùng nguồn bị xóa cần
+  lập lại. Lịch sử/report của run giữ nguyên; chạy lại với nguồn bị xóa bị chặn
+  trước khi mở phiên Kaggle và cần nhập nguồn/lập proposal mới.
