@@ -19,7 +19,7 @@ mốc sau, không thêm vào MVP1.
 | --- | --- | --- | --- |
 | M1-01 / CP1-A | Import PDF/file, bản gốc + text theo trang, ingestion status/version | Hai project riêng; chọn file vừa import làm context; agent đọc qua đường dẫn | Đã bàn giao local, 2026-10-08 |
 | M1-02 / CP1-B | Trao đổi/approval/artifacts tiếp tục qua restart, UI khôi phục/lỗi | Restart không replay agent/notebook; source mới làm proposal chờ duyệt cần xem lại | Đã bàn giao local, 2026-10-08 |
-| M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Luồng chính đã bàn giao local; nhánh browser nguồn đã xóa còn chờ nghiệm thu |
+| M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Đã nghiệm thu local, 2026-10-08 |
 | M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Chưa nghiệm thu |
 
 ## M1-01
@@ -168,14 +168,27 @@ mốc sau, không thêm vào MVP1.
   hành đổi lên v2. Project thứ hai không thấy dữ liệu project đầu.
 - Evidence: `.workbench/acceptance/m1-03-variants-2026-10-08/` chứa counters,
   fixture và JSON hash trước/sau. Counters ghi `codex_real_calls=0`,
-  `kaggle_real_sessions=0`; fake planner=2, Working=1, SSH=1, terminal stop=1.
-  Screenshot được hiển thị inline trong browser run; API screenshot khả dụng
-  không lưu đường dẫn file local nên không ghi path ảnh giả.
-- Nhánh source đã xóa **chưa nghiệm thu bằng browser**. Fixture `8012/health`
-  trả `ok`, nhưng inventory CUA sau reset và sau khi mở panel fixture đều trả
-  `apps=[]`, `browsers=[]`; vì vậy chưa xóa nguồn giả, chưa kiểm tra cảnh báo UI
-  hay proposal mới. Không đánh dấu nhánh này đạt. Các counters bên trên là bằng
-  chứng của luồng giả lập trước correction; lần thử browser này không gọi agent.
+  `kaggle_real_sessions=0`; sau cả hai journeys fake planner=4, Working=1,
+  SSH=1, terminal stop=1. Screenshot full-flow cũ hiển thị inline; source-
+  deletion screenshots được lưu thành các file local ở phần dưới.
+- Nhánh source đã xóa đã được nghiệm thu trong browser fixture `8012` ở task
+  chính sau khi user mở tab: từ parent run `8077a3b8…`, tạo variant DRAFT
+  `1f9a3c51…`; xóa duy nhất nguồn giả `5c51b0b2…` qua Library GUI (6 file,
+  khoảng 1.3 KB). UI ghi rõ “Fixture source document: đã bị xóa; không tự khôi
+  phục” và khóa planner trước khi review. Sau khi thêm/chọn “Fixture replacement
+  document” v1, review mở khóa planner; proposal v2 `cf9c64ae…` dừng ở
+  `AWAITING_APPROVAL`. Context hash `842782e0…` và `data_refs` chỉ chứa nguồn
+  thay thế `eea0aa48…`; ID nguồn đã xóa không có trong snapshot, nhưng còn trong
+  baseline lineage bất biến của variant. Không approve hoặc tạo Working mới cho
+  journey này; luồng fake Working/report/stop đã được kiểm ở journey trước.
+- Evidence JSON `.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-acceptance.json`
+  xác nhận parent run/report/code/output/proposal context/hash không đổi và
+  counters `codex_real_calls=0`, `kaggle_real_sessions=0` (fake planner=4,
+  Working=1, SSH=1, stop=1). Browser evidence: [source-deleted-warning.png](../../.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-warning.png),
+  [replacement-proposal.png](../../.workbench/acceptance/m1-03-variants-2026-10-08/replacement-proposal.png),
+  [source-deleted-proposal-dom.txt](../../.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-proposal-dom.txt).
+- Inventory CUA của worker vẫn trống; browser journey trên do root task thực
+  hiện sau khi user mở tab. Counters và hash evidence chỉ thuộc fixture local.
 - Backend thật `8011` được kiểm tra health; smoke test chỉ đọc dữ liệu đang có.
   Luồng Working toàn browser dùng fixture giả lập, chưa xác minh với Codex/Kaggle
   thật. Chạy biến thể thật và nghiệm thu trọn MVP1 vẫn thuộc M1-04.

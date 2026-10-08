@@ -1,6 +1,6 @@
 # M1-03 — Tạo idea biến thể từ kết quả đã lưu
 
-Ngày: 2026-10-08. Trạng thái: triển khai local; chưa nghiệm thu đầy đủ vì thiếu browser journey cho nhánh nguồn đã xóa.
+Ngày: 2026-10-08. Trạng thái: đã nghiệm thu local, 2026-10-08; M1-04 chưa nghiệm thu.
 Tham chiếu: IMPLEMENT_MVP1.md / CP1-C, PRODUCT_ROADMAP.md / P1-05.
 
 ## 1. Đích đến và phạm vi
@@ -110,11 +110,14 @@ của một variant mất lineage về baseline gốc.
       chặn bởi backend. Thay parent cùng `request_id` không có route UI riêng.
 - [x] Source cha đổi version hiển thị cảnh báo/review; proposal mới ghim version;
       snapshot cha không đổi. Variant dùng được khi parent không có code/report.
-- [ ] Source đã xóa chưa được đi hết một browser journey riêng trong fixture.
-      `8012/health` vẫn trả `ok`, nhưng CUA inventory sau reset và sau khi mở
-      panel fixture đều trả `apps=[]`, `browsers=[]`; không thể thực hiện GUI
-      journey. Chưa xóa nguồn fixture, chưa kiểm tra cảnh báo UI hay proposal
-      mới. Không xóa dữ liệu project thật và không đánh dấu tiêu chí này đạt.
+- [x] Browser fixture đã đi nhánh nguồn cha bị xóa: run cha `8077a3b8…` vẫn giữ
+      snapshot nguồn `5c51b0b2…`; variant mới `1f9a3c51…` hiện đúng cảnh báo
+      “Fixture source document: đã bị xóa; không tự khôi phục”. Planner bị khóa
+      trước review. Sau khi thêm/chọn `Fixture replacement document` v1 và review,
+      planner được mở; proposal v2 `cf9c64ae…` ở `AWAITING_APPROVAL`. Snapshot và
+      `data_refs` chỉ có replacement `eea0aa48…`, không có nguồn đã xóa; lineage
+      baseline cha vẫn giữ ID nguồn cha cùng hash đã ghim. Xóa chỉ dữ liệu fixture
+      (6 file, khoảng 1.3 KB), không xóa project thật.
 - [x] Correction tổng quát baseline: dùng manifest đã lưu để stage
       `source/generate_data.py` đã xác minh, kèm hash/nội dung; assertion nằm
       trong `test_variants.py`, thuộc targeted suite 34 passed.
@@ -133,11 +136,13 @@ của một variant mất lineage về baseline gốc.
       người dùng. Workspace fixture/process/tab được dọn sau khi lưu evidence.
 - [x] Không có Codex/Kaggle thật phát sinh; report ghi rõ fake vs live phạm vi.
 
-Ghi chú evidence: screenshot bytes hiển thị inline qua screenshot API trong
-browser run; môi trường không cung cấp API lưu chúng thành đường dẫn file local
-được hỗ trợ. Counters và parent-hash JSON được lưu trong
-`.workbench/acceptance/m1-03-variants-2026-10-08/`. Source deletion browser
-criterion vẫn pending vì không có browser surface trong CUA inventory.
+Ghi chú evidence: counters và parent-hash JSON được lưu trong
+`.workbench/acceptance/m1-03-variants-2026-10-08/`. Journey source-deletion có
+evidence đã lưu: [source-deleted-warning.png](../../.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-warning.png),
+[replacement-proposal.png](../../.workbench/acceptance/m1-03-variants-2026-10-08/replacement-proposal.png),
+[source-deleted-proposal-dom.txt](../../.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-proposal-dom.txt)
+và JSON kiểm tra snapshot/hash/counters tại
+`.workbench/acceptance/m1-03-variants-2026-10-08/source-deleted-acceptance.json`.
 
 Browser dùng mcp__cua_repl; đọc skill computer-use và tài liệu API trước thao
 tác. Fixture 8012/workspace acceptance riêng được phép, tái dùng fixture M1-02
