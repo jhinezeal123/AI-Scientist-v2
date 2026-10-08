@@ -1,7 +1,6 @@
 import {useCallback, useEffect, useState} from 'react';
 import {api, History, Working} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
-import ArtifactLinks from './ArtifactLinks';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   execution_mode:'ssh'|'legacy';working?:Working;
@@ -13,8 +12,8 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
   code_sha256:string|null;artifacts:string[];attempts:{attempt:number;state:string;session_id:string|null;origin:'CODEX'|'REUSE';
     error:string|null;checks:{pass:boolean;errors:string[];checks:string[];limitations:string[]}|null}[]};
 
-export default function RunPanel({projectId, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore}: {
-  projectId:string;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
+export default function RunPanel({projectId, initialRunId, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore}: {
+  projectId:string;initialRunId?:string;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>}) {
   const [showDeleted,setShowDeleted]=useState(false);
@@ -24,7 +23,7 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
   const [error,setError] = useState('');
   const [accelerator,setAccelerator] = useState('cpu');
   const [ttl,setTtl] = useState(1800);
-  const [selection,setSelection] = useState<{projectId:string;id:string}|null>(null);
+  const [selection,setSelection] = useState<{projectId:string;id:string}|null>(()=>initialRunId ? {projectId,id:initialRunId} : null);
   const selectedId = selection?.projectId === projectId && visible.some(run => run.id === selection.id && !run.deleted_at)
     ? selection.id : null;
   const [observations,setObservations] = useState<Record<string,string>>({});
@@ -124,16 +123,11 @@ export default function RunPanel({projectId, runs, busy, onWorking, onStop, onRe
       </div>
       {run.identity?.session_id && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved}/>}
       {run.working && <RunMonitorPanel key={run.id} projectId={projectId} runId={run.id} onObserved={onObserved} working/>}
-      {run.attempts.map(attempt => <div className="context" key={attempt.attempt}>
-        <h3>Bản code cũ {attempt.attempt} · {attempt.origin === 'REUSE' ? 'Dùng lại code' : 'Codex'} · {attempt.state}</h3>
-        {attempt.session_id && <code className="source-id">Codex session {attempt.session_id}</code>}
-        {attempt.checks && <><p>Preflight đã lưu từ phiên bản cũ: {attempt.checks.pass ? 'PASS' : 'FAIL'}</p>
-          <ul>{attempt.checks.checks.map(item => <li key={item}>{item}</li>)}</ul>
-          {attempt.checks.errors.map(item => <p role="alert" key={item}>{item}</p>)}</>}
-        {attempt.error && <p>{attempt.error}</p>}
-      </div>)}
       {run.code_sha256 && <code className="source-id">Code SHA256 {run.code_sha256}</code>}
-      {!!run.artifacts.length && <><h3>Artifacts đã lưu</h3><ArtifactLinks projectId={projectId} runId={run.id} names={run.artifacts}/></>}
+      {!!run.artifacts.length && <h3><a className="artifacts-page-link"
+        href={`/?page=artifacts&project=${projectId}&run=${run.id}`}>
+        Artifacts đã lưu · {run.artifacts.length} file ↗
+      </a></h3>}
       {run.report_path === 'report.md' && <><h3>Report</h3><a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>
         {run.report_preview && <pre className="report-preview">{run.report_preview}</pre>}</>}
     </article>)}

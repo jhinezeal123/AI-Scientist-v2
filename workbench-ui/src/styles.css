@@ -34,6 +34,8 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 .run-detail .context h3,.run-detail>h3{border-left:3px solid var(--mint);padding-left:12px}
 .run-detail .panel-head h3{margin-bottom:0}
 .run-detail>h3{margin-top:28px}
+.artifacts-page-link{font:inherit}.artifacts-page main{margin:0 auto;max-width:1000px;padding:0 24px 32px}
+.artifacts-page header{flex-wrap:wrap}.artifacts-page .stack a{padding:8px 0;border-bottom:1px solid var(--line)}
 .run-detail .live-log>summary{font-size:17px;font-weight:650}
 .log-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:14px 0 10px}
 .log-toolbar .actions{gap:6px}.log-toolbar button{font-size:12px;padding:6px 10px}

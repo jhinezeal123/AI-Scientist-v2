@@ -8,12 +8,13 @@ import SourceCards from './SourceCards';
 import {statusText} from './sourceStatus';
 
 const blank = {title: '', content: ''};
+const initialPage=new URLSearchParams(window.location.search);
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState(localStorage.getItem('workbench.project') || '');
+  const [projectId, setProjectId] = useState(initialPage.get('project') || localStorage.getItem('workbench.project') || '');
   const [projectName, setProjectName] = useState('');
-  const [tab, setTab] = useState('Library');
+  const [tab, setTab] = useState(initialPage.has('run') ? 'Run' : 'Library');
   const [resources, setResources] = useState<Resource[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [history, setHistory] = useState<History>({proposals: [], runs: []});
@@ -202,7 +203,7 @@ export default function App() {
         });}} onApprove={async proposal => {await action(async () => {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
-        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} runs={history.runs} busy={busy || planning || implementing}
+        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} initialRunId={initialPage.get('run') || undefined} runs={history.runs} busy={busy || planning || implementing}
           onDelete={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRevision(n=>n+1);setNotice('Đã xóa run khỏi danh sách. Artifacts được giữ để khôi phục.');
           });}}
