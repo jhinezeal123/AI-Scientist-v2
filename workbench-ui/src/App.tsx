@@ -315,8 +315,8 @@ export default function App() {
           onRestore={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục run.');
           });}}
-          onWorking={async (id,accelerator,ttl) => {
-          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl});setRevision(n => n+1);setNotice('Đã bắt đầu Working: mở Kaggle, viết và chạy code, thu kết quả rồi dừng phiên.');});
+          onWorking={async (id,accelerator,ttl,stageIterations) => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl,search:{enabled:true,stage_iterations:stageIterations}});setRevision(n => n+1);setNotice('Đã bắt đầu Working: cây tìm kiếm 4 giai đoạn dùng chung một phiên Kaggle.');});
         }} onStop={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/stop`, 'POST');setRevision(n => n+1);setNotice('Đã yêu cầu dừng Working. Backend sẽ xác nhận phiên Kaggle đã dừng.');});
         }} onReconcile={async id => {

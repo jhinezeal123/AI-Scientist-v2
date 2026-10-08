@@ -104,13 +104,20 @@ class StoreConflict(ValueError):
 
 
 class ProjectStore:
-    def run_root(self, project_id, run_id):
+    def run_root(self, project_id, run_id, workspace=None):
         """Resolve an owned run's persisted artifact location."""
         run = self.run(project_id, run_id)
         relative = PurePosixPath(run['artifact_dir'])
         if relative.is_absolute() or '\\' in run['artifact_dir'] or '..' in relative.parts:
             raise ValueError('Invalid run artifact directory')
-        root = self.directory(project_id)
+        if relative.parts[:1] == ('experiments',):
+            if workspace is None or len(relative.parts) != 2:
+                raise ValueError('Experiment location requires its workspace')
+            root = Path(workspace).resolve()
+        else:
+            if relative.parts != ('runs', run_id):
+                raise ValueError('Invalid legacy run location')
+            root = self.directory(project_id)
         path = root.joinpath(*relative.parts)
         for parent in (path, *path.parents):
             if parent == root.parent:
@@ -121,8 +128,9 @@ class ProjectStore:
             raise ValueError('Run artifact directory escapes its project')
         return path
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, workspace: Path | None = None):
         self.root = root.resolve()
+        self.workspace = Path(workspace).resolve() if workspace else (self.root.parent.parent if self.root.parent.name == '.workbench' else self.root.parent)
         self.root.mkdir(parents=True, exist_ok=True)
         self._directories = {}
         self._discover_projects()
@@ -343,11 +351,13 @@ class ProjectStore:
                     if any(source['id'] == resource_id for source in json.loads(run[0])['resources']):
                         raise StoreConflict('Nguồn đang được run sử dụng; chờ run kết thúc trước khi xóa')
                 pending = connection.execute('SELECT plan_json FROM source_deletions WHERE resource_id=?', (resource_id,)).fetchone()
-                plan = json.loads(pending[0]) if pending else deletion_plan(library, resource_id)
+                experiment_roots = {row['id']: self.run_root(project_id, row['id'], self.workspace)
+                    for row in connection.execute("SELECT id FROM runs WHERE artifact_dir LIKE 'experiments/%'")}
+                plan = json.loads(pending[0]) if pending else deletion_plan(library, resource_id, experiment_roots)
                 connection.execute('INSERT OR IGNORE INTO source_deletions VALUES(?,?,NULL)', (resource_id, canonical(plan)))
                 self._invalidate_source_proposals(connection, resource_id)
             try:
-                remove_source_files(library, resource_id, plan)
+                remove_source_files(library, resource_id, plan, experiment_roots)
             except (OSError, ValueError) as exc:
                 error = 'Chưa xóa hết file. Đóng file/thư mục đang mở rồi bấm Xóa lại.'
                 with self.connection(project_id) as connection:

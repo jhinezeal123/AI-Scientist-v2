@@ -1,0 +1,6 @@
+{
+  "1": "Establish a working baseline for the approved objective. Demonstrate functional correctness using the approved sources, outputs and constraints.",
+  "2": "Tune configuration of the working baseline while preserving its architecture or method. Compare actual results under the same approved evaluation conditions. Do not add unrelated datasets or change the approved budget.",
+  "3": "Test a substantive method improvement or approved research hypothesis against the tuned baseline. Gather actual evidence and describe limitations, within the approved objective.",
+  "4": "Perform a controlled ablation or component comparison to measure the contribution of the researched change. Use the same evaluation data and conditions. Preserve the baseline and report actual evidence."
+}

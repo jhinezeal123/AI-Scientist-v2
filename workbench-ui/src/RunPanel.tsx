@@ -4,6 +4,7 @@ import RunMonitorPanel from './RunMonitorPanel';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   execution_mode:'ssh'|'legacy';working?:Working;
+  search?:{experiment:string;stages:{name:string;nodes:number}[];tree_path:string|null};
   can_retry:boolean;parent_run_id:string|null;
   variant:Variant|null;variant_parent_deleted_at:string|null;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
@@ -16,7 +17,7 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
 const newRequestId=()=>crypto.randomUUID().replaceAll('-','');
 
 export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore, onCreateVariant}: {
-  projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
+  projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,stageIterations:number[])=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>;
   onCreateVariant:(id:string,requestId:string,title:string,purpose:string,changeSummary:string)=>Promise<Idea|undefined>}) {
@@ -27,6 +28,8 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
   const [error,setError] = useState('');
   const [accelerator,setAccelerator] = useState('cpu');
   const [ttl,setTtl] = useState(1800);
+  const [stageIterations,setStageIterations] = useState([3,3,3,3]);
+  const stageLabels=['Implementation','Tuning','Research','Ablation'];
   const [variantOpen,setVariantOpen]=useState(false);
   const [variantTitle,setVariantTitle]=useState('');
   const [variantPurpose,setVariantPurpose]=useState('');
@@ -95,15 +98,20 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
       {run.error && <p role="alert" className="alert error">{run.error}</p>}
       {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
         <h3>Working</h3>
-        <p>Mở phiên Kaggle, viết và chạy code qua SSH, lưu kết quả rồi dừng phiên.</p>
+        <p>Agentic Tree Search: implementation → tuning → research → ablation. Cả cây dùng chung một phiên Kaggle.</p>
         <label>Phần cứng<select value={accelerator} disabled={busy} onChange={e=>setAccelerator(e.target.value)}>
           <option value="cpu">CPU</option><option value="NvidiaT4">GPU · T4 x2</option>
           <option value="TpuV5E8">TPU · v5e-8</option><option value="TpuV6E8">TPU · v6e-8</option>
         </select></label>
         <label>Thời gian tối đa của phiên (phút)<input type="number" min="1" max="720" step="1" value={ttl/60}
           disabled={busy} onChange={e=>setTtl(Number(e.target.value)*60)}/></label>
-        <button className="primary" disabled={busy || !Number.isInteger(ttl) || ttl<60 || ttl>43200}
-          onClick={()=>void onWorking(run.id,accelerator,ttl)}>Bắt đầu Working</button>
+        <details><summary>Ngân sách tìm kiếm của phiên</summary>
+          <p className="muted">Số bản thử tối đa cho từng giai đoạn. Baseline kế thừa không tính thành bản thử mới. Bạn có thể tạo lượt Working tiếp theo.</p>
+          {stageLabels.map((label,index)=><label key={label}>{label} · số bước<input type="number" min="1" step="1"
+            value={stageIterations[index]} disabled={busy} onChange={e=>setStageIterations(values=>values.map((value,i)=>i===index ? Number(e.target.value) : value))}/></label>)}
+        </details>
+        <button className="primary" disabled={busy || !Number.isInteger(ttl) || ttl<60 || ttl>43200 || stageIterations.some(n=>!Number.isInteger(n) || n<1)}
+          onClick={()=>void onWorking(run.id,accelerator,ttl,stageIterations)}>Bắt đầu Working</button>
       </div>}
       {run.working && <div className="context"><h3>Phiên Working</h3>
         <p>{run.working.accelerator === 'NvidiaT4' ? 'GPU · T4 x2' : run.working.accelerator} · tối đa {run.working.ttl_seconds/60} phút</p>
@@ -118,6 +126,12 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         {run.working.summary && <><h3>Tóm tắt công việc</h3><p>{run.working.summary.summary}</p></>}
       </div>}
       <p className="muted">Mỗi lượt do bạn yêu cầu. Không giới hạn tổng số lượt Working.</p>
+      {run.search && <div className="context"><h3>Agentic Tree Search</h3>
+        <code className="source-id">{run.search.experiment}</code>
+        <p>{run.search.stages.map(stage=>`${stageLabels[Number(stage.name[0])-1] || stage.name}: ${stage.nodes} node`).join(' · ')}</p>
+        {run.search.tree_path && <a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${run.search.tree_path}`}
+          target="_blank" rel="noreferrer">Mở cây thí nghiệm ↗</a>}
+      </div>}
       {run.parent_run_id && <p className="muted">Tạo từ Run {run.parent_run_id.slice(0,8)} · dùng cùng proposal đã duyệt.</p>}
       {run.variant && <div className="context">
         <h3>Biến thể từ kết quả đã lưu</h3><p>Run cha: {run.variant.parent_run_id}</p>

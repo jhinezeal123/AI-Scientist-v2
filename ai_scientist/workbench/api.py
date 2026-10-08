@@ -80,6 +80,7 @@ class VariantInput(StrictModel):
 class WorkingInput(StrictModel):
     accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
     ttl_seconds: int = Field(default=1800, ge=60, le=43200)
+    search: dict | None = None
 
 
 def library_router(store, workspace_root):
@@ -299,7 +300,7 @@ def library_router(store, workspace_root):
 
     @router.post('/projects/{project_id}/runs/{run_id}/working', status_code=202)
     async def working(project_id: str, run_id: str, body: WorkingInput, request: Request):
-        return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds)
+        return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds, body.search)
 
     @router.post('/projects/{project_id}/runs/{run_id}/stop', status_code=202)
     async def stop_working(project_id: str, run_id: str, request: Request):
@@ -343,7 +344,7 @@ def library_router(store, workspace_root):
     async def reconcile(project_id: str, run_id: str, request: Request):
         return await async_call(request.app.state.working.reconcile, project_id, run_id)
 
-    @router.get('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}')
+    @router.api_route('/projects/{project_id}/runs/{run_id}/artifacts/{name:path}', methods=['GET', 'HEAD'])
     def artifact(project_id: str, run_id: str, name: str, request: Request):
         from fastapi.responses import FileResponse, PlainTextResponse
         detail = call(request.app.state.working.detail, project_id, run_id)
@@ -357,6 +358,13 @@ def library_router(store, workspace_root):
             if path.stat().st_size > 100_000:
                 raise HTTPException(404, 'Artifact not found')
             return PlainTextResponse(path.read_text(encoding='utf-8'), media_type='text/markdown; charset=utf-8')
+        if name.startswith('logs/0-run/') and path.suffix in {'.html', '.json'}:
+            # Relative tree_data.json requests remain behind the same ownership allowlist.
+            from fastapi.responses import Response
+            from email.utils import formatdate
+            media = 'text/html' if path.suffix == '.html' else 'application/json'
+            return Response(path.read_bytes(), media_type=media,
+                headers={'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Last-Modified', 'Last-Modified': formatdate(path.stat().st_mtime, usegmt=True), 'Content-Security-Policy': "sandbox allow-scripts allow-downloads; default-src 'self' https://cdnjs.cloudflare.com; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'"})
         return FileResponse(path, filename=path.name)
 
     return router

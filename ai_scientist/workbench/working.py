@@ -100,7 +100,9 @@ class WorkingService:
                 'known_notebooks': observations, 'unresolved_notebooks': unresolved_refs,
                 'account_observation': account_observation, 'checked_at': datetime.now(timezone.utc).isoformat()}
 
-    async def start(self, project_id, run_id, accelerator=None, ttl_seconds=None):
+    async def start(self, project_id, run_id, accelerator=None, ttl_seconds=None, search=None):
+        from .models import SearchOptions
+        options = SearchOptions.model_validate(search or {'enabled': getattr(self.config, 'tree_search_enabled', False)})
         accelerator = accelerator or getattr(self.config, 'kaggle_accelerator', 'cpu')
         ttl = ttl_seconds or getattr(self.config, 'kaggle_session_seconds', 1800)
         if accelerator not in ACCELERATORS or type(ttl) is not int or ttl < 60:
@@ -121,6 +123,14 @@ class WorkingService:
             # Validate editable prompt files before opening a paid Kaggle session.
             load_prompt('working.instructions')
             load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
+            if options.enabled:
+                from .tree_search import TreeSearchRun
+                for alias in ('search.node', 'search.query'):
+                    load_prompt(alias, workdir=self.view.root(project_id, run_id) / 'working-agent')
+                load_prompt('search.node_instructions')
+                goals = json.loads(load_prompt('search.stage_goals'))
+                if set(goals) != {'1', '2', '3', '4'} or any(not isinstance(goal, str) or not goal.strip() for goal in goals.values()):
+                    raise ValueError('Tree search requires goals for exactly four stages')
             for project in await asyncio.to_thread(self.store.list_projects):
                 for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
                     if item['id'] == run_id:
@@ -129,13 +139,16 @@ class WorkingService:
                     if item['state'] not in allowed:
                         raise StoreConflict('Một Run khác đang hoạt động')
             await self.check_idle()
+            if options.enabled:
+                from .experiments import prepare_experiment
+                await asyncio.to_thread(prepare_experiment, self.store, self.config.workspace_root, project_id, run_id, approved)
             root = self.view.root(project_id, run_id)
             root.mkdir(parents=True, exist_ok=True)
             workdir = root / 'working-agent'
             workdir.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(self.records.reserve, project_id, run_id, accelerator, ttl)
             key = (project_id, run_id)
-            self.tasks[key] = asyncio.create_task(self._work(key, approved, accelerator, ttl))
+            self.tasks[key] = asyncio.create_task(self._work(key, approved, accelerator, ttl, options))
             return {'run_id': run_id, 'state': 'STARTING'}
 
     async def _connect(self, key, approved, accelerator, ttl):
@@ -188,7 +201,7 @@ class WorkingService:
             timeout_seconds=min(getattr(self.config, 'working_seconds', 900), max(1, descriptor['ttl_seconds'] - 60)),
             max_output_bytes=3_000_000)
 
-    async def _work(self, key, approved, accelerator, ttl):
+    async def _work(self, key, approved, accelerator, ttl, options):
         project_id, run_id = key
         root = self.view.root(*key)
         terminal, gateway = None, None
@@ -213,32 +226,40 @@ class WorkingService:
                 outcome = 'CANCELLED'
                 return
             workdir = root / 'working-agent'
-            gateway = await asyncio.to_thread(AgentTerminalBridge, terminal, workdir)
-            request = self._request(key, approved, descriptor, workdir)
-            self.records.update(*key, state='WORKING', phase='working', agent_called=1)
+            self.records.update(*key, state='WORKING', phase='working', agent_called=0 if options.enabled else 1)
             self.records.append_log(*key, 'SSH đã sẵn sàng. Agent đang làm việc trong Kaggle.\n', 'backend')
-            result, payload = await self.planner.worker.run(request)
-            await asyncio.to_thread(gateway.close)
-            gateway = None
+            if options.enabled:
+                from .tree_search import TreeSearchRun
+                search_run = TreeSearchRun(self, key, approved, descriptor, terminal, options)
+                payload, manifest, node = await search_run.execute()
+            else:
+                gateway = await asyncio.to_thread(AgentTerminalBridge, terminal, workdir)
+                request = self._request(key, approved, descriptor, workdir)
+                result, payload = await self.planner.worker.run(request)
+                await asyncio.to_thread(gateway.close)
+                gateway = None
             if key in self.stop_requests:
                 outcome = 'CANCELLED'
                 return
             self.records.update(*key, phase='collecting', summary=payload.model_dump())
-            manifest = await asyncio.to_thread(collect_files, terminal, root,
-                approved['body'].get('budget', {}).get('output_bytes'))
+            if not options.enabled:
+                manifest = await asyncio.to_thread(collect_files, terminal, root,
+                    approved['body'].get('budget', {}).get('output_bytes'))
             names = {item['path'] for item in manifest['files']}
             if not set(payload.output_files).issubset(names) or (payload.succeeded and manifest['command_count'] < 1):
                 raise ValueError('Agent result does not match verified SSH commands/files')
             (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
             self.records.update(*key, manifest=manifest)
-            source = root / 'source/workload.py'
-            code = source.read_text(encoding='utf-8') if source.is_file() and not source.is_symlink() else ''
-            node = Node(plan=json.dumps(approved['body'], ensure_ascii=False), code=code)
-            node.is_buggy = not payload.succeeded
-            node.analysis = payload.summary
-            journal = Journal()
-            journal.append(node)
-            (root / 'journal.json').write_text(json.dumps(journal_snapshot(journal), ensure_ascii=False, indent=2), encoding='utf-8')
+            if not options.enabled:
+                source = root / 'source/workload.py'
+                code = source.read_text(encoding='utf-8') if source.is_file() and not source.is_symlink() else ''
+                node = Node(plan=json.dumps(approved['body'], ensure_ascii=False), code=code)
+                node.is_buggy = not payload.succeeded
+                node.analysis = payload.summary
+                journal = Journal()
+                journal.append(node)
+                (root / 'journal.json').write_text(json.dumps(journal_snapshot(journal), ensure_ascii=False, indent=2), encoding='utf-8')
+            code = (root / 'source/workload.py').read_text(encoding='utf-8') if (root / 'source/workload.py').is_file() else ''
             with self.store.connection(project_id) as connection:
                 connection.execute('UPDATE runs SET node_id=?,node_json=?,code_sha256=? WHERE id=?',
                     (node.id, json.dumps(node.to_dict()), hashlib.sha256(code.encode()).hexdigest() if code else None, run_id))
@@ -332,6 +353,14 @@ class WorkingService:
         for item in (record['manifest'] or {}).get('files', []):
             lines.append(f'- {item["path"]} · {item["bytes"]} bytes · {item["sha256"]}')
         lines += ['', '## Giới hạn', '', *('- ' + value for value in summary.get('limitations', []))]
+        search_path = root / 'logs/0-run/search-state.json'
+        if search_path.is_file():
+            search_state = json.loads(search_path.read_text(encoding='utf-8'))
+            lines += ['', '## Agentic Tree Search', '', '- Bộ điều phối: AgentManager của repo gốc.',
+                      f'- Experiment: {root.name}', '- Cây: logs/0-run/unified_tree_viz.html']
+            for stage in search_state['stages']:
+                nodes = search_state['journals'].get(stage['name'], {}).get('nodes', [])
+                lines.append(f'- {stage["name"]}: {len(nodes)} node (có thể gồm baseline từ stage trước).')
         (root / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.records.append_log(*key, 'Đã xác nhận Kaggle dừng. Kết quả Working đã lưu.\n', 'backend')
         self.records.finish(*key, receipt, outcome, 'report.md')
@@ -374,6 +403,22 @@ class WorkingService:
         detail = self.view.detail(project_id, run_id)
         record = self.record(project_id, run_id)
         detail['execution_mode'] = 'ssh' if record or not detail['identity'] else 'legacy'
+        from .experiments import search_artifacts
+        root = self.view.root(project_id, run_id)
+        detail['artifacts'] = sorted(set(detail['artifacts']) | set(search_artifacts(root)))
+        if (root / 'logs/0-run/search-state.json').is_file():
+            saved = json.loads((root / 'logs/0-run/search-state.json').read_text(encoding='utf-8'))
+            stages, previous_ids = [], set()
+            for number in range(1, 5):
+                group = [stage for stage in saved['stages'] if stage['name'].startswith(str(number) + '_')]
+                if not group:
+                    continue
+                node_ids = {node['id'] for stage in group for node in saved['journals'].get(stage['name'], {}).get('nodes', [])}
+                stages.append({'name': group[0]['name'], 'nodes': len(node_ids - previous_ids)})
+                previous_ids.update(node_ids)
+            detail['search'] = {'experiment': detail['artifact_dir'], 'options': saved['options'],
+                                'stages': stages,
+                                'tree_path': 'logs/0-run/unified_tree_viz.html' if (root / 'logs/0-run/unified_tree_viz.html').is_file() else None}
         if record:
             descriptor = record['descriptor'] or {}
             detail['working'] = {key: record[key] for key in ('phase', 'accelerator', 'ttl_seconds', 'started_at', 'agent_called', 'stop_confirmed')}

@@ -145,9 +145,9 @@ class CodexCliRuntime:
         if cancelled(): raise RuntimeCancelled("Agent request cancelled before start")
         if not request.workdir.is_dir(): raise ValueError("Agent working directory does not exist")
         output_schema=research_output_schema(request.role)
-        if request.role == 'mvp0_working':
-            from ..models import WorkingPayload
-            output_schema = WorkingPayload.model_json_schema()
+        if request.role in {'mvp0_working', 'mvp1_search_node', 'mvp1_search_query'}:
+            from ..models import ROLE_PAYLOADS
+            output_schema = ROLE_PAYLOADS[request.role].model_json_schema()
         schema_path=self._write_output_schema(request.workdir,output_schema) if output_schema is not None else None
         try:
             return self._run_with_schema(request,progress,cancelled,schema_path)
@@ -172,7 +172,7 @@ class CodexCliRuntime:
         tool_rule = ("Read-only terminal tools may inspect selected Library files inside the supplied request workspace. "
                      "Do not execute source code, modify files, use network or MCP, or access credentials. "
                      if request.role == 'mvp0_plan' else 'Do not call tools. ')
-        if request.role == 'mvp0_working':
+        if request.role in {'mvp0_working', 'mvp1_search_node', 'mvp1_search_query'}:
             prompt = request.prompt
         elif structured:
             role_prompt=structured_role_prompt(request.role,request.prompt)
@@ -188,10 +188,10 @@ class CodexCliRuntime:
         from ..codex_executable import resolve_codex_executable
         executable = str(resolve_codex_executable(self.executable))
         args = [executable, "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--sandbox",
-                'workspace-write' if request.role == 'mvp0_working' else 'read-only',
+                'workspace-write' if request.role in {'mvp0_working', 'mvp1_search_node'} else 'read-only',
                 "--cd", str(request.workdir), "--model", self.model, "--config", f'model_reasoning_effort="{self.reasoning_effort}"',
                 ]
-        if request.role == 'mvp0_working':
+        if request.role in {'mvp0_working', 'mvp1_search_node', 'mvp1_search_query'}:
             args.extend(['--ignore-user-config', '--config', 'approval_policy="never"',
                          '--config', 'sandbox_workspace_write.network_access=true'])
             if os.name == 'nt':
@@ -239,7 +239,8 @@ class CodexCliRuntime:
         if proc.returncode: raise RuntimeError(f"Codex CLI exited with status {proc.returncode}")
         result = parse_codex_jsonl(bytes(captured["out"]),role=request.role if structured else None)
         if not isinstance(result.get("text"),str): raise ValueError("Codex CLI final response is missing text")
-        return RuntimeResult(result["text"], files=_decode_files(result.get("files",{})), session_id=result.get("session_id"))
+        return RuntimeResult(result["text"], files=_decode_files(result.get("files",{})),
+                             session_id=result.get("session_id"), usage=result.get('usage', {}))
 
     _kill_tree = staticmethod(HeadlessCliRuntime._kill_tree)
     _stop_and_prove = classmethod(HeadlessCliRuntime._stop_and_prove.__func__)
@@ -249,7 +250,7 @@ def parse_codex_jsonl(raw: bytes, *, role: str | None = None) -> dict:
     """Extract only the final agent message from Codex's documented JSONL event envelope."""
     try: lines=raw.decode("utf-8").splitlines()
     except UnicodeDecodeError as exc: raise ValueError("Codex CLI event stream was not UTF-8") from exc
-    final=None;session_id=None;turn_completed=False
+    final=None;session_id=None;turn_completed=False;usage={}
     for line in lines:
         try:event=json.loads(line)
         except json.JSONDecodeError as exc: raise ValueError("Codex CLI emitted an invalid JSONL event") from exc
@@ -263,7 +264,12 @@ def parse_codex_jsonl(raw: bytes, *, role: str | None = None) -> dict:
                 final=item["text"]
         if event.get("type")=="turn.failed": raise ValueError("Codex CLI turn failed")
         if event.get("type")=="error": raise ValueError("Codex CLI reported an error")
-        if event.get("type")=="turn.completed": turn_completed=True
+        if event.get("type")=="turn.completed":
+            turn_completed=True
+            counts = event.get('usage')
+            if isinstance(counts, dict):
+                usage = {key: counts[key] for key in ('input_tokens', 'cached_input_tokens', 'output_tokens')
+                         if type(counts.get(key)) is int and counts[key] >= 0}
     if final is None: raise ValueError("Codex CLI stream has no completed agent message")
     if not turn_completed: raise ValueError("Codex CLI turn did not complete cleanly")
     try: value=json.loads(final)
@@ -271,10 +277,13 @@ def parse_codex_jsonl(raw: bytes, *, role: str | None = None) -> dict:
         if role is not None and research_output_schema(role) is not None:
             raise ResearchOutputValidationError(role,"invalid_json","$",decode_position=exc.pos) from None
         raise ValueError("Codex CLI final response was not valid JSON") from exc
-    if role == 'mvp0_working':
+    if role in {'mvp0_working', 'mvp1_search_node', 'mvp1_search_query'}:
         # CLI native structured output is the payload itself. The worker validates
         # it once; only this adapter creates the in-process RuntimeResult envelope.
-        return {"text": json.dumps(value, ensure_ascii=False), "files": {}, "session_id": session_id}
+        result = {"text": json.dumps(value, ensure_ascii=False), "files": {}, "session_id": session_id}
+        if usage:
+            result['usage'] = usage
+        return result
     if role is not None and research_output_schema(role) is not None:
         value=validate_research_output(role,value)
         if role=="coder":

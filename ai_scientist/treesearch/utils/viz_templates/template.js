@@ -411,7 +411,7 @@ async function loadAllStageData(baseTreeData) {
 
   // Load data for each stage if available
   const stageNames = ['Stage_1', 'Stage_2', 'Stage_3', 'Stage_4'];
-  const stageNames2actualNames = {
+  const stageNames2actualNames = baseTreeData.stage_paths || {
     'Stage_1': 'stage_1_initial_implementation_1_preliminary',
     'Stage_2': 'stage_2_baseline_tuning_1_first_attempt',
     'Stage_3': 'stage_3_creative_research_1_first_attempt',
@@ -431,7 +431,7 @@ async function loadAllStageData(baseTreeData) {
           // Validate the loaded data
           if (data && data.layout && data.edges) {
             stageData[stage] = data;
-            availableStages.push(stage);
+            if (!availableStages.includes(stage)) availableStages.push(stage);
             console.log(`Successfully loaded and validated data for ${stage}`);
           } else {
             console.warn(`Loaded data for ${stage} is invalid:`, data);
@@ -673,9 +673,9 @@ const treeStructData = "PLACEHOLDER_TREE_DATA";
 
 // Add log directory path and stage info to the tree data
 treeStructData.log_dir_path = window.location.pathname.split('/').slice(0, -1).join('/');
-treeStructData.current_stage = window.location.pathname.includes('stage_')
-  ? window.location.pathname.split('stage_')[1].split('/')[0]
-  : 'Stage_1';
+treeStructData.current_stage = treeStructData.current_stage || (window.location.pathname.includes('stage_')
+  ? 'Stage_' + window.location.pathname.split('stage_')[1].split('_')[0]
+  : 'Stage_1');
 
 // Initialize background color
 window.bgColCurrent = bgCol;

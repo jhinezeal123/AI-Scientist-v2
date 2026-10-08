@@ -25,7 +25,16 @@ def checked_files(directory):
             yield path
 
 
-def deletion_plan(library, resource_id):
+def checked_experiment_directory(roots, run_id, name):
+    if run_id not in roots or not re.fullmatch(r'(?:working-agent|query-agent)/library/[^/\\]+', name):
+        raise ValueError('Invalid experiment source deletion path')
+    directory = roots[run_id]
+    for part in name.split('/'):
+        directory = checked_child(directory, part)
+    return directory
+
+
+def deletion_plan(library, resource_id, experiment_roots=None):
     original, identity = library._source_folder(resource_id)
     project = library.project_directory
     aliases = set([original.name, *identity['aliases']])
@@ -50,12 +59,29 @@ def deletion_plan(library, resource_id):
                 copies.append(relative)
     paths = [*dict.fromkeys(copies), original.relative_to(project).as_posix()]
     files = [file for name in paths for file in checked_files(checked_directory(project, name))]
-    return {'paths':paths, 'files':len(files), 'bytes':sum(file.stat().st_size for file in files)}
+    experiment_paths = []
+    for run_id in experiment_roots or {}:
+        for workspace in ('working-agent', 'query-agent'):
+            for alias in aliases:
+                name = f'{workspace}/library/{alias}'
+                directory = checked_experiment_directory(experiment_roots, run_id, name)
+                if not directory.is_dir():
+                    continue
+                source_files = list(checked_files(directory))
+                versions = list(directory.glob('v*/source.md'))
+                if not versions or any(f'\nResource: {resource_id}\n' not in file.read_text(encoding='utf-8') for file in versions):
+                    raise ValueError('Experiment source copy identity mismatch')
+                files.extend(source_files)
+                experiment_paths.append({'run_id': run_id, 'path': name})
+    return {'paths':paths, 'experiment_paths':experiment_paths,
+            'files':len(files), 'bytes':sum(file.stat().st_size for file in files)}
 
 
-def remove_source_files(library, resource_id, plan):
+def remove_source_files(library, resource_id, plan, experiment_roots=None):
     project = library.project_directory
     directories = [checked_directory(project, name) for name in plan['paths']]
+    directories.extend(checked_experiment_directory(experiment_roots or {}, item['run_id'], item['path'])
+                       for item in plan.get('experiment_paths', []))
     # Check the whole plan before removing the first byte. A partial deletion can be retried.
     for directory in directories:
         if not directory.exists():

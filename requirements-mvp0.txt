@@ -18,3 +18,9 @@ anthropic
 pytest>=8,<9
 pypdf>=6,<7
 python-multipart>=0.0.20,<1
+# Original AgentManager, tree visualization and token tracker.
+omegaconf>=2.3,<3
+igraph>=0.11,<2
+coolname
+shutup
+tiktoken

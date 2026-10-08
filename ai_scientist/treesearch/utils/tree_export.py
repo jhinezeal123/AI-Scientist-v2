@@ -33,7 +33,9 @@ def generate_layout(n_nodes, edges, layout_type="rt"):
 
 def normalize_layout(layout: np.ndarray):
     """Normalize layout to [0, 1]"""
-    layout = (layout - layout.min(axis=0)) / (layout.max(axis=0) - layout.min(axis=0))
+    span = layout.max(axis=0) - layout.min(axis=0)
+    layout = np.divide(layout - layout.min(axis=0), span,
+                       out=np.full_like(layout, np.nan, dtype=float), where=span != 0)
     layout[:, 1] = 1 - layout[:, 1]
     layout[:, 1] = np.nan_to_num(layout[:, 1], nan=0)
     layout[:, 0] = np.nan_to_num(layout[:, 0], nan=0.5)
@@ -362,11 +364,11 @@ def cfg_to_tree_struct(cfg, jou: Journal, out_path: Path = None):
 def generate_html(tree_graph_str: str):
     template_dir = Path(__file__).parent / "viz_templates"
 
-    with open(template_dir / "template.js") as f:
+    with open(template_dir / "template.js", encoding='utf-8') as f:
         js = f.read()
-        js = js.replace('"PLACEHOLDER_TREE_DATA"', tree_graph_str)
+        js = js.replace('"PLACEHOLDER_TREE_DATA"', tree_graph_str.replace('<', '\\u003c'))
 
-    with open(template_dir / "template.html") as f:
+    with open(template_dir / "template.html", encoding='utf-8') as f:
         html = f.read()
         html = html.replace("<!-- placeholder -->", js)
 
@@ -400,7 +402,7 @@ def generate(cfg, jou: Journal, out_path: Path):
     except Exception as e:
         print(f"Error in generate_html: {e}")
         raise
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         f.write(html)
 
     # Create a unified tree visualization that shows all stages
@@ -434,10 +436,10 @@ def create_unified_viz(cfg, current_stage_viz_path):
     # Copy the template files
     template_dir = Path(__file__).parent / "viz_templates"
 
-    with open(template_dir / "template.html") as f:
+    with open(template_dir / "template.html", encoding='utf-8') as f:
         html = f.read()
 
-    with open(template_dir / "template.js") as f:
+    with open(template_dir / "template.js", encoding='utf-8') as f:
         js = f.read()
 
     # Get completed stages by checking directories
@@ -472,13 +474,18 @@ def create_unified_viz(cfg, current_stage_viz_path):
         }
 
     # Replace the placeholder in the JS with our data
-    js = js.replace('"PLACEHOLDER_TREE_DATA"', json.dumps(base_data))
+    base_data['stage_paths'] = {}
+    for directory in sorted(log_dir.iterdir(), key=lambda path: int(path.name.split('_')[-2]) if path.name.startswith('stage_') and path.name.split('_')[-2].isdigit() else 0):
+        if directory.is_dir() and directory.name.startswith('stage_') and (directory / 'tree_data.json').is_file():
+            base_data['stage_paths']['Stage_' + directory.name.split('_')[1]] = directory.name
+    base_data['stage_paths'].update(getattr(cfg, 'unified_stage_paths', {}) or {})
+    js = js.replace('"PLACEHOLDER_TREE_DATA"', json.dumps(base_data).replace('<', '\\u003c'))
 
     # Replace the placeholder in the HTML with our JS
     html = html.replace("<!-- placeholder -->", js)
 
     # Write the unified visualization
-    with open(unified_viz_path, "w") as f:
+    with open(unified_viz_path, "w", encoding='utf-8') as f:
         f.write(html)
 
     print(f"[green]Created unified visualization at {unified_viz_path}[/green]")

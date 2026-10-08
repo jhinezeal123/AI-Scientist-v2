@@ -30,8 +30,60 @@ tránh trùng tên), chứa `idea.md`, `idea.json`, `logs/0-run/`,
 `token_tracker.json`, report và bằng chứng dừng. Bốn cây nằm trong các thư mục
 stage của `logs/0-run/`, kèm `unified_tree_viz.html` theo cách repo gốc.
 SQLite giữ liên kết project/run → experiment; run cũ vẫn mở từ đường dẫn đã lưu.
-Review/PDF chỉ xuất hiện khi thật sự được tạo, không tạo file giả. Token chưa
+`review_text.txt` lưu feedback/chọn kết quả thực tế của cây, không phải review
+paper. PDF chỉ có khi tác vụ thực sự tạo PDF; không tạo file giả. Token chưa
 được runtime cung cấp được ghi là chưa biết; không báo số 0 như số đo thực tế.
+Chi phí và reasoning tokens chưa có số đo được ghi `null`.
+
+Với cấu hình hiện tại, thư mục gốc là
+`D:\Documents\AI-Scientist-v2\experiments`:
+
+```text
+experiments/YYYY-MM-DD_<idea_title>_attempt_N/
+├── idea.md
+├── idea.json
+├── logs/0-run/
+│   ├── unified_tree_viz.html
+│   ├── search-state.json
+│   ├── stage_1_initial_implementation/  # cây gộp các substage
+│   ├── stage_2_baseline_tuning/
+│   ├── stage_3_creative_research/
+│   ├── stage_4_ablation_studies/
+│   ├── stage_<substage>/               # journal/export gốc
+│   ├── nodes/<node_id>/                # source, output, manifest, result
+│   └── feedback/
+├── token_tracker.json
+├── review_text.txt
+├── source/
+├── output/                            # kết quả của node được chọn
+├── report.md
+└── working-stop.json
+```
+
+Tên node dùng ID gốc để giữ quan hệ cây; node đặt ngay dưới `nodes` để tránh
+đường dẫn quá dài trên Windows. Log terminal thực tế tiếp tục nằm trong Log
+Working. File `Node._term_out` dùng tóm tắt của node, không thay thế log terminal.
+Xóa nguồn dọn bản gốc và các bản sao Library trong cả workspace feedback và
+workspace thực thi của experiment thuộc project đó; report/code cũ giữ nguyên.
+
+## Sử dụng và cấu hình
+
+1. Tạo idea, chọn nguồn, lập và duyệt proposal như trước.
+2. Trong Run, mở “Ngân sách tìm kiếm của phiên” để chỉnh số bước tối đa của
+   implementation/tuning/research/ablation. Mặc định 3 bước mỗi stage; baseline
+   kế thừa không tính là một bước mới. Stage có thể hoàn tất sớm.
+3. Bấm “Bắt đầu Working”. Các nhánh draft/debug/improve chạy qua một terminal
+   SSH; backend thu bằng chứng, chọn kết quả và xác nhận Kaggle dừng.
+4. “Mở cây thí nghiệm” mở viewer gốc với bốn tab; “Artifacts đã lưu” mở danh sách
+   file. Tạo lượt Working mới cấp `attempt_N` mới, không đổi node/artifact cũ.
+
+Các prompt nằm trong `ai_scientist/workbench/system_prompt/`, alias trong
+`aliases.json`: `search.node`, `search.node_instructions`, `search.query`,
+`search.stage_goals`. Sửa goals phải giữ đủ bốn khóa `1`–`4`.
+Thời gian tối đa toàn Working theo `working_seconds` trong config local và TTL
+phiên Kaggle; các ràng buộc proposal tiếp tục được đưa cho agent. Không có quota
+tổng số lượt. Stock multi-seed/GPU process pool không được chạy thêm trong
+Workbench; launcher gốc vẫn giữ các mặc định riêng của nó.
 
 ## Trình tự
 
@@ -43,16 +95,35 @@ Review/PDF chỉ xuất hiện khi thật sự được tạo, không tạo file
 
 ## Checklist nghiệm thu
 
-- [ ] Launcher gốc tiếp tục dùng provider/process pool mặc định.
-- [ ] Một Working đi qua đủ bốn stage của AgentManager gốc.
-- [ ] Có nhánh draft/debug/improve và parent ID khôi phục đúng.
-- [ ] Mỗi stage có thể dừng theo ngân sách; không có vòng substage vô hạn.
-- [ ] Một SSH/bootstrap cho cả cây; dừng và chứng minh dừng trước COMPLETED.
-- [ ] Artifact từng node bất biến; kết quả được hash khi thu qua SSH.
-- [ ] Layout experiment có idea, journal, cây HTML và token tracking thật.
-- [ ] GUI mở được cây và artifacts; refresh/restart vẫn xem được kết quả.
-- [ ] Run cũ, retry, variant và project isolation tiếp tục hoạt động.
-- [ ] Không gọi preflight/contract notebook cũ hoặc in toàn bộ Library vào prompt.
+- [x] Launcher gốc tiếp tục dùng provider/process pool mặc định (review điểm nối).
+- [x] Một Working đi qua đủ bốn stage của AgentManager gốc.
+- [x] Có nhánh draft/debug/improve và parent ID khôi phục đúng.
+- [x] Mỗi stage có thể dừng theo ngân sách; không có vòng substage vô hạn.
+- [x] Một SSH/bootstrap cho cả cây; dừng và chứng minh dừng trước COMPLETED.
+- [x] Artifact từng node bất biến; kết quả được hash khi thu qua SSH.
+- [x] Layout experiment có idea, journal, cây HTML và trạng thái token usage.
+- [x] GUI mở được cây và artifacts; refresh/restart vẫn xem được kết quả.
+- [x] Run cũ, retry, variant và project isolation tiếp tục hoạt động.
+- [x] Không gọi preflight/contract notebook cũ hoặc in toàn bộ Library vào prompt.
+
+## Bằng chứng nghiệm thu local — 2026-10-08
+
+- Refactor riêng: `fdf958a`, 34 regression trước/sau đều đạt. Behavior được
+  triển khai sau commit này.
+- Targeted backend: 71 passed; kiểm tra bổ sung cho xóa nguồn/cancel/recovery
+  sau thay đổi cuối: 25 passed. Hai tập có phần giao nhau, không cộng thành
+  số trường hợp riêng biệt. Frontend `tsc -b && vite build` đạt.
+- Browser local đi từ tạo project/nguồn/idea → proposal → approval → Working
+  → report/dừng → restart → tạo lượt mới. Hai experiment, mỗi lượt có 7 node:
+  draft lỗi → debug thành công, tuning 2, research 2, ablation 1.
+- Counters: fake SSH=2, bootstrap=2, stop=2; Codex thật=0, Kaggle thật=0.
+  Restart không replay; SHA256 của cả 93 file lượt đầu giữ nguyên sau retry.
+  Viewer mở và đổi stage được. Dữ liệu/bằng chứng/screenshot nằm ở
+  `.workbench/acceptance/tree-search-2026-10-08/`.
+- Kiểm thử node thất bại và người dùng dừng: lưu checkpoint failed/interrupted,
+  hủy worker, thu proof dừng, không mở phiên thứ hai.
+- Chưa chạy Codex/Kaggle thật qua bốn stage; chưa chạy toàn launcher gốc với
+  process pool/GPU local. Nghiệm thu remote thật vẫn thuộc M1-04.
 
 Ngoài phạm vi: tự động viết/review PDF không được yêu cầu trong proposal;
 điều phối nhiều phiên Kaggle song song; chạy Kaggle thật để nghiệm thu.

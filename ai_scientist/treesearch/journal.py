@@ -451,19 +451,9 @@ class Journal:
         # Gather info about each node
         for node in nodes:
             if not node.is_seed_node:
-                candidate_info = (
-                    f"ID: {node.id}\n" f"Metric: {str(node.metric)}\n"
-                    if node.metric
-                    else (
-                        "N/A\n" f"Training Analysis: {node.analysis}\n"
-                        if hasattr(node, "analysis")
-                        else (
-                            "N/A\n" f"VLM Feedback: {node.vlm_feedback_summary}\n"
-                            if hasattr(node, "vlm_feedback_summary")
-                            else "N/A\n"
-                        )
-                    )
-                )
+                candidate_info = (f"ID: {node.id}\nMetric: {node.metric or 'N/A'}\n"
+                                  f"Analysis: {node.analysis}\n"
+                                  f"Feedback: {node.vlm_feedback_summary}\n")
                 prompt["Candidates"] += candidate_info
 
         try:

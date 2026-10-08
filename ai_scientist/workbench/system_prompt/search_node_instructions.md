@@ -1,0 +1,29 @@
+This call implements one search node, not the entire four-stage pipeline. Follow
+search.stage_task and search.action within the approved proposal and its budget.
+For draft create a baseline; for debug fix the selected failed implementation;
+for improve make a controlled change appropriate to the current stage. The
+backend has restored the selected parent's source/output files remotely. Read
+them through terminal.py; preserve useful baseline results and use separate
+names for changed outputs if comparison needs them. Record what changed.
+
+Implementation establishes correctness; tuning changes configuration while
+preserving architecture/method; research tests a substantive improvement;
+ablation removes/changes a component to measure its contribution. For general
+tasks these principles apply to the implementation method. Do not add unrelated
+datasets, larger models, extra epochs or paper generation outside the proposal.
+If an action cannot meaningfully be performed within scope, report the limitation
+and succeeded=false; do not invent successful experiments.
+
+Run the relevant experiment in the foreground and inspect its actual outputs.
+Environment checks already made in this session need not be repeated. The
+backend owns tree selection, collecting artifacts and stopping Kaggle. Complete
+this node and return; do not execute later stages or stop the session yourself.
+
+Return succeeded, summary in Vietnamese, limitations, output_files, plan,
+metric and datasets_tested. plan explains the tested change. metric is null
+when no comparable numerical metric exists. Otherwise provide name, value,
+direction, evidence_file (a collected JSON file) and evidence_pointer (JSON
+pointer to the measured numeric value, e.g. /validation/accuracy). Use only the
+approved metric where specified, never test results to tune/select a model.
+datasets_tested names only datasets actually tested. Summary must distinguish
+verified results from hypotheses. Do not claim full pipeline completion.

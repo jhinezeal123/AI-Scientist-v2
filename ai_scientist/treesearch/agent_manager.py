@@ -423,8 +423,19 @@ Your research idea:\n\n
     def _check_stage_completion(self, stage: Stage) -> bool:
         """Check if current stage is complete based on criteria"""
         journal = self.journals[stage.name]
+        # A successful final permitted draft is still a working implementation.
+        if stage.stage_number == 1 and journal.good_nodes:
+            return True, "Found working implementation"
+        iterations = len(journal.nodes)
+        if self.cfg.agent.stages.get('count_generated_nodes', False):
+            main = self.parse_stage_names(stage.name)[0]
+            other_ids = {n.id for name, j in self.journals.items()
+                         if self.parse_stage_names(name)[0] != main for n in j.nodes}
+            generated_ids = {n.id for name, j in self.journals.items()
+                             if self.parse_stage_names(name)[0] == main for n in j.nodes}
+            iterations = len(generated_ids - other_ids)
         # Terminate if max iterations reached
-        if len(journal.nodes) >= stage.max_iterations:
+        if iterations >= stage.max_iterations:
             logger.info(f"Stage {stage.name} completed: reached max iterations")
             print(
                 f"[green]Stage {stage.name} completed: reached max iterations[/green]"
@@ -524,7 +535,7 @@ Your research idea:\n\n
             # Check if the experiment execution time is too short
             exec_time_minutes = best_node.exec_time / 60
             print(f"[cyan]exec_time_minutes: {exec_time_minutes}[/cyan]")
-            if len(self.journals[stage.name].nodes) > (
+            if self.cfg.agent.get('scale_experiments', True) and len(self.journals[stage.name].nodes) > (
                 self.cfg.agent.stages.stage3_max_iters / 2
             ):
                 if exec_time_minutes < self.cfg.exec.timeout / 60 / 2:
@@ -671,7 +682,7 @@ Your research idea:\n\n
             + sub_stage_goal,
             max_iterations=self._get_max_iterations(main_stage_num),
             num_drafts=0,
-            stage_number=current_substage.stage_number + 1,
+            stage_number=main_stage_num,
         )
 
     def _create_next_main_stage(
@@ -711,6 +722,7 @@ Your research idea:\n\n
 
             current_substage = self.current_stage
             while current_substage:  # Sub-stage loop
+                self.current_stage = current_substage
                 print(f"[green]Starting sub-stage: {current_substage.name}[/green]")
 
                 with self._create_agent_for_stage(current_substage) as agent:
@@ -748,7 +760,8 @@ Your research idea:\n\n
                         )
                         if main_stage_complete:
                             # After main stage completion, run multi-seed eval on the best node
-                            if current_substage.stage_number in [1, 2, 3, 4]:
+                            if (current_substage.stage_number in [1, 2, 3, 4]
+                                    and self.cfg.agent.multi_seed_eval.num_seeds > 0):
                                 best_node = self._get_best_implementation(
                                     current_substage.name
                                 )

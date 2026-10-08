@@ -21,7 +21,12 @@ def prompt_root(tmp_path, monkeypatch):
 
 def test_packaged_working_aliases_are_complete():
     aliases = json.loads((system_prompt._ROOT / 'aliases.json').read_text())
-    assert set(aliases) == {'working.agent', 'working.instructions'}
+    assert set(aliases) == {'working.agent', 'working.instructions', 'search.node',
+                            'search.node_instructions', 'search.query', 'search.stage_goals'}
+    for alias in ('search.node', 'search.query'):
+        assert 'fixture' in system_prompt.load_prompt(alias, workdir='fixture')
+    assert set(json.loads(system_prompt.load_prompt('search.stage_goals'))) == {'1','2','3','4'}
+    assert 'one search node' in system_prompt.load_prompt('search.node_instructions')
     agent = system_prompt.load_prompt('working.agent', workdir='fixture')
     instructions = system_prompt.load_prompt('working.instructions').split('\n\n')
     assert 'Request workspace: fixture\nRead working-request.json, then perform the approved work through terminal.py.' in agent

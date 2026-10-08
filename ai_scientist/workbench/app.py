@@ -51,7 +51,7 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
                 await worker.close(config.shutdown_seconds)
 
     app = FastAPI(title="AI Scientist Workbench", lifespan=lifespan)
-    store = ProjectStore(config.workspace_root / ".workbench/projects")
+    store = ProjectStore(config.workspace_root / ".workbench/projects", config.workspace_root)
     app.state.store = store
     app.include_router(library_router(store, config.workspace_root))
 

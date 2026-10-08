@@ -24,6 +24,7 @@ class WorkbenchConfig(BaseModel):
     working_seconds: int = Field(default=900, ge=60)
     kaggle_session_seconds: int = Field(default=1800, ge=60)
     kaggle_accelerator: str = 'cpu'
+    tree_search_enabled: bool = True
 
     @classmethod
     def load(cls, path: Path):
@@ -151,8 +152,41 @@ class WorkingPayload(StrictModel):
     output_files: list[str] = Field(max_length=200)
 
 
+class SearchOptions(StrictModel):
+    enabled: bool = True
+    stage_iterations: list[int] = Field(default_factory=lambda: [3, 3, 3, 3], min_length=4, max_length=4)
+    num_drafts: int = Field(default=1, ge=1)
+    debug_prob: float = Field(default=0.5, ge=0, le=1)
+    max_debug_depth: int = Field(default=3, ge=0)
+
+    @model_validator(mode='after')
+    def positive_iterations(self):
+        if any(type(value) is not int or value < 1 for value in self.stage_iterations):
+            raise ValueError('Each stage requires a positive search budget')
+        return self
+
+
+class SearchMetric(StrictModel):
+    name: str
+    value: float
+    direction: Literal['minimize', 'maximize']
+    evidence_file: str
+    evidence_pointer: str
+
+
+class SearchNodePayload(WorkingPayload):
+    plan: str = Field(min_length=1, max_length=8000)
+    metric: SearchMetric | None
+    datasets_tested: list[str] = Field(max_length=30)
+
+
+class SearchQueryPayload(StrictModel):
+    response: str = Field(min_length=1, max_length=50_000)
+
+
 ROLE_PAYLOADS = {"mvp0_plan": PlanPayload, "mvp0_code": CodePayload, "mvp0_report": ReportPayload,
-                 "mvp0_working": WorkingPayload}
+                 "mvp0_working": WorkingPayload, 'mvp1_search_node': SearchNodePayload,
+                 'mvp1_search_query': SearchQueryPayload}
 
 
 def validate_result(role, result):

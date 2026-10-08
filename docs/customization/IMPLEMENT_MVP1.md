@@ -22,6 +22,16 @@ mốc sau, không thêm vào MVP1.
 | M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Đã nghiệm thu local, 2026-10-08 |
 | M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Chưa nghiệm thu |
 
+### Mở rộng đã yêu cầu sau M1-03
+
+Working dùng trực tiếp AgentManager/Journal/Node/chính sách draft-debug-improve
+và viewer của repo gốc cho cả bốn giai đoạn implementation, tuning, research,
+ablation. Các lượt mới lưu theo `experiments/YYYY-MM-DD_<idea>_attempt_N/`;
+Library vẫn riêng theo project, SQLite nối run với experiment. Ngân sách từng
+stage do user chọn; một phiên SSH cho cả cây. Đã nghiệm thu browser local với
+provider/terminal giả lập, chưa tạo phiên Kaggle thật; M1-04 vẫn chưa nghiệm thu.
+Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_TREE_SEARCH.md).
+
 ## M1-01
 
 - Upload PDF có text hoặc file vào Library; lưu bytes bản gốc đúng version/hash.
