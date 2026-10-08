@@ -33,7 +33,7 @@ class PlanningService:
     async def _plan(self, project_id, idea_id, context):
         try:
             request_id = uuid.uuid4().hex
-            workdir = self.workspace_root / ".workbench/projects" / project_id / "planning" / request_id
+            workdir = self.store.directory(project_id) / "planning" / request_id
             workdir.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(self.store.library(project_id).stage, context['snapshot'], workdir)
             (workdir / "context.json").write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -92,7 +92,7 @@ class PlanningService:
             if unknown_ids:
                 evidence = await self.idle_check()
                 # Record the read permitting this new approval; old runs stay unchanged.
-                directory = self.workspace_root/'.workbench/projects'/project_id/'approval-idle-checks'
+                directory = self.store.directory(project_id) / 'approval-idle-checks'
                 directory.mkdir(parents=True,exist_ok=True)
                 destination = directory/(proposal['id']+'.json')
                 if directory.is_symlink() or destination.is_symlink():

@@ -74,7 +74,11 @@ class ProjectStore:
         connection.execute('UPDATE project_meta SET schema_version=4 WHERE schema_version<4')
 
     def library(self, project_id):
-        return LibraryFiles(self._path(project_id).parent)
+        return LibraryFiles(self.directory(project_id))
+
+    def directory(self, project_id):
+        """Resolve all project files through the same ownership-checked path."""
+        return self._path(project_id).parent
 
     def _path(self, project_id):
         if not re.fullmatch(r"[0-9a-f]{32}", project_id):

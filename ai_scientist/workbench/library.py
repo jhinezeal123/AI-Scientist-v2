@@ -17,6 +17,12 @@ class LibraryFiles:
             raise ValueError('Linked Library path refused')
         return path
 
+    def source_name(self, resource_id, version):
+        return f'library/{resource_id}/v{version}/source.md'
+
+    def source_path(self, resource_id, version):
+        return self.path(self.source_name(resource_id, version))
+
     @staticmethod
     def document(source):
         return (f"# {source['title']}\n\n"
@@ -26,7 +32,7 @@ class LibraryFiles:
                 f"{source['content'] or 'Reference only. The URL has not been fetched.'}\n").encode('utf-8')
 
     def reference(self, source):
-        name = f"library/{source['id']}/v{source['version']}/source.md"
+        name = self.source_name(source['id'], source['version'])
         path = self.path(name)
         if 'content' in source:
             data = self.document(source)

@@ -146,7 +146,7 @@ def library_router(store, workspace_root):
         with store.connection(project_id) as connection:
             if not connection.execute('SELECT 1 FROM resources WHERE id=?', (resource_id,)).fetchone():
                 raise HTTPException(404, 'Source not found in this project')
-        path = call(store.library(project_id).path, f'library/{resource_id}/v{version}/source.md')
+        path = call(store.library(project_id).source_path, resource_id, version)
         if not path.is_file():
             raise HTTPException(404, 'Source version not found')
         return PlainTextResponse(path.read_text(encoding='utf-8'))
