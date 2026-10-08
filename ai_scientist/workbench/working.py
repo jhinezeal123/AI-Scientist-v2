@@ -270,9 +270,25 @@ class WorkingService:
             if key in self.stop_requests or isinstance(exc, asyncio.CancelledError):
                 outcome = 'CANCELLED'
             self.records.append_log(*key, f'Working dừng ({type(exc).__name__}). Lệnh và notebook không được tự gửi lại.\n', 'backend')
+            # A late/missing agent response does not erase files already produced.
+            # Collect only through an idle, existing SSH connection; a busy shell
+            # must remain available for the stop path rather than delay shutdown.
+            saved = self.record(*key)
+            if terminal and outcome != 'CANCELLED' and not (saved or {}).get('manifest') and terminal.lock.acquire(blocking=False):
+                terminal.lock.release()
+                try:
+                    manifest = await asyncio.to_thread(collect_files, terminal, root,
+                        approved['body'].get('budget', {}).get('output_bytes'))
+                    (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                    self.records.update(*key, manifest=manifest)
+                    self.records.append_log(*key, 'Đã thu file có SHA256 trước khi dừng; kết quả agent chưa được xác minh hoàn tất.\n', 'backend')
+                except Exception:
+                    self.records.append_log(*key, 'Không thu đủ file sau lỗi; giữ artifacts đã lưu và tiếp tục dừng Kaggle.\n', 'backend')
             record = self.record(*key)
             if record and not record['summary']:
-                self.records.update(*key, summary={'succeeded': False, 'summary': f'Working bị gián đoạn ({type(exc).__name__})',
+                explanation = ('Hết thời gian Working trước khi agent trả kết quả cuối; file đã thu không chứng minh hoàn tất.'
+                               if isinstance(exc, TimeoutError) and terminal else f'Working bị gián đoạn ({type(exc).__name__})')
+                self.records.update(*key, summary={'succeeded': False, 'summary': explanation,
                                                   'limitations': ['Chưa hoàn thành công việc đã duyệt.'], 'output_files': []})
             elif record:
                 summary = record['summary']

@@ -18,6 +18,12 @@ Run the relevant experiment in the foreground and inspect its actual outputs.
 Environment checks already made in this session need not be repeated. The
 backend owns tree selection, collecting artifacts and stopping Kaggle. Complete
 this node and return; do not execute later stages or stop the session yourself.
+Read only the baseline files and Library sections needed for this stage. Use
+targeted searches and bounded excerpts; do not print all inherited source files,
+outputs or every page of a paper. Reuse preceding stage results rather than
+rerunning completed experiments unless the controlled comparison requires it.
+After checking the required files and measured metric, return the final node
+JSON promptly. Do not add unrelated inspections after successful execution.
 
 Return succeeded, summary in Vietnamese, limitations, output_files, plan,
 metric and datasets_tested. plan explains the tested change. metric is null

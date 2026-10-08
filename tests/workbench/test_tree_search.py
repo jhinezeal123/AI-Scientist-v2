@@ -178,3 +178,33 @@ def test_codex_usage_is_measured_from_turn_event_for_search_roles():
     result = parse_codex_jsonl(raw, role='mvp1_search_query')
     assert result['usage'] == {'input_tokens':10,'cached_input_tokens':3,'output_tokens':2}
     assert json.loads(result['text']) == {'response':'fixture'}
+
+
+def test_late_final_node_keeps_verified_files_before_stop_without_claiming_success(tmp_path):
+    class LateFinalRuntime(SearchRuntime):
+        def run(self, request, progress, cancelled):
+            result = super().run(request, progress, cancelled)
+            if request.role == 'mvp1_search_node' and self.node_actions[-1][0].startswith('4_'):
+                raise TimeoutError('Fixture final response exceeded its deadline')
+            return result
+    async def check():
+        runtime = LateFinalRuntime(fail_draft=False)
+        _, project, run, worker, _, service, _, mcp, donor = fixture(tmp_path, runtime=runtime, donor=SearchDonor())
+        service.config.codex_model = 'fixture-model'
+        await service.start(project, run, search={'stage_iterations':[1,1,1,1]})
+        await service.tasks[project, run]
+        detail = service.detail(project, run)
+        assert detail['state'] == 'FAILED' and detail['working']['stop_confirmed']
+        assert 'Hết thời gian Working' in detail['working']['summary']['summary']
+        assert len(runtime.node_actions) == 4 and len(mcp.calls) == len(donor.opens) == 1
+        root = service.view.root(project, run)
+        assert (root / 'output/comparison.csv').read_text() == 'fixture_step\n4\n'
+        manifest = json.loads((root / 'working-manifest.json').read_text())
+        assert manifest['command_count'] > 0
+        for item in manifest['files']:
+            assert hashlib.sha256((root / item['path']).read_bytes()).hexdigest() == item['sha256']
+        assert 'output/comparison.csv' in detail['artifacts']
+        assert json.loads((root / 'logs/0-run/search-state.json').read_text())['status'] == 'failed'
+        await service.close(1)
+        await worker.close(1)
+    asyncio.run(check())
