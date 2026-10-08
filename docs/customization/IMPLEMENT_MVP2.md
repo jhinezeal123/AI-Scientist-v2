@@ -22,8 +22,8 @@ không đổi mode của run đang chạy hoặc lịch sử và không làm m�
 
 Task chia theo feature; **user tự QA/demo sau mỗi task**. Agent bàn giao code,
 hướng dẫn thao tác và checklist, chờ user duyệt trước khi làm task tiếp theo.
-M2-01 và M2-02 đã triển khai; M2-02 chờ user QA. M2-03/M2-04 vẫn là kế hoạch. Chưa nghiệm thu
-luồng MVP2 trọn vẹn hoặc chạy demo Kaggle mới.
+M2-01 và M2-02 đã triển khai; M2-02 đã qua hai pipeline browser QA thật, chờ user
+nghiệm thu. M2-03/M2-04 vẫn là kế hoạch; luồng MVP2 trọn vẹn chưa nghiệm thu.
 
 ## 2. So sánh hành vi
 
@@ -158,7 +158,7 @@ bố đã tích hợp chỉ vì file/module còn trong fork.
 | Task | Feature | Bàn giao cho user QA | Trạng thái |
 | --- | --- | --- | --- |
 | **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Đã bàn giao (`28d7342`); user cho phép tiếp tục M2-02 |
-| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai; chờ user QA |
+| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai (`f9b13d7`); browser QA hai pipeline đạt, chờ user nghiệm thu |
 | **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Chưa bắt đầu |
 | **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Chưa bắt đầu |
 
@@ -291,23 +291,55 @@ chạy lại agent hoặc submit. Việc copy Output → Library dành cho M2-03
    Output/log/đường dẫn không đổi, không submit lại. Mở run Research cũ: vẫn có
    cây/report và experiment tương ứng.
 
-QA trên đây dùng Codex/Kaggle thật do user chủ động chạy. Agent triển khai chỉ
+QA trên đây dùng Codex/Kaggle thật do user chủ động chạy. Tại bàn giao code, agent triển khai chỉ
 build frontend/compile Python, đọc lại code và trạng thái backend; chưa chạy
 pipeline Kaggle hoặc bộ kiểm thử tính năng cho M2-02.
 Backend đã khởi động lại tại port 8011, health OK và không có job đang chạy.
 Cả 6 project hiện có đã có thư mục output; nội dung/hash của 13 proposal cũ
 giữ nguyên sau restart.
 
-**User QA:**
+**Browser QA thật theo yêu cầu user (2026-10-08):**
 
-- [ ] Idea Etc có đầu ra đã mô tả → proposal → approval → Working trực tiếp.
-- [ ] Không gọi AgentManager, không stage tuning/research/ablation, không hiện
+- Project riêng `QA M2-02 Etc Output` (`97988f9e052646eba8309bc1541a9206`).
+  Mọi thao tác tạo Library/idea, lập/duyệt proposal, Start Working, retry,
+  mở/tải Output được thực hiện qua browser; kiểm tra byte/hash và số liệu
+  bằng cách đọc các file thực đã thu. Không gọi API để bỏ qua luồng GUI.
+- Run `4a801ad1f5164745a0b5be680b04d0ab`: một phiên CPU trên huynhtrungcuong,
+  proposal `27bc5b9a234f44498246c84791ed1971`, v1. CSV đúng 100 dòng, miền giá trị
+  đúng nguồn Library; revenue từng dòng và tổng JSON khớp phép cộng Decimal:
+  **28931.41**. Ba file source/CSV/JSON tổng **7790 bytes**, khớp SHA256.
+  Nút Mở CSV/JSON và Tải file hoạt động; bản tải khớp byte với bundle.
+- Run `3b630d65f8504d5f8aaa9d6f72d2e2d9`: proposal
+  `0784cafe45e74a538631880670650546`, v1. Đếm toàn bộ nguồn Library qua Python
+  remote: **9 dòng, 92 từ, 553 ký tự Unicode**, khớp file gốc. Trả nội dung
+  trong Output, `output_files=[]` và manifest files rỗng; vẫn COMPLETED.
+- Cả hai run chỉ gọi Working agent một lần, không Node/Journal/cây/report
+  nghiên cứu. Receipt đúng session có `stopped=true`, status `complete`,
+  rồi run mới COMPLETED. Sidebar đổi sang Research không đổi Run Etc.
+- Retry `8b72c08f1b764f5caa983e9784bcfad6` giữ proposal đầu, có bundle attempt_1
+  và feedback/source tham khảo, ở APPROVED; không tạo thêm working_runs/session.
+- Restart backend khi không có job chạy; refresh browser vẫn mở hai Output
+  và log cũ, không gọi lại agent/submit. Backend health OK; 13 proposal trước
+  QA giữ nguyên fingerprint `27328d0a807336118c2366f8ef287e86460bf5305b52c20b6a096ce73737a71a`.
+- Bằng chứng local: `.workbench/acceptance/m2-02-2026-10-08/verification.json`,
+  `output-completed.jpg`, `output-files.jpg`, `content-only-completed.jpg`;
+  bundle thực ở project/output. Không sửa code tính năng trong lượt QA này.
+- Chưa thử trực tiếp nhánh Stop giữa công việc, timeout, mất SSH/thu file dở
+  và ảnh/PDF preview. Chưa chạy pipeline Research mới trong QA M2-02.
+
+**Checklist QA:**
+
+- [x] Idea Etc có đầu ra đã mô tả → proposal → approval → Working trực tiếp.
+- [x] Không gọi AgentManager, không stage tuning/research/ablation, không hiện
   ngân sách bốn stage hay cây trên run Etc.
-- [ ] Kết quả/nội dung/files nằm đúng project/output/<lượt>; mở/tải qua Output.
-- [ ] Run Etc tiếp theo có thư mục riêng; run Training/Research vẫn ở experiment.
-- [ ] Log/Stop/retry/timeout/restart giữ trạng thái thật và xác nhận dừng;
+- [x] Kết quả/nội dung/files nằm đúng project/output/<lượt>; mở/tải qua Output.
+- [x] Hai run Etc và retry có thư mục riêng; retry chưa mở Kaggle khi chưa Start.
+- [x] Log/Stop tự động/retry/restart giữ trạng thái thật và xác nhận dừng;
   không cần report.md/metric/checkpoint để hoàn thành Etc.
-- [ ] Chỉ mode/scope đã duyệt được chạy; swap GUI không đổi execution hiện hành.
+- [x] Chỉ mode/scope đã duyệt được chạy; swap GUI không đổi execution hiện hành.
+- [ ] Stop giữa công việc, timeout/mất SSH/thu file dở: hiển thị phần chưa hoàn tất.
+- [ ] Pipeline Training/Research mới vẫn ở experiment (run Research cũ đã mở
+  được với cây/report; dữ liệu lịch sử giữ nguyên).
 
 ### M2-03 — Copy Output sang Library
 
