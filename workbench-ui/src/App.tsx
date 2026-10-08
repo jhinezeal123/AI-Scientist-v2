@@ -40,6 +40,7 @@ export default function App() {
   const [revision, setRevision] = useState(0);
   const [connectionRevision,setConnectionRevision] = useState(0);
   const [connectionError,setConnectionError] = useState('');
+  const [reviewedVariantSources,setReviewedVariantSources] = useState('');
   const refresh=()=>setConnectionRevision(n=>n+1);
 
   useEffect(() => {
@@ -154,12 +155,49 @@ export default function App() {
 
   const project = projects.find(p => p.id === projectId);
   const unavailable=loading || !!connectionError;
+  const selectedIdea=ideas.find(idea=>idea.id===ideaId);
+  const parentSources=selectedIdea?.variant?.baseline.parent.sources || [];
+  const changedParentSources=parentSources.filter(parent=>{
+    const current=resources.find(source=>source.id===parent.id && !source.deletion_pending);
+    return !current || current.version!==parent.version || current.content_sha256!==parent.content_sha256;
+  });
+  const variantSourceReviewRequired=changedParentSources.length>0 && reviewedVariantSources!==ideaId;
+  const sourceVersionSignature=JSON.stringify(resources.filter(source=>!source.deletion_pending)
+    .map(source=>[source.id,source.version,source.content_sha256]));
+  useEffect(()=>{setReviewedVariantSources('');},[projectId,sourceVersionSignature]);
   function selectIdea(id:string) {
     setIdeaId(id);setContext(null);
+    setReviewedVariantSources('');
+    const nextIdea=ideas.find(idea=>idea.id===id);
+    const oldSources=nextIdea?.variant?.baseline.parent.sources || [];
+    const needsReview=oldSources.some(parent=>{
+      const current=resources.find(source=>source.id===parent.id && !source.deletion_pending);
+      return !current || current.version!==parent.version || current.content_sha256!==parent.content_sha256;
+    });
+    if (!needsReview && nextIdea?.variant)setReviewedVariantSources(id);
     const latest=proposals.filter(proposal=>proposal.idea_id===id).sort((a,b)=>b.version-a.version)[0];
     if (latest)setSelected(latest.context_snapshot.resources.map(source=>source.id)
       .filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
   }
+  async function createVariant(id:string,requestId:string,variantTitle:string,purpose:string,changeSummary:string):Promise<Idea|undefined> {
+    let created:Idea|undefined;
+    await action(async()=>{
+      created=await api<Idea>(`/projects/${projectId}/runs/${id}/variants`,'POST',{
+        request_id:requestId,title:variantTitle,purpose,change_summary:changeSummary,
+      });
+      const sources=created.variant?.baseline.parent.sources || [];
+      setSelected(sources.map(source=>source.id).filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
+      const hasChanged=sources.some(parent=>{
+        const current=resources.find(source=>source.id===parent.id && !source.deletion_pending);
+        return !current || current.version!==parent.version || current.content_sha256!==parent.content_sha256;
+      });
+      setReviewedVariantSources(hasChanged ? '' : created.id);
+      setIdeaId(created.id);setEditingIdea(null);setIdeaText('');setTitle('');setContext(null);setTab('Idea');
+      setRevision(n=>n+1);setNotice('Đã lưu idea biến thể ở trạng thái bản nháp. Chưa gọi planner hoặc tạo run.');
+    });
+    return created;
+  }
+  function openRun(id:string) {setTab('Run');setRunId(id);}
   return <div className="app">
     <aside className="rail">
       <div className="brand"><span className="brand-mark">∿</span><div>AI SCIENTIST<small>LOCAL WORKBENCH</small></div></div>
@@ -234,13 +272,24 @@ export default function App() {
             });}}/>
         </section><section className="panel"><h2>Nguồn sẽ đưa cho agent</h2><p className="muted">Chọn nguồn để đưa đường dẫn file vào context. Agent tự tìm và đọc phần cần thiết; xem trước không gọi Codex.</p>
           <div className="stack"><label>Idea đã lưu<select value={ideaId} onChange={e => selectIdea(e.target.value)}><option value="">Chọn idea</option>{ideas.filter(idea=>!idea.deleted_at).map(idea => <option key={idea.id} value={idea.id}>{ideaTitle(idea)}</option>)}</select></label>
-            {resources.filter(resource=>!resource.deletion_pending).map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
+            {variantSourceReviewRequired && <div role="alert" className="alert error">
+              <p>Nguồn từ run cha đã đổi hoặc bị xóa. Đã chọn các nguồn còn tồn tại; proposal sẽ ghim phiên bản hiện hành. Kiểm tra danh sách nguồn trước khi tiếp tục.</p>
+              <ul>{changedParentSources.map(source=>{
+                const current=resources.find(item=>item.id===source.id && !item.deletion_pending);
+                return <li key={source.id}>{source.title}: {current ? `cha v${source.version}, hiện tại v${current.version}` : 'đã bị xóa; không tự khôi phục'}.</li>;
+              })}</ul>
+              <label className="check"><input type="checkbox" checked={reviewedVariantSources===ideaId}
+                onChange={event=>setReviewedVariantSources(event.target.checked ? ideaId : '')}/>
+                <span>Tôi đã kiểm tra nguồn đang chọn cho proposal mới.</span></label>
+            </div>}
+            {resources.filter(resource=>!resource.deletion_pending).map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);setReviewedVariantSources('');}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || unavailable || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
-            <button className="primary" disabled={busy || unavailable || planning || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
+            <button className="primary" disabled={busy || unavailable || planning || variantSourceReviewRequired || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
               await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
             })}>Lập proposal bằng Codex</button>
           </div>{context && <div className="context"><h3>Context snapshot</h3><code className="source-id">SHA256 {context.context_sha256}</code>{context.snapshot.resources.map(resource => <div className="context-source" key={resource.id}><strong>{resource.title}</strong><small>v{resource.version} · {statusText(resource.status)}</small><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>)}<details><summary>Xem context và đường dẫn nguồn</summary><pre>{JSON.stringify(context.snapshot,null,2)}</pre></details></div>}
-        </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={ideas.find(i => i.id === ideaId)} proposals={proposals} resources={resources} busy={busy || unavailable || planning}
+        </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={selectedIdea} proposals={proposals} resources={resources} busy={busy || unavailable || planning || variantSourceReviewRequired}
+          onOpenParent={openRun}
           onReplan={async()=>{await action(async()=>{
             await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected});
             setRevision(n=>n+1);setNotice('Đã yêu cầu Codex tiếp tục từ trao đổi đã lưu và các nguồn đang chọn.');
@@ -257,6 +306,7 @@ export default function App() {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
         });}}/></div>}
         {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning || implementing}
+          onCreateVariant={createVariant}
           onDelete={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRevision(n=>n+1);setNotice('Đã xóa run khỏi danh sách. Artifacts được giữ để khôi phục.');
           });}}

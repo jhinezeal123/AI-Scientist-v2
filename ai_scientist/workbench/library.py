@@ -1,7 +1,7 @@
 """Versioned project source files and copies for an agent's request workspace."""
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import tempfile
@@ -221,13 +221,21 @@ class LibraryFiles:
                         raise ValueError('Imported Library file hash mismatch')
                     yield name, data
 
-    def stage(self, snapshot, workspace):
+    def stage(self, snapshot, workspace, extra_files=None):
         workspace = Path(workspace).resolve()
-        for name, data in self.selected_files(snapshot):
-            target = workspace / name
+        files = list(self.selected_files(snapshot))
+        files.extend((extra_files or {}).items())
+        for name, data in files:
+            parsed = PurePosixPath(name) if isinstance(name, str) else None
+            if (parsed is None or parsed.is_absolute() or '\\' in name
+                    or any(part in {'', '.', '..'} for part in parsed.parts)):
+                raise ValueError('Unsafe agent staging path')
+            target = workspace.joinpath(*parsed.parts)
             if not target.resolve().is_relative_to(workspace) or any(
                     parent.is_symlink() or parent.is_junction() for parent in (target, *target.parents) if parent.is_relative_to(workspace)):
                 raise ValueError('Linked agent Library path refused')
+            if not isinstance(data, bytes):
+                raise ValueError('Agent staging only accepts verified bytes')
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
 

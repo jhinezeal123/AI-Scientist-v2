@@ -70,6 +70,13 @@ class RetryInput(StrictModel):
     request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
+class VariantInput(StrictModel):
+    request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    title: str = Field(min_length=1, max_length=80)
+    purpose: str = Field(min_length=1, max_length=20_000)
+    change_summary: str = Field(min_length=1, max_length=20_000)
+
+
 class WorkingInput(StrictModel):
     accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
     ttl_seconds: int = Field(default=1800, ge=60, le=43200)
@@ -305,6 +312,11 @@ def library_router(store, workspace_root):
     @router.post('/projects/{project_id}/runs/{run_id}/retry', status_code=201)
     async def retry_run(project_id: str, run_id: str, body: RetryInput, request: Request):
         return await async_call(request.app.state.working.retry, project_id, run_id, body.request_id)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/variants', status_code=201)
+    async def create_variant(project_id: str, run_id: str, body: VariantInput, request: Request):
+        return await async_call(request.app.state.service.create_variant, project_id, run_id,
+                                body.request_id, body.title, body.purpose, body.change_summary)
 
     @router.get('/projects/{project_id}/runs/{run_id}/logs')
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):

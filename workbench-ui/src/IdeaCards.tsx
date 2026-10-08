@@ -50,9 +50,10 @@ export default function IdeaCards({ideas,selectedId,busy,onSelect,onEdit,onRenam
         <button type="button" onClick={()=>onSelect('')}>Đóng chi tiết</button></div>
       <TitleEditor key={`${selected.id}:${selected.title}`} idea={selected} busy={busy} onRename={onRename}/>
       <p className="source-meta">{labels[selected.state] || selected.state} · {new Date(selected.created_at).toLocaleString('vi-VN')}</p>
+      {selected.variant && <p className="muted">Biến thể từ Run {selected.variant.parent_run_id.slice(0,8)} · {selected.variant.purpose}</p>}
       <pre>{selected.text}</pre><code className="source-id">{selected.id}</code>
-      <button type="button" disabled={busy || selected.state==='PLANNING' || selected.state==='APPROVED'}
-        onClick={()=>onEdit(selected)}>Sửa idea</button>
+      {!selected.variant && <button type="button" disabled={busy || selected.state==='PLANNING' || selected.state==='APPROVED'}
+        onClick={()=>onEdit(selected)}>Sửa idea</button>}
       <button type="button" className="danger-button" disabled={busy || selected.state==='PLANNING'}
         onClick={()=>void onDelete(selected.id)}>Xóa idea</button>
     </article>}

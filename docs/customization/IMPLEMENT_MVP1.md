@@ -19,7 +19,7 @@ mốc sau, không thêm vào MVP1.
 | --- | --- | --- | --- |
 | M1-01 / CP1-A | Import PDF/file, bản gốc + text theo trang, ingestion status/version | Hai project riêng; chọn file vừa import làm context; agent đọc qua đường dẫn | Đã bàn giao local, 2026-10-08 |
 | M1-02 / CP1-B | Trao đổi/approval/artifacts tiếp tục qua restart, UI khôi phục/lỗi | Restart không replay agent/notebook; source mới làm proposal chờ duyệt cần xem lại | Đã bàn giao local, 2026-10-08 |
-| M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Chưa bắt đầu |
+| M1-03 / CP1-C | Tạo biến thể idea từ run, purpose/parent/thay đổi, proposal mới | Giữ dữ liệu cũ; duyệt mới trước Working; report gắn đúng project/run | Đã bàn giao local, 2026-10-08 |
 | M1-04 | Demo và bàn giao P1-01…P1-06 | Competition + paper, PDF, restart giữa phiên, chạy biến thể thật có xác nhận dừng | Chưa nghiệm thu |
 
 ## M1-01
@@ -62,8 +62,7 @@ mốc sau, không thêm vào MVP1.
   Bản sao SQLite trước migration: `.workbench/backups/mvp1-imports-2026-10-08/`.
 - Kiểm thử planner/Working dùng fixture; chưa chạy Codex/Kaggle thật với PDF.
   Nghiệm thu toàn MVP1 và chạy biến thể thật thuộc M1-04.
-- Tại thời điểm bàn giao M1-01, M1-02 và M1-03 chưa triển khai;
-  tiến độ mới nhất nằm ở bảng task và các mục bàn giao bên dưới.
+- Tiến độ hiện tại nằm ở bảng task và các mục bàn giao bên dưới.
 
 ### Tinh chỉnh Library theo yêu cầu
 
@@ -120,3 +119,49 @@ mốc sau, không thêm vào MVP1.
   duyệt cần xem lại và có thao tác lập bản mới. Không gọi Codex/Kaggle thật.
 - Bằng chứng local: `.workbench/acceptance/m1-02-recovery-2026-10-08/`.
   Nghiệm thu với phiên Kaggle mới và biến thể thật vẫn thuộc M1-04.
+
+## M1-03 — Tạo idea biến thể từ kết quả đã lưu
+
+### Luồng sử dụng
+
+- Từ run đã kết thúc, người dùng nhập tiêu đề, mục đích và thay đổi để tạo một
+  idea DRAFT mới. Việc này không gọi planner, không duyệt proposal và không mở
+  run/Working. Run chưa dừng hoặc không đủ điều kiện bị chặn.
+- Idea/proposal/context/run mới lưu lineage về đúng project và run cha. Proposal
+  và approval là lượt mới; approval tạo run mới, Working vẫn cần người dùng bấm
+  riêng. Nút tạo lượt Working mới tiếp tục dùng retry với cùng proposal; quan hệ
+  đó không thay parent/lineage của variant.
+- Baseline lấy từ proposal/source refs và report/code/manifest được phép đọc.
+  Snapshot ghim đường dẫn/hash; planner và Working nhận file tham khảo đã kiểm
+  tra/stage cùng Library, không nhồi toàn bộ code/log vào prompt. File cha và
+  artifact không bị ghi đè. Baseline thiếu vẫn tạo được variant từ metadata.
+- Dùng chung `LibraryFiles.stage`, approved context snapshot/hash, `RunView`,
+  Working manifest, proposal approval và xác nhận dừng. Journal `Node` chỉ liên
+  kết code/thử nghiệm sau Working; `run.parent_run_id` đang biểu diễn retry. Vì
+  lineage/purpose phải tồn tại từ DRAFT trước run và retry vẫn riêng, M1-03 thêm
+  metadata SQLite `variant_ideas` thay vì đổi ý nghĩa hai cơ chế cũ. Không cần
+  structural refactor trước behavior.
+
+### Kiểm chứng và bằng chứng
+
+- Targeted backend: `pytest tests/workbench/test_variants.py tests/workbench/test_store.py tests/workbench/test_planning.py tests/workbench/test_working.py`
+  **19 passed**; kiểm tra cuối cho module variant sau assertion bổ sung về
+  approval gate: `pytest tests/workbench/test_variants.py` **2 passed**.
+  Bao gồm replay/conflict, ownership, stop confirmation, baseline hash, dữ liệu
+  cha không đổi, fallback khi không có code/report và chặn Working trước approval.
+- Frontend build `npm run build` đạt (`tsc -b && vite build`).
+- Browser fixture local `8012` đi hết draft → source version cần review →
+  clarification/restart → proposal mới → approval/run mới → Working qua fake
+  SSH/terminal/MCP → report, retry riêng, ẩn/khôi phục parent và đổi project.
+  Planner/Working fixture thực đọc baseline files. DRAFT ban đầu không phát sinh
+  planner/run/Working; API approval lặp trả cùng run. Parent report/code/output,
+  proposal context hash và source snapshot v1 đều giữ nguyên sau khi nguồn hiện
+  hành đổi lên v2. Project thứ hai không thấy dữ liệu project đầu.
+- Evidence: `.workbench/acceptance/m1-03-variants-2026-10-08/` chứa counters,
+  fixture và JSON hash trước/sau. Counters ghi `codex_real_calls=0`,
+  `kaggle_real_sessions=0`; fake planner=2, Working=1, SSH=1, terminal stop=1.
+  Screenshot được hiển thị inline trong browser run; API screenshot khả dụng
+  không lưu đường dẫn file local nên không ghi path ảnh giả.
+- Backend thật `8011` được kiểm tra health; smoke test chỉ đọc dữ liệu đang có.
+  Luồng Working toàn browser dùng fixture giả lập, chưa xác minh với Codex/Kaggle
+  thật. Chạy biến thể thật và nghiệm thu trọn MVP1 vẫn thuộc M1-04.

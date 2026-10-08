@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {Idea, Proposal, Resource} from './api';
 
 type Props = {idea?: Idea; proposals: Proposal[]; resources:Resource[]; busy: boolean;
+  onOpenParent:(id:string)=>void;
   onReplan:()=>Promise<void>;
   onAnswer: (proposal: Proposal, text: string) => Promise<void>;
   onContinue: (proposal: Proposal) => Promise<void>;
@@ -16,7 +17,7 @@ function Details({value}:{value:string|Record<string,unknown>}) {
     .map(([key,item])=><p key={key}><strong>{labels[key] || key}: </strong>{typeof item==='string' ? item : JSON.stringify(item)}</p>)}</div>;
 }
 
-export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,onContinue,onApprove,onReplan}:Props) {
+export default function ProposalPanel({idea,proposals,resources,busy,onOpenParent,onAnswer,onContinue,onApprove,onReplan}:Props) {
   const [answer,setAnswer] = useState('');
   const latest = proposals.filter(p => p.idea_id === idea?.id).sort((a,b) => b.version-a.version)[0];
   const changedSources=latest?.context_snapshot.resources.filter(source=>!resources.some(current=>
@@ -30,6 +31,22 @@ export default function ProposalPanel({idea,proposals,resources,busy,onAnswer,on
     {!idea && <p className="empty">Chọn một idea đã lưu để lập proposal.</p>}
     {idea?.state === 'PLANNING' && <p role="status" className="alert">Codex đang đọc nguồn và lập proposal. Bạn vẫn có thể xem Library; chưa tạo code hoặc chạy notebook.</p>}
     {idea?.error && <p role="alert" className="alert error">{idea.error}</p>}
+    {idea?.variant && <div className="context variant-context">
+      <h3>Idea biến thể từ Run {idea.variant.parent_run_id.slice(0,8)}</h3>
+      {idea.variant.parent_deleted_at
+        ? <p role="status" className="muted">Run cha đang ẩn. Khôi phục ở tab Run để mở lại.</p>
+        : <button type="button" onClick={()=>onOpenParent(idea.variant!.parent_run_id)}>Mở Run cha</button>}
+      <p><strong>Mục đích mới: </strong>{idea.variant.purpose}</p>
+      <p><strong>Thay đổi: </strong>{idea.variant.change_summary}</p>
+      <small className="muted">Proposal cha {idea.variant.parent_proposal_id} · v{idea.variant.parent_proposal_version} · context {idea.variant.baseline.parent.context_sha256}</small>
+      <h4>Baseline đã ghim</h4>
+      {!idea.variant.baseline.text_files.some(file=>file.available) && <p className="muted">Run cha không có report/code text đọc được; metadata và nguồn đã duyệt vẫn được giữ.</p>}
+      {idea.variant.baseline.text_files.map(file=><div className="context-source" key={file.stage_path}>
+        <strong>{file.kind}</strong><small>{file.available ? `${file.bytes} bytes · SHA256 ${file.sha256}` : `Không cấp được: ${file.reason}`}</small>
+        {file.available && <code className="source-id">{file.stage_path}</code>}
+      </div>)}
+      {!!idea.variant.baseline.parent.sources.length && <p className="muted">Nguồn cha: {idea.variant.baseline.parent.sources.map(source=>`${source.title} · v${source.version} · ${source.content_sha256.slice(0,12)}`).join(' | ')}</p>}
+    </div>}
     {idea?.conversation.map((message,index) => <article className="conversation" key={index}><span className="source-meta">{message.role === 'user' ? 'Bạn' : `Codex · v${message.version}`}</span>
       {message.role === 'user' ? <pre>{message.text}</pre> : message.body.questions.length === 1 ? <p>{message.body.questions[0]}</p>
         : message.body.questions.length > 1 ? <ol>{message.body.questions.map((question,i) => <li key={i}>{question}</li>)}</ol>

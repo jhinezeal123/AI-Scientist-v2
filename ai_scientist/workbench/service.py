@@ -13,9 +13,10 @@ from .store import StoreConflict
 
 
 class PlanningService:
-    def __init__(self, store, bindings, worker, workspace_root: Path):
+    def __init__(self, store, bindings, worker, workspace_root: Path, *, view=None):
         self.store, self.bindings, self.worker = store, bindings, worker
         self.workspace_root = workspace_root
+        self.view = view
         self.lock = asyncio.Lock()
         self.task = None
         self.closed = False
@@ -30,12 +31,20 @@ class PlanningService:
             self.task = asyncio.create_task(self._plan(project_id, idea_id, context))
             return {"idea_id": idea_id, "state": "PLANNING"}
 
+    async def create_variant(self, project_id, parent_run_id, request_id, title, purpose, change_summary):
+        if self.view is None:
+            raise RuntimeError('Run view is required to capture a safe variant baseline')
+        baseline, texts = await asyncio.to_thread(self.view.variant_baseline, project_id, parent_run_id)
+        return await asyncio.to_thread(self.store.create_variant_idea, project_id, parent_run_id, request_id,
+                                       title, purpose, change_summary, baseline, texts)
+
     async def _plan(self, project_id, idea_id, context):
         try:
             request_id = uuid.uuid4().hex
             workdir = self.store.directory(project_id) / "planning" / request_id
             workdir.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(self.store.library(project_id).stage, context['snapshot'], workdir)
+            files = await asyncio.to_thread(self.store.variant_stage_files, context['snapshot'])
+            await asyncio.to_thread(self.store.library(project_id).stage, context['snapshot'], workdir, files)
             (workdir / "context.json").write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
             request = self.bindings.request_type(request_id, "mvp0_plan", planning_prompt(context), workdir,
                                                  timeout_seconds=300, max_output_bytes=300_000)

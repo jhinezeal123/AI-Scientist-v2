@@ -41,6 +41,14 @@ CREATE TABLE IF NOT EXISTS source_deletions(resource_id TEXT PRIMARY KEY REFEREN
 plan_json TEXT NOT NULL, error TEXT);
 """
 
+VARIANT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS variant_ideas(
+idea_id TEXT PRIMARY KEY REFERENCES ideas(id), parent_run_id TEXT NOT NULL REFERENCES runs(id),
+parent_proposal_id TEXT NOT NULL REFERENCES proposals(id), purpose TEXT NOT NULL, change_summary TEXT NOT NULL,
+created_at TEXT NOT NULL, request_id TEXT NOT NULL UNIQUE, request_sha256 TEXT NOT NULL,
+variant_json TEXT NOT NULL, baseline_text_json TEXT NOT NULL);
+"""
+
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -126,6 +134,7 @@ class ProjectStore:
         connection.executescript(IMPLEMENTATION_SCHEMA)
         connection.executescript(INGESTION_SCHEMA)
         connection.executescript(DELETION_SCHEMA)
+        connection.executescript(VARIANT_SCHEMA)
         if 'title' not in {row['name'] for row in connection.execute('PRAGMA table_info(ideas)')}:
             connection.execute("ALTER TABLE ideas ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         if 'origin' not in {row['name'] for row in connection.execute('PRAGMA table_info(implementation_attempts)')}:
@@ -133,7 +142,7 @@ class ProjectStore:
         for table in ('ideas', 'runs'):
             if 'deleted_at' not in {row['name'] for row in connection.execute(f'PRAGMA table_info({table})')}:
                 connection.execute(f'ALTER TABLE {table} ADD COLUMN deleted_at TEXT')
-        connection.execute('UPDATE project_meta SET schema_version=6 WHERE schema_version<6')
+        connection.execute('UPDATE project_meta SET schema_version=7 WHERE schema_version<7')
 
     def library(self, project_id):
         return LibraryFiles(self.directory(project_id), lambda resource, version:self.ingestion(project_id, resource, version),
@@ -197,7 +206,8 @@ class ProjectStore:
                 connection.executescript(IMPLEMENTATION_SCHEMA)
                 connection.executescript(INGESTION_SCHEMA)
                 connection.executescript(DELETION_SCHEMA)
-                connection.execute("INSERT INTO project_meta VALUES(?,?,?,6)",
+                connection.executescript(VARIANT_SCHEMA)
+                connection.execute("INSERT INTO project_meta VALUES(?,?,?,7)",
                                    (project_id, name, datetime.now(timezone.utc).isoformat()))
                 connection.commit()
             finally:
@@ -338,6 +348,12 @@ class ProjectStore:
             for row in connection.execute("SELECT * FROM ideas" + ('' if include_deleted else ' WHERE deleted_at IS NULL') + " ORDER BY rowid DESC"):
                 item = dict(row)
                 item["conversation"] = json.loads(item.pop("conversation_json"))
+                variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?', (item['id'],)).fetchone()
+                item['variant'] = json.loads(variant['variant_json']) if variant else None
+                if item['variant']:
+                    parent = connection.execute('SELECT deleted_at FROM runs WHERE id=?',
+                                                (item['variant']['parent_run_id'],)).fetchone()
+                    item['variant']['parent_deleted_at'] = parent['deleted_at'] if parent else None
                 result.append(item)
             return result
 
@@ -350,6 +366,141 @@ class ProjectStore:
             connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title) VALUES(?,?,?,'DRAFT',NULL,?,?)",
                                (idea_id, text, "[]", datetime.now(timezone.utc).isoformat(), title))
         return next(item for item in self.ideas(project_id) if item["id"] == idea_id)
+
+    @staticmethod
+    def _variant_parent(connection, parent_run_id):
+        row = connection.execute("SELECT runs.*,proposals.id AS parent_proposal_id,proposals.version AS parent_proposal_version,"
+                                 "proposals.state AS proposal_state,proposals.body_json,proposals.context_snapshot_json,"
+                                 "proposals.context_sha256 FROM runs JOIN proposals ON proposals.id=runs.proposal_id WHERE runs.id=?",
+                                 (parent_run_id,)).fetchone()
+        if row is None:
+            raise KeyError('Run not found in this project')
+        allowed = {'COMPLETED', 'FAILED', 'CANCELLED', 'REMOTE_SUCCEEDED', 'REMOTE_FAILED'}
+        if row['deleted_at']:
+            raise StoreConflict('Run cha đã bị ẩn; khôi phục run trước khi tạo biến thể')
+        if row['state'] not in allowed:
+            raise StoreConflict(f"Run cha chưa kết thúc hoặc cần đối soát ({row['state']}); chưa thể tạo biến thể")
+        if row['proposal_state'] != 'APPROVED':
+            raise StoreConflict('Run cha không có proposal đã duyệt')
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='working_runs'").fetchone():
+            working = connection.execute('SELECT stop_confirmed FROM working_runs WHERE run_id=?', (parent_run_id,)).fetchone()
+            if working is not None and not working['stop_confirmed']:
+                raise StoreConflict('Working của run cha chưa xác nhận Kaggle đã dừng')
+        return dict(row)
+
+    def create_variant_idea(self, project_id, parent_run_id, request_id, title, purpose, change_summary,
+                            captured_baseline, baseline_texts):
+        """Create one DRAFT variant idea and pin its bounded baseline in the project database."""
+        title = idea_title(title)
+        purpose, change_summary = purpose.strip(), change_summary.strip()
+        if not purpose or not change_summary or len(purpose) > 20_000 or len(change_summary) > 20_000:
+            raise ValueError('Mục đích và thay đổi phải có nội dung (tối đa 20.000 ký tự mỗi ô)')
+        if not re.fullmatch(r'[0-9a-f]{32}', request_id):
+            raise ValueError('Invalid variant request ID')
+        request_sha256 = digest(canonical({'parent_run_id': parent_run_id, 'title': title,
+                                          'purpose': purpose, 'change_summary': change_summary}))
+        captured_baseline = dict(captured_baseline)
+        baseline_texts = dict(baseline_texts)
+        with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            existing = connection.execute('SELECT idea_id,request_sha256 FROM variant_ideas WHERE request_id=?',
+                                          (request_id,)).fetchone()
+            if existing is not None:
+                if existing['request_sha256'] != request_sha256:
+                    raise StoreConflict('Request ID đã dùng cho parent hoặc nội dung biến thể khác')
+                return self.idea(project_id, existing['idea_id'])
+
+            parent = self._variant_parent(connection, parent_run_id)
+            parent_snapshot = json.loads(parent['context_snapshot_json'])
+            parent_body = json.loads(parent['body_json'])
+            parent_sources = [
+                {key: source[key] for key in ('id', 'title', 'kind', 'version', 'content_sha256')}
+                for source in parent_snapshot['resources']
+            ]
+            expected_parent = {
+                'run_id': parent_run_id, 'proposal_id': parent['parent_proposal_id'],
+                'proposal_version': parent['parent_proposal_version'],
+                'context_sha256': parent['context_sha256'], 'purpose': parent_body['objective'],
+                'sources': parent_sources,
+            }
+            if captured_baseline.get('parent') != expected_parent:
+                raise StoreConflict('Thông tin baseline cha đã đổi; tải lại run rồi tạo biến thể')
+            files = captured_baseline.get('text_files')
+            if not isinstance(files, list) or len(files) > 4:
+                raise ValueError('Baseline text manifest không hợp lệ')
+            total = 0
+            allowed_paths = {'baseline/report.md', 'baseline/workload.py'}
+            available = set()
+            for item in files:
+                if not isinstance(item, dict) or item.get('stage_path') not in allowed_paths:
+                    raise ValueError('Baseline path không nằm trong allowlist')
+                if item.get('available') is True:
+                    path = item['stage_path']
+                    data = baseline_texts.get(path)
+                    if not isinstance(data, str):
+                        raise ValueError('Baseline text bị thiếu')
+                    encoded = data.encode('utf-8')
+                    total += len(encoded)
+                    if total > 1_048_576 or len(encoded) != item.get('bytes') or digest(data) != item.get('sha256'):
+                        raise StoreConflict('Baseline text vượt giới hạn hoặc SHA256 không khớp')
+                    if path in available:
+                        raise ValueError('Baseline text path bị lặp')
+                    available.add(path)
+            if set(baseline_texts) != available:
+                raise ValueError('Baseline text không khớp manifest')
+
+            idea_id = uuid.uuid4().hex
+            created_at = datetime.now(timezone.utc).isoformat()
+            variant = {
+                'project_id': project_id, 'idea_id': idea_id, 'parent_run_id': parent_run_id,
+                'parent_proposal_id': parent['parent_proposal_id'],
+                'parent_proposal_version': parent['parent_proposal_version'],
+                'purpose': purpose, 'change_summary': change_summary,
+                'created_at': created_at, 'request_id': request_id,
+                'baseline': captured_baseline,
+            }
+            idea_text = f'Mục đích mới: {purpose}\n\nThay đổi so với run gốc: {change_summary}'
+            connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title) VALUES(?,?,?,'DRAFT',NULL,?,?)",
+                               (idea_id, idea_text, '[]', created_at, title))
+            connection.execute('INSERT INTO variant_ideas VALUES(?,?,?,?,?,?,?,?,?,?)',
+                               (idea_id, parent_run_id, parent['parent_proposal_id'], purpose, change_summary,
+                                created_at, request_id, request_sha256, canonical(variant),
+                                canonical(baseline_texts)))
+        return self.idea(project_id, idea_id)
+
+    def variant_stage_files(self, snapshot):
+        """Return only verified, bounded text files pinned by a variant snapshot."""
+        variant = snapshot.get('variant')
+        if not variant:
+            return {}
+        idea_id = variant.get('idea_id')
+        project_id = snapshot.get('project_id')
+        with self.connection(project_id) as connection:
+            row = connection.execute('SELECT variant_json,baseline_text_json FROM variant_ideas WHERE idea_id=?',
+                                     (idea_id,)).fetchone()
+        if row is None or json.loads(row['variant_json']) != variant:
+            raise StoreConflict('Baseline biến thể đã bị đổi hoặc không còn khớp approval')
+        texts = json.loads(row['baseline_text_json'])
+        result = {}
+        total = 0
+        for item in variant['baseline']['text_files']:
+            if not item.get('available'):
+                continue
+            path = item['stage_path']
+            content = texts.get(path)
+            if not isinstance(content, str):
+                raise StoreConflict('Baseline đã ghim bị thiếu; agent chưa được gọi')
+            data = content.encode('utf-8')
+            total += len(data)
+            if (total > 1_048_576 or len(data) != item['bytes'] or digest(content) != item['sha256']):
+                raise StoreConflict('Baseline đã ghim bị hỏng; agent chưa được gọi')
+            result[path] = data
+        if set(texts) != set(result):
+            raise StoreConflict('Baseline đã ghim không khớp manifest; agent chưa được gọi')
+        manifest = canonical({'variant': {key: value for key, value in variant.items() if key != 'baseline'},
+                              'baseline': variant['baseline']}).encode('utf-8')
+        result['baseline/manifest.json'] = manifest
+        return result
 
     def context_snapshot(self, project_id, idea_id, resource_ids):
         if len(resource_ids) != len(set(resource_ids)):
@@ -367,6 +518,9 @@ class ProjectStore:
             context = {"project_id": project_id, "idea": {"id": idea["id"], "text": idea["text"],
                         "conversation": json.loads(idea["conversation_json"])},
                        "resources": sorted(resources, key=lambda item: item["id"])}
+            variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone()
+            if variant:
+                context['variant'] = json.loads(variant['variant_json'])
             serialized = canonical(context)
             if len(serialized.encode("utf-8")) > 100_000:
                 raise ValueError("Idea, conversation and source references exceed 100 KB")
@@ -380,6 +534,7 @@ class ProjectStore:
         if digest(serialized) != context["context_sha256"]:
             raise ValueError("Context hash mismatch")
         self.library(project_id).agent_snapshot(snapshot)
+        self.variant_stage_files(snapshot)
         proposal_id = uuid.uuid4().hex
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -404,6 +559,11 @@ class ProjectStore:
         human = lambda messages: [message for message in messages if message.get("role") == "user"]
         if idea is None or idea["text"] != snapshot["idea"]["text"] or human(json.loads(idea["conversation_json"])) != human(snapshot["idea"]["conversation"]):
             raise StoreConflict("Idea or answers changed; create a new proposal")
+        variant = snapshot.get('variant')
+        current_variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?',
+                                              (snapshot['idea']['id'],)).fetchone()
+        if bool(variant) != bool(current_variant) or (variant and json.loads(current_variant['variant_json']) != variant):
+            raise StoreConflict('Variant baseline or lineage changed; create a new proposal')
         for source in snapshot["resources"]:
             current = connection.execute("SELECT version,content_sha256 FROM resources WHERE id=? AND id NOT IN (SELECT resource_id FROM source_deletions)", (source["id"],)).fetchone()
             if current is None or current["version"] != source["version"] or current["content_sha256"] != source["content_sha256"]:
@@ -467,6 +627,8 @@ class ProjectStore:
             row = connection.execute("SELECT text,state,title FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if row is None:
                 raise KeyError("Idea not found in this project")
+            if connection.execute('SELECT 1 FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone():
+                raise StoreConflict('Mục đích và thay đổi của idea biến thể đã được ghi nhận; tạo biến thể mới để đổi phạm vi')
             if row["text"] != expected_text or row["state"] in {"PLANNING", "APPROVED"}:
                 raise StoreConflict("Idea changed, is planning, or was approved; reload or create a new idea")
             if title is not None and row['title'] != expected_title:
@@ -504,6 +666,7 @@ class ProjectStore:
 
     def approve_proposal(self, project_id, proposal_id, version, context_sha256, idle_unknown_ids=()):
         from .models import WorkingProposal
+        candidate = next((item for item in self.proposals(project_id) if item['id'] == proposal_id), None)
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
             proposal = connection.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
@@ -524,6 +687,9 @@ class ProjectStore:
             if proposal["state"] != "AWAITING_APPROVAL" or latest != version or idea_state == "PLANNING":
                 raise StoreConflict("Proposal is not current and awaiting approval")
             self._check_context(connection, json.loads(proposal["context_snapshot_json"]))
+            # The exact pinned variant baseline must still be readable before approval.
+            if candidate is not None:
+                self.variant_stage_files(candidate['context_snapshot'])
             self.library(project_id).agent_snapshot(json.loads(proposal['context_snapshot_json']))
             body = WorkingProposal.model_validate_json(proposal["body_json"])
             snapshot = json.loads(proposal["context_snapshot_json"])

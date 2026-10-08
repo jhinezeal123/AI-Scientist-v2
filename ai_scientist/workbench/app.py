@@ -29,6 +29,7 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
         service = PlanningService(store, loaded, worker, config.workspace_root)
         app.state.service = service
         app.state.view = RunView(store, config.workspace_root, lambda: service.idle_check is not None)
+        service.view = app.state.view
         app.state.logs = MonitorStore(store)
         try:
             async with mcp_connection(config) as (session, names):
