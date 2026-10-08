@@ -9,6 +9,25 @@ import unicodedata
 PATH_LOCK = RLock()
 
 
+def filesystem_path(path):
+    """Use Windows' extended namespace for deep, project-packaged artifacts."""
+    path = Path(path)
+    if os.name != 'nt':
+        return path
+    value = str(path.resolve())
+    if not value.startswith('\\\\?\\'):
+        value = '\\\\?\\UNC\\' + value[2:] if value.startswith('\\\\') else '\\\\?\\' + value
+    return Path(value)
+
+
+def display_path(path):
+    """Hide the filesystem namespace prefix in user-facing paths."""
+    value = str(path)
+    if value.startswith('\\\\?\\UNC\\'):
+        return '\\\\' + value[8:]
+    return value[4:] if value.startswith('\\\\?\\') else value
+
+
 def folder_title(value):
     title = unicodedata.normalize('NFC', value)
     title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title)

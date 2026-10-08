@@ -14,6 +14,7 @@ from .store import StoreConflict
 from .kaggle import decode_result
 from .working_store import WorkingStore, TERMINAL
 from .system_prompt import load_prompt
+from .named_paths import display_path
 
 ACCELERATORS = {'cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'}
 ACTIVE = {'STARTING', 'WORKING', 'STOPPING'}
@@ -417,6 +418,7 @@ class WorkingService:
                 stages.append({'name': group[0]['name'], 'nodes': len(node_ids - previous_ids)})
                 previous_ids.update(node_ids)
             detail['search'] = {'experiment': detail['artifact_dir'], 'options': saved['options'],
+                                'directory': display_path(root),
                                 'stages': stages,
                                 'tree_path': 'logs/0-run/unified_tree_viz.html' if (root / 'logs/0-run/unified_tree_viz.html').is_file() else None}
         if record:

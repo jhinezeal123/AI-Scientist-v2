@@ -1,9 +1,8 @@
 """Allocate upstream-style experiment directories for owned Workbench runs."""
 from datetime import datetime
 import json
-from pathlib import Path
 
-from .named_paths import PATH_LOCK, checked_child, folder_title
+from .named_paths import PATH_LOCK, checked_child, folder_title, filesystem_path
 
 
 def prepare_experiment(store, workspace, project_id, run_id, approved):
@@ -12,10 +11,10 @@ def prepare_experiment(store, workspace, project_id, run_id, approved):
         row = connection.execute('SELECT artifact_dir FROM runs WHERE id=?', (run_id,)).fetchone()
         if row is None:
             raise KeyError('Run not found in this project')
-        if row['artifact_dir'].startswith('experiments/'):
+        if row['artifact_dir'].startswith('experiment/'):
             return store.run_root(project_id, run_id, workspace)
         old = store.run_root(project_id, run_id, workspace)
-        experiments = checked_child(Path(workspace), 'experiments')
+        experiments = filesystem_path(checked_child(store.directory(project_id), 'experiment'))
         experiments.mkdir(exist_ok=True)
         idea = store.idea(project_id, approved['snapshot']['idea']['id'])
         title = folder_title(idea['title'] or approved['body']['objective'][:70]).replace(' ', '_')[:85]
@@ -30,7 +29,7 @@ def prepare_experiment(store, workspace, project_id, run_id, approved):
             root.mkdir()
         try:
             connection.execute('UPDATE runs SET artifact_dir=? WHERE id=?',
-                               ('experiments/' + root.name, run_id))
+                               ('experiment/' + root.name, run_id))
             # Keep original upstream keys so this description is portable to its launcher.
             description = {'Name': title, 'Title': idea['title'] or approved['body']['objective'],
                 'Abstract': approved['body']['paraphrase'],
@@ -48,6 +47,49 @@ def prepare_experiment(store, workspace, project_id, run_id, approved):
             root.rename(old)
             raise
         return root
+
+
+def migrate_project_experiments(store, project_id):
+    """Move only this project's registered external experiments, preserving bytes."""
+    with PATH_LOCK:
+        with store.connection(project_id) as connection:
+            runs = [dict(row) for row in connection.execute(
+                "SELECT id,artifact_dir FROM runs WHERE artifact_dir LIKE 'experiments/%'")]
+        for run in runs:
+            old = store.run_root(project_id, run['id'], store.workspace)
+            container = filesystem_path(checked_child(store.directory(project_id), 'experiment'))
+            destination = checked_child(container, old.name)
+            # A crash after rename but before SQLite commit leaves the folder at
+            # its destination. Verify ownership before repairing the DB pointer.
+            if old.exists() and destination.exists():
+                raise FileExistsError(f'Experiment migration destination already exists: {destination}')
+            evidence = old if old.exists() else destination
+            marker = checked_child(evidence, 'idea.json')
+            if not evidence.is_dir() or not marker.is_file():
+                raise FileNotFoundError(f'Experiment migration source missing: {old}')
+            owner = json.loads(marker.read_text(encoding='utf-8')).get('workbench', {})
+            if owner.get('project_id') != project_id or owner.get('run_id') != run['id']:
+                raise ValueError('Experiment migration ownership mismatch')
+            moved = False
+            try:
+                with store.connection(project_id) as connection:
+                    connection.execute('BEGIN IMMEDIATE')
+                    if old.exists():
+                        container.mkdir(exist_ok=True)
+                        old.rename(destination)
+                        moved = True
+                    connection.execute('UPDATE runs SET artifact_dir=? WHERE id=?',
+                                       ('experiment/' + destination.name, run['id']))
+            except BaseException:
+                if moved:
+                    destination.rename(old)
+                raise
+        # Remove only the now-empty legacy container. Unregistered upstream
+        # experiments stay intact; never scan or delete them recursively.
+        if runs:
+            legacy = checked_child(store.workspace, 'experiments')
+            if legacy.is_dir() and not any(legacy.iterdir()):
+                legacy.rmdir()
 
 
 def search_artifacts(root):

@@ -2,9 +2,10 @@
 import hashlib
 import json
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from .store import _safe_variant_source_path
+from .named_paths import display_path
 
 BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'payload.json', 'checks.json')
 ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
@@ -23,7 +24,7 @@ class RunView:
     def root(self, project_id, run_id):
         # Validate ownership before deriving a fixed path, never accept client paths.
         root = self.store.run_root(project_id, run_id, self.workspace)
-        if root.is_symlink() or not root.resolve().is_relative_to(self.workspace.resolve()):
+        if root.is_symlink() or not Path(display_path(root.resolve())).is_relative_to(self.workspace.resolve()):
             raise ValueError('Run artifact directory must remain inside the workspace')
         return root
 

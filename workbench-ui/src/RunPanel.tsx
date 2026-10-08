@@ -4,7 +4,7 @@ import RunMonitorPanel from './RunMonitorPanel';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   execution_mode:'ssh'|'legacy';working?:Working;
-  search?:{experiment:string;stages:{name:string;nodes:number}[];tree_path:string|null};
+  search?:{experiment:string;directory?:string;stages:{name:string;nodes:number}[];tree_path:string|null};
   can_retry:boolean;parent_run_id:string|null;
   variant:Variant|null;variant_parent_deleted_at:string|null;
   purpose:string;expected_outputs:string[];report_path:string|null;report_preview?:string;
@@ -127,7 +127,7 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
       </div>}
       <p className="muted">Mỗi lượt do bạn yêu cầu. Không giới hạn tổng số lượt Working.</p>
       {run.search && <div className="context"><h3>Agentic Tree Search</h3>
-        <code className="source-id">{run.search.experiment}</code>
+        <code className="source-id">{run.search.directory || run.search.experiment}</code>
         <p>{run.search.stages.map(stage=>`${stageLabels[Number(stage.name[0])-1] || stage.name}: ${stage.nodes} node`).join(' · ')}</p>
         {run.search.tree_path && <a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${run.search.tree_path}`}
           target="_blank" rel="noreferrer">Mở cây thí nghiệm ↗</a>}

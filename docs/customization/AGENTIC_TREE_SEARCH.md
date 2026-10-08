@@ -25,21 +25,36 @@ mọi node chạy tuần tự qua kết nối SSH đó. Proposal vẫn phải đ
 
 ## Dữ liệu
 
-Các lượt mới dùng `experiments/YYYY-MM-DD_<idea_title>_attempt_N/` (N tăng để
+Các lượt mới dùng `experiment/YYYY-MM-DD_<idea_title>_attempt_N/` bên trong
+thư mục project, cùng cấp với `library/` (N tăng để
 tránh trùng tên), chứa `idea.md`, `idea.json`, `logs/0-run/`,
 `token_tracker.json`, report và bằng chứng dừng. Bốn cây nằm trong các thư mục
 stage của `logs/0-run/`, kèm `unified_tree_viz.html` theo cách repo gốc.
-SQLite giữ liên kết project/run → experiment; run cũ vẫn mở từ đường dẫn đã lưu.
+SQLite giữ đường dẫn tương đối trong project. Experiment Workbench đã lưu ở
+`workspace/experiments/` được di chuyển vào đúng project khi backend khởi động,
+giữ nguyên bytes/hash. Migration kiểm tra project/run trong `idea.json`, không
+ghi đè thư mục đích và không đụng experiment không thuộc Workbench. Run notebook
+cũ ở `runs/<run_id>/` giữ vị trí hiện có.
 `review_text.txt` lưu feedback/chọn kết quả thực tế của cây, không phải review
 paper. PDF chỉ có khi tác vụ thực sự tạo PDF; không tạo file giả. Token chưa
 được runtime cung cấp được ghi là chưa biết; không báo số 0 như số đo thực tế.
 Chi phí và reasoning tokens chưa có số đo được ghi `null`.
 
 Với cấu hình hiện tại, thư mục gốc là
-`D:\Documents\AI-Scientist-v2\experiments`:
+`D:\Documents\AI-Scientist-v2\.workbench\projects\<tên project>\experiment`:
 
 ```text
-experiments/YYYY-MM-DD_<idea_title>_attempt_N/
+.workbench/projects/<tên project>/
+├── project.sqlite
+├── library/
+└── experiment/
+    └── YYYY-MM-DD_<idea_title>_attempt_N/
+```
+
+Mỗi experiment chứa:
+
+```text
+experiment/YYYY-MM-DD_<idea_title>_attempt_N/
 ├── idea.md
 ├── idea.json
 ├── logs/0-run/
@@ -74,7 +89,7 @@ workspace thực thi của experiment thuộc project đó; report/code cũ gi�
    kế thừa không tính là một bước mới. Stage có thể hoàn tất sớm.
 3. Bấm “Bắt đầu Working”. Các nhánh draft/debug/improve chạy qua một terminal
    SSH; backend thu bằng chứng, chọn kết quả và xác nhận Kaggle dừng.
-4. “Mở cây thí nghiệm” mở viewer gốc với bốn tab; “Artifacts đã lưu” mở danh sách
+4. GUI hiện đường dẫn đầy đủ bên trong project. “Mở cây thí nghiệm” mở viewer gốc với bốn tab; “Artifacts đã lưu” mở danh sách
    file. Tạo lượt Working mới cấp `attempt_N` mới, không đổi node/artifact cũ.
 
 Các prompt nằm trong `ai_scientist/workbench/system_prompt/`, alias trong
@@ -127,3 +142,21 @@ Workbench; launcher gốc vẫn giữ các mặc định riêng của nó.
 
 Ngoài phạm vi: tự động viết/review PDF không được yêu cầu trong proposal;
 điều phối nhiều phiên Kaggle song song; chạy Kaggle thật để nghiệm thu.
+
+## Đóng gói theo project — 2026-10-08
+
+- Experiment và Library nằm cạnh nhau trong project. Attempt được cấp riêng
+  theo project; hai project có cùng tiêu đề idea đều có thể bắt đầu ở attempt_0.
+- Sao chép/di chuyển cả project giữ được đường dẫn run tương đối. Các log/config
+  lịch sử có thể chứa đường dẫn tuyệt đối cũ; app phân giải artifacts qua SQLite,
+  không dùng các đường dẫn lịch sử đó để mở hoặc chạy lại agent.
+- Migration dùng rename, không tạo bản sao giữ lại ở thư mục chung. Nếu bị ngắt
+  sau rename trước khi cập nhật DB, startup xác minh ownership ở đích và sửa
+  liên kết. Lỗi cập nhật DB khôi phục vị trí nguồn.
+- Windows truy cập artifact sâu bằng extended path namespace; GUI vẫn hiện
+  đường dẫn thông thường. Không đổi thiết lập Windows hoặc rút ngắn tên project.
+- Targeted sau thay đổi: 38 passed; frontend build đạt. Hai experiment fixture
+  đã chuyển vào `QA Tree Search/experiment/`; toàn bộ 93 file của lượt đầu giữ
+  nguyên SHA256, thư mục chung cũ đã được dọn khi rỗng. Browser mở được cây/report
+  sau migration và tạo lượt `attempt_2` hoàn tất tại vị trí mới; hash lượt đầu
+  vẫn giữ nguyên. Không mở Kaggle thật hoặc gọi Codex thật.

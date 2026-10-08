@@ -12,6 +12,7 @@ import pytest
 
 from ai_scientist.workbench.journal import restore_journal
 from ai_scientist.workbench.tree_search import TreeSearchRun
+from ai_scientist.workbench.named_paths import filesystem_path, display_path
 from ai_scientist.workbench.agents.codex import parse_codex_jsonl
 from test_working import Donor, Terminal, fixture
 
@@ -86,8 +87,11 @@ def test_original_manager_four_stages_debug_substages_and_experiment_layout(tmp_
         assert runtime.node_actions[:2] == [('1_initial_implementation_1_preliminary', 'draft'), ('1_initial_implementation_1_preliminary', 'debug')]
         assert {int(stage[0]) for stage, _ in runtime.node_actions} == {1,2,3,4}
         assert len(runtime.node_actions) == 7
-        assert detail['artifact_dir'].startswith('experiments/') and detail['artifact_dir'].endswith('_attempt_0')
+        assert detail['artifact_dir'].startswith('experiment/') and detail['artifact_dir'].endswith('_attempt_0')
         root = service.view.root(project, run)
+        assert root.parent == filesystem_path(store.directory(project) / 'experiment')
+        assert detail['search']['directory'] == display_path(root)
+        assert not (tmp_path / 'experiments').exists()
         assert all((root / path).is_file() for path in ('idea.md','idea.json','token_tracker.json','review_text.txt','logs/0-run/unified_tree_viz.html'))
         saved = json.loads((root / 'logs/0-run/search-state.json').read_text())
         assert saved['status'] == 'completed'

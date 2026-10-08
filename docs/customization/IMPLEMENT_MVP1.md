@@ -26,8 +26,9 @@ mốc sau, không thêm vào MVP1.
 
 Working dùng trực tiếp AgentManager/Journal/Node/chính sách draft-debug-improve
 và viewer của repo gốc cho cả bốn giai đoạn implementation, tuning, research,
-ablation. Các lượt mới lưu theo `experiments/YYYY-MM-DD_<idea>_attempt_N/`;
-Library vẫn riêng theo project, SQLite nối run với experiment. Ngân sách từng
+ablation. Các lượt mới lưu theo
+`.workbench/projects/<tên project>/experiment/YYYY-MM-DD_<idea>_attempt_N/`,
+cùng cấp với Library; SQLite giữ đường dẫn tương đối trong project. Ngân sách từng
 stage do user chọn; một phiên SSH cho cả cây. Đã nghiệm thu browser local với
 provider/terminal giả lập, chưa tạo phiên Kaggle thật; M1-04 vẫn chưa nghiệm thu.
 Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_TREE_SEARCH.md).

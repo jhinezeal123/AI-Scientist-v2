@@ -9,7 +9,7 @@ import sqlite3
 import uuid
 
 from .library import LibraryFiles
-from .named_paths import PATH_LOCK, checked_child, folder_title, rename_folder, unique_title
+from .named_paths import PATH_LOCK, checked_child, folder_title, rename_folder, unique_title, filesystem_path
 
 
 SCHEMA = """
@@ -115,9 +115,11 @@ class ProjectStore:
                 raise ValueError('Experiment location requires its workspace')
             root = Path(workspace).resolve()
         else:
-            if relative.parts != ('runs', run_id):
+            if relative.parts != ('runs', run_id) and not (len(relative.parts) == 2 and relative.parts[0] == 'experiment'):
                 raise ValueError('Invalid legacy run location')
             root = self.directory(project_id)
+        if relative.parts[0] in {'experiment', 'experiments'}:
+            root = filesystem_path(root)
         path = root.joinpath(*relative.parts)
         for parent in (path, *path.parents):
             if parent == root.parent:
@@ -139,6 +141,8 @@ class ProjectStore:
             with self.connection(project['id']) as connection:
                 self._migrate_schema(connection)
                 pending = [row[0] for row in connection.execute('SELECT resource_id FROM source_deletions')]
+            from .experiments import migrate_project_experiments
+            migrate_project_experiments(self, project['id'])
             for resource_id in pending:
                 try:
                     self.delete_resource(project['id'], resource_id)
@@ -352,7 +356,7 @@ class ProjectStore:
                         raise StoreConflict('Nguồn đang được run sử dụng; chờ run kết thúc trước khi xóa')
                 pending = connection.execute('SELECT plan_json FROM source_deletions WHERE resource_id=?', (resource_id,)).fetchone()
                 experiment_roots = {row['id']: self.run_root(project_id, row['id'], self.workspace)
-                    for row in connection.execute("SELECT id FROM runs WHERE artifact_dir LIKE 'experiments/%'")}
+                    for row in connection.execute("SELECT id FROM runs WHERE artifact_dir LIKE 'experiment/%' OR artifact_dir LIKE 'experiments/%'")}
                 plan = json.loads(pending[0]) if pending else deletion_plan(library, resource_id, experiment_roots)
                 connection.execute('INSERT OR IGNORE INTO source_deletions VALUES(?,?,NULL)', (resource_id, canonical(plan)))
                 self._invalidate_source_proposals(connection, resource_id)
