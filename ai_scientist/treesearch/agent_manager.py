@@ -1,10 +1,11 @@
-from typing import List, Optional, Dict, Callable, Any, Tuple
+from typing import List, Optional, Dict, Callable, Any, Tuple, TYPE_CHECKING
 import pickle
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 import logging
-from .parallel_agent import ParallelAgent
+if TYPE_CHECKING:
+    from .parallel_agent import ParallelAgent
 from .journal import Journal, Node
 import copy
 import re
@@ -121,7 +122,8 @@ class StageTransition:
 
 
 class AgentManager:
-    def __init__(self, task_desc: str, cfg: Any, workspace_dir: Path):
+    def __init__(self, task_desc: str, cfg: Any, workspace_dir: Path, *,
+                 agent_factory=None, checkpoint_callback=None, stage_goals=None):
         self.task_desc = json.loads(task_desc)
         for k in [
             "Title",
@@ -134,6 +136,8 @@ class AgentManager:
                 raise ValueError(f"Key {k} not found in task_desc")
         self.cfg = cfg
         self.workspace_dir = workspace_dir
+        self.agent_factory = agent_factory
+        self.checkpoint_callback = checkpoint_callback
         self.current_stage_number = 0
         self.stages: List[Stage] = []
         self.current_stage: Optional[Stage] = None
@@ -165,6 +169,8 @@ class AgentManager:
                 - Conduct systematic component analysis that reveals the contribution of each part
                 - Use the same datasets you used from the previous stage""",
         }
+        if stage_goals is not None:
+            self.main_stage_goals = dict(stage_goals)
         # Create initial stage
         self._create_initial_stage()
 
@@ -248,6 +254,9 @@ Your research idea:\n\n
 
     def _save_checkpoint(self):
         """Save the current state of the experiment"""
+        if self.checkpoint_callback is not None:
+            self.checkpoint_callback(self)
+            return
         if self.current_stage is None:
             logger.warning("Cannot save checkpoint: current_stage is None")
             return
@@ -271,7 +280,7 @@ Your research idea:\n\n
         with open(save_path, "wb") as f:
             pickle.dump(checkpoint, f)
 
-    def _create_agent_for_stage(self, stage: Stage) -> ParallelAgent:
+    def _create_agent_for_stage(self, stage: Stage) -> 'ParallelAgent':
         """Create a ParallelAgent configured for the given stage"""
         stage_cfg = self.cfg.copy()
         stage_cfg.agent.search.num_drafts = stage.num_drafts
@@ -318,7 +327,11 @@ Your research idea:\n\n
             best_stage2_node = None
             best_stage1_node = None
 
-        return ParallelAgent(
+        factory = self.agent_factory
+        if factory is None:
+            from .parallel_agent import ParallelAgent
+            factory = ParallelAgent
+        return factory(
             task_desc=task_desc,
             cfg=stage_cfg,
             journal=self.journals[stage.name],

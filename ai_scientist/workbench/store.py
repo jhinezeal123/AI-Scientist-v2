@@ -104,6 +104,23 @@ class StoreConflict(ValueError):
 
 
 class ProjectStore:
+    def run_root(self, project_id, run_id):
+        """Resolve an owned run's persisted artifact location."""
+        run = self.run(project_id, run_id)
+        relative = PurePosixPath(run['artifact_dir'])
+        if relative.is_absolute() or '\\' in run['artifact_dir'] or '..' in relative.parts:
+            raise ValueError('Invalid run artifact directory')
+        root = self.directory(project_id)
+        path = root.joinpath(*relative.parts)
+        for parent in (path, *path.parents):
+            if parent == root.parent:
+                break
+            if parent.is_symlink() or parent.is_junction():
+                raise ValueError('Linked run artifact directory')
+        if not path.resolve().is_relative_to(root.resolve()):
+            raise ValueError('Run artifact directory escapes its project')
+        return path
+
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)

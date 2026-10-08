@@ -22,8 +22,7 @@ class RunView:
 
     def root(self, project_id, run_id):
         # Validate ownership before deriving a fixed path, never accept client paths.
-        self.store.run(project_id, run_id)
-        root = self.store.directory(project_id) / 'runs' / run_id
+        root = self.store.run_root(project_id, run_id)
         if root.is_symlink() or not root.resolve().is_relative_to(self.workspace.resolve()):
             raise ValueError('Run artifact directory must remain inside the workspace')
         return root

@@ -1,5 +1,20 @@
 from . import backend_anthropic, backend_openai
 from .utils import FunctionSpec, OutputType, PromptType, compile_prompt_to_md
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+
+_query_provider = ContextVar('treesearch_query_provider', default=None)
+
+
+@contextmanager
+def use_query_provider(provider):
+    """Scope an injected provider to this experiment, without changing other runs."""
+    token = _query_provider.set(provider)
+    try:
+        yield
+    finally:
+        _query_provider.reset(token)
 
 def get_ai_client(model: str, **model_kwargs):
     """
@@ -40,6 +55,12 @@ def query(
     Returns:
         OutputType: A string completion if func_spec is None, otherwise a dict with the function call details.
     """
+
+    provider = _query_provider.get()
+    if provider is not None:
+        return provider(system_message=system_message, user_message=user_message,
+                        model=model, temperature=temperature, max_tokens=max_tokens,
+                        func_spec=func_spec, **model_kwargs)
 
     model_kwargs = model_kwargs | {
         "model": model,
