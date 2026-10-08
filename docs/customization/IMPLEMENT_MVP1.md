@@ -89,6 +89,20 @@ Thiết kế, sử dụng và bằng chứng: [AGENTIC_TREE_SEARCH.md](AGENTIC_T
   lập lại. Lịch sử/report của run giữ nguyên; chạy lại với nguồn bị xóa bị chặn
   trước khi mở phiên Kaggle và cần nhập nguồn/lập proposal mới.
 
+### Dọn project (2026-10-08)
+
+- Chọn project trong sidebar → “Xóa project” → nhập đúng tên → “Xóa vĩnh viễn”.
+  Xóa thật toàn bộ thư mục project, gồm SQLite, Library, planning, run và experiment;
+  không giữ bản sao hoặc thùng rác. Thông báo kết quả có dung lượng file đã xóa.
+- Chặn xóa khi planner/agent còn làm việc, Working chưa kết thúc hoặc một run
+  chưa xác nhận phiên Kaggle dừng, kể cả run đã ẩn. Tái sử dụng kiểm tra lifecycle
+  hiện có; không gọi agent, submit notebook hoặc tự hủy phiên để xóa project.
+- Xóa xong chuyển sang project còn lại; xóa project cuối trở về màn hình tạo
+  project. Dọn lựa chọn browser và URL của project đã xóa.
+- Kiểm chứng: API trên thư mục tạm kiểm tra purge/cô lập/path dài, chặn run
+  chưa dừng/nguồn liên kết và thử lại khi file bị khóa. Browser kiểm tra form,
+  nhập sai/đúng tên và Hủy. Không xóa project hiện có của người dùng.
+
 ## M1-02 — Tiếp tục phiên đã lưu
 
 ### Luồng sử dụng

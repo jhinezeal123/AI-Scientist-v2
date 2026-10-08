@@ -17,6 +17,7 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 .source-alias{font-size:14px;font-weight:600}.source-card-status{color:var(--muted)}.source-card-status[data-pending='true']{color:#f08f83}
 .source-detail>.panel-head h3{font-size:20px;line-height:1.4}.source-actions{margin-top:20px;flex-wrap:wrap}
 .delete-confirmation{margin-top:16px;border:1px solid #613e39;border-radius:5px;padding:14px}.delete-confirmation>p:first-child{margin-top:0}
+.project-picker{display:grid;gap:10px}.project-deletion>button{width:100%;background:transparent}.project-deletion .delete-confirmation{margin-top:0;font-size:12px;overflow-wrap:anywhere}.project-deletion .actions{margin-top:14px;flex-wrap:wrap}.project-deletion p{line-height:1.5}.project-deletion .danger{color:#f08f83;border-color:#613e39}
 .idea-preview{width:100%;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .page-picker{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;max-height:180px;overflow:auto}.page-picker button{font-size:12px;padding:8px 12px}
 .run-card-status,.idea-card-status{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}

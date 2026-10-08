@@ -27,3 +27,10 @@ export function lastProject():string {
 export function rememberProject(projectId:string) {
   try {localStorage.setItem('workbench.project',projectId);} catch { /* Saved server data remains usable. */ }
 }
+
+export function forgetProject(projectId:string) {
+  try {
+    localStorage.removeItem(key(projectId));
+    if (lastProject()===projectId)localStorage.removeItem('workbench.project');
+  } catch { /* Server deletion does not depend on browser preferences. */ }
+}

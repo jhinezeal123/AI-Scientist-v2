@@ -119,6 +119,21 @@ def library_router(store, workspace_root):
             raise HTTPException(422, "Project name must contain text")
         return call(store.create_project, body.name)
 
+    @router.delete('/projects/{project_id}')
+    async def delete_project(project_id: str, body: ProjectInput, request: Request):
+        service = getattr(request.app.state, 'service', None)
+        if service:
+            async with service.lock:
+                if (service.worker.future is not None and not service.worker.future.done()
+                        or service.worker.state.get('status') == 'unknown'
+                        or service.task is not None and not service.task.done()):
+                    raise HTTPException(409, 'Chờ agent kết thúc và xác nhận trạng thái trước khi xóa project')
+                working = getattr(request.app.state, 'working', None)
+                if working and any(key[0] == project_id and not task.done() for key, task in working.tasks.items()):
+                    raise HTTPException(409, 'Working của project chưa kết thúc; chờ xác nhận Kaggle dừng trước khi xóa')
+                return await asyncio.to_thread(call, store.delete_project, project_id, body.name)
+        return await asyncio.to_thread(call, store.delete_project, project_id, body.name)
+
     @router.get("/projects/{project_id}/resources")
     def resources(project_id: str):
         return call(store.resources, project_id)

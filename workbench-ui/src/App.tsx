@@ -5,9 +5,10 @@ import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import SourceCards from './SourceCards';
+import ProjectDeletion from './ProjectDeletion';
 import {statusText} from './sourceStatus';
 import {loadProjectData} from './projectData';
-import {lastProject, ProjectSession, readProjectSession, rememberProject, saveProjectSession} from './projectSession';
+import {forgetProject, lastProject, ProjectSession, readProjectSession, rememberProject, saveProjectSession} from './projectSession';
 
 const blank = {title: '', content: ''};
 const initialPage=new URLSearchParams(window.location.search);
@@ -37,6 +38,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [projectNotice,setProjectNotice]=useState('');
   const [revision, setRevision] = useState(0);
   const [connectionRevision,setConnectionRevision] = useState(0);
   const [connectionError,setConnectionError] = useState('');
@@ -69,11 +71,12 @@ export default function App() {
   }, [projectId]);
 
   useEffect(()=>{
-    if (sessionProject!==projectId || !projectId)return;
-    saveProjectSession(projectId,{tab,ideaId,sourceIds:selected,runId});
+    if (sessionProject!==projectId)return;
+    if (projectId)saveProjectSession(projectId,{tab,ideaId,sourceIds:selected,runId});
     const url=new URL(window.location.href);
-    url.searchParams.set('project',projectId);
-    if (tab==='Run' && runId)url.searchParams.set('run',runId);
+    if (projectId)url.searchParams.set('project',projectId);
+    else url.searchParams.delete('project');
+    if (projectId && tab==='Run' && runId)url.searchParams.set('run',runId);
     else url.searchParams.delete('run');
     if (url.href!==window.location.href)window.history.replaceState(null,'',url);
   },[sessionProject,projectId,tab,ideaId,selected,runId]);
@@ -125,7 +128,7 @@ export default function App() {
   },[projectId,history.runs.length,connectionError]);
 
   async function action(work: () => Promise<void>) {
-    setBusy(true); setError(''); setNotice('');
+    setBusy(true); setError(''); setNotice('');setProjectNotice('');
     try {await work();} catch (e) {
       const disconnected=connectionFailure(e) && !(e instanceof ApiError);
       setError(disconnected ? 'Chưa nhận được phản hồi. Tải lại dữ liệu để kiểm tra trạng thái trước khi yêu cầu lại thao tác.'
@@ -140,6 +143,16 @@ export default function App() {
     void action(async () => {
       const project = await api<Project>('/projects', 'POST', {name: projectName});
       setProjects(await api<Project[]>('/projects')); setProjectId(project.id); setProjectName('');
+    });
+  }
+
+  function deleteProject(target:Project) {
+    void action(async()=>{
+      const result=await api<{freed_bytes:number}>(`/projects/${target.id}`,'DELETE',{name:target.name});
+      forgetProject(target.id);
+      const remaining=projects.filter(item=>item.id!==target.id);
+      setProjects(remaining);setProjectId(remaining[0]?.id || '');
+      setProjectNotice(`Đã xóa vĩnh viễn project “${target.name}” và giải phóng ${(result.freed_bytes/1024/1024).toLocaleString('vi-VN',{maximumFractionDigits:2})} MB.`);
     });
   }
 
@@ -203,10 +216,11 @@ export default function App() {
   return <div className="app">
     <aside className="rail">
       <div className="brand"><span className="brand-mark">∿</span><div>AI SCIENTIST<small>LOCAL WORKBENCH</small></div></div>
-      <label>Project<select aria-label="Project đang mở" value={projectId} disabled={busy} onChange={e => setProjectId(e.target.value)}>
+      <div className="project-picker"><label>Project<select aria-label="Project đang mở" value={projectId} disabled={busy} onChange={e => setProjectId(e.target.value)}>
         {!projects.length && <option value="">Chưa có project</option>}
         {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
+      {project && <ProjectDeletion key={project.id} project={project} busy={busy} disabled={busy || unavailable || planning || implementing} onDelete={deleteProject}/>}</div>
       <form className="new-project" onSubmit={createProject}><label>Tên project mới<input value={projectName} required maxLength={120} onChange={e => setProjectName(e.target.value)}/></label>
         <button disabled={busy || unavailable || !projectName.trim()}>Tạo project</button></form>
       <nav aria-label="Workbench">{(['Library', 'Idea', 'Run'] as const).map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
@@ -217,6 +231,7 @@ export default function App() {
         {project && <span className="mono project-id">{project.id.slice(0,8)}</span>}</header>
       {error && <div role="alert" className="alert error">{error}<button aria-label="Đóng lỗi" onClick={() => setError('')}>×</button></div>}
       {notice && <div role="status" className="alert">{notice}</div>}
+      {projectNotice && <div role="status" className="alert">{projectNotice}</div>}
       {connectionError && <div role="alert" className="alert error connection-notice"><span>{connectionError} Kết nối lại chỉ đọc trạng thái; bạn quyết định lượt chạy tiếp theo.</span>
         <button type="button" onClick={refresh}>Kết nối lại</button></div>}
       {!project ? <section className="panel welcome"><h2>Tạo project đầu tiên</h2><p>Lưu đề bài, nguồn dữ liệu và idea cùng một project. Bắt đầu bằng form bên trái.</p></section> : <>

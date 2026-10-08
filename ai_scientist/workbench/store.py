@@ -298,6 +298,34 @@ class ProjectStore:
             projects = [self.project(project_id) for project_id in tuple(self._directories)]
         return sorted(projects, key=lambda project: project["created_at"], reverse=True)
 
+    def delete_project(self, project_id, expected_name):
+        from .project_deletion import project_files, remove_project_files
+        with PATH_LOCK:
+            directory = self.directory(project_id)
+            with self.connection(project_id) as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                project = connection.execute('SELECT * FROM project_meta WHERE id=?', (project_id,)).fetchone()
+                if project is None:
+                    raise KeyError('Project not found')
+                if project['name'] != expected_name:
+                    raise StoreConflict('Tên project không khớp; tải lại và xác nhận đúng project')
+                if connection.execute("SELECT 1 FROM ideas WHERE state='PLANNING'").fetchone():
+                    raise StoreConflict('Chờ agent lập proposal xong trước khi xóa project')
+                # Include hidden runs: deleting the folder must not orphan a Kaggle session.
+                for run in connection.execute('SELECT * FROM runs'):
+                    if not self._can_delete_run(connection, run):
+                        raise StoreConflict(f"Run {run['id'][:8]} ({run['state']}) đang hoạt động hoặc chưa xác nhận Kaggle dừng; dừng/đối soát run trước khi xóa project")
+                    if run['artifact_dir'].startswith('experiments/'):
+                        raise StoreConflict('Experiment còn nằm ngoài project; khởi động lại backend để chuyển dữ liệu trước khi xóa')
+                target, receipt = project_files(self.root, directory)
+            # All in-process SQLite handles have closed; PATH_LOCK blocks new readers/writers.
+            try:
+                remove_project_files(target)
+            except OSError as exc:
+                raise StoreConflict('Chưa xóa hết project. Đóng file/thư mục đang mở rồi thử xóa lại.') from exc
+            self._directories.pop(project_id, None)
+            return {'id': project_id, 'name': expected_name, 'deleted': True, **receipt}
+
     def resources(self, project_id):
         with self.connection(project_id) as connection:
             pending = {row['resource_id']:row['error'] for row in connection.execute('SELECT * FROM source_deletions')}
