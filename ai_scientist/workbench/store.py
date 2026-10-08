@@ -241,6 +241,13 @@ class ProjectStore:
 
     @contextmanager
     def connection(self, project_id):
+        # Folder operations must wait for open SQLite handles, including readers.
+        with PATH_LOCK:
+            with self._connection(project_id) as connection:
+                yield connection
+
+    @contextmanager
+    def _connection(self, project_id):
         path = self._path(project_id)
         if not path.is_file():
             raise KeyError("Project not found")
@@ -286,8 +293,9 @@ class ProjectStore:
                     'library_path':str(self.directory(project_id) / 'library')}
 
     def list_projects(self):
-        self._discover_projects()
-        projects = [self.project(project_id) for project_id in tuple(self._directories)]
+        with PATH_LOCK:
+            self._discover_projects()
+            projects = [self.project(project_id) for project_id in tuple(self._directories)]
         return sorted(projects, key=lambda project: project["created_at"], reverse=True)
 
     def resources(self, project_id):
