@@ -133,11 +133,12 @@ class WorkingService:
                 if set(goals) != {'1', '2', '3', '4'} or any(not isinstance(goal, str) or not goal.strip() for goal in goals.values()):
                     raise ValueError('Tree search requires goals for exactly four stages')
             for project in await asyncio.to_thread(self.store.list_projects):
+                unstarted = await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])
                 for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
                     if item['id'] == run_id:
                         continue
                     allowed = {'FAILED', 'COMPLETED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'UNKNOWN'}
-                    if item['state'] not in allowed:
+                    if item['state'] not in allowed and item['id'] not in unstarted:
                         raise StoreConflict('Một Run khác đang hoạt động')
             await self.check_idle()
             if options.enabled:

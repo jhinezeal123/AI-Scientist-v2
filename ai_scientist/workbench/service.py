@@ -97,7 +97,8 @@ class PlanningService:
                 allowed = {'COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'}
                 if self.idle_check is not None:
                     allowed.add('UNKNOWN')
-                blocking = next((run for run in candidates if run['state'] not in allowed), None)
+                unstarted = await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])
+                blocking = next((run for run in candidates if run['state'] not in allowed and run['id'] not in unstarted), None)
                 if blocking:
                     raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) của project {project['name']} đang chặn lượt mới.")
             if unknown_ids:

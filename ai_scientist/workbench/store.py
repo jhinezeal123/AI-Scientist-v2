@@ -801,8 +801,9 @@ class ProjectStore:
             sources = {source["id"]: source for source in snapshot["resources"]}
             if any(ref not in sources for ref in body.data_refs):
                 raise StoreConflict("Proposal cites unselected source IDs")
-            candidates = connection.execute("SELECT id,state FROM runs WHERE deleted_at IS NULL AND state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
-            blocking = next((row for row in candidates if not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
+            candidates = connection.execute("SELECT * FROM runs WHERE deleted_at IS NULL AND state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
+            blocking = next((row for row in candidates if not self._is_unstarted_run(connection, row)
+                             and not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
             if blocking:
                 raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) đang chặn lượt mới. Run đã kết thúc trên Kaggle không chặn duyệt proposal.")
             run_id = uuid.uuid4().hex
@@ -847,6 +848,17 @@ class ProjectStore:
             if row is None:
                 raise KeyError('Run not found in this project')
             return self._can_delete_run(connection, row)
+
+    @classmethod
+    def _is_unstarted_run(cls, connection, run):
+        return (run['state'] in {'APPROVED', 'PREFLIGHT'} and not run['identity_json']
+                and cls._can_delete_run(connection, run))
+
+    def unstarted_run_ids(self, project_id):
+        """Prepared approvals hold no worker or Kaggle session; starting still locks."""
+        with self.connection(project_id) as connection:
+            return {row['id'] for row in connection.execute('SELECT * FROM runs')
+                    if self._is_unstarted_run(connection, row)}
 
     def set_deleted(self, project_id, kind, item_id, deleted=True):
         if kind not in {'ideas', 'runs'}:

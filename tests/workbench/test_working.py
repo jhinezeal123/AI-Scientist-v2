@@ -145,6 +145,43 @@ async def wait_for(predicate):
     raise AssertionError('fixture did not reach expected state')
 
 
+def test_unstarted_approvals_do_not_block_but_remote_or_active_runs_still_do(tmp_path):
+    from copy import deepcopy
+    import pytest
+    from ai_scientist.workbench.store import StoreConflict
+    async def scenario():
+        store, project, original, worker, planner, service, runtime, mcp, donor = fixture(tmp_path)
+        approved = store.approved_snapshot(project, original)
+        idea = store.save_idea(project, 'Another prepared idea')
+        context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
+        proposal = store.save_proposal(project, idea['id'], approved['body'], context)
+        second = await planner.approve(project, proposal, 1, context['context_sha256'])
+        assert store.unstarted_run_ids(project) == {original, second['id']}
+        other = store.create_project('Other prepared project')['id']
+        source = store.save_resource(other, {'title':'Other source','content':'other data'})
+        other_idea = store.save_idea(other, 'Prepared only')
+        other_context = store.context_snapshot(other, other_idea['id'], [source['id']])
+        body = deepcopy(approved['body'])
+        body['data_refs'] = [source['id']]
+        other_proposal = store.save_proposal(other, other_idea['id'], body, other_context)
+        other_run = await planner.approve(other, other_proposal, 1, other_context['context_sha256'])
+        with store.connection(other) as connection:
+            connection.execute('UPDATE runs SET identity_json=? WHERE id=?', ('{"status":"running"}', other_run['id']))
+        with pytest.raises(StoreConflict):
+            await service.start(project, second['id'])
+        with store.connection(other) as connection:
+            connection.execute('UPDATE runs SET identity_json=NULL WHERE id=?', (other_run['id'],))
+        assert (await service.start(project, second['id']))['state'] == 'STARTING'
+        with pytest.raises(StoreConflict):
+            await service.start(project, original)
+        await service.tasks[project, second['id']]
+        assert service.record(project, second['id'])['stop_confirmed']
+        assert store.run(project, original)['state'] == 'APPROVED'
+        assert store.run(other, other_run['id'])['state'] == 'APPROVED'
+        await worker.close(1)
+    asyncio.run(scenario())
+
+
 def test_working_success_pending_resume_outputs_stop_and_unlimited_new_runs(tmp_path):
     async def check():
         store, project, run, worker, planner, service, runtime, mcp, donor = fixture(tmp_path, mcp=MCP(pending=True))
