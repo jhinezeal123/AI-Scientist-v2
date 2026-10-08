@@ -75,6 +75,21 @@ def get_completed_stages(log_dir):
     return completed_stages
 
 
+def format_metric(metric):
+    """Keep the journal's metric representation consistent across viewers."""
+    if not metric:
+        return None
+    if isinstance(metric.value, dict) and "metric_names" in metric.value:
+        return metric.value
+    return {"metric_names": [{
+        "metric_name": metric.name or "value",
+        "lower_is_better": not metric.maximize,
+        "description": metric.description or "",
+        "data": [{"dataset_name": "default", "final_value": metric.value,
+                  "best_value": metric.value}],
+    }]}
+
+
 def cfg_to_tree_struct(cfg, jou: Journal, out_path: Path = None):
     edges = list(get_edges(jou))
     print(f"[red]Edges: {edges}[/red]")
@@ -95,32 +110,7 @@ def cfg_to_tree_struct(cfg, jou: Journal, out_path: Path = None):
 
     for n in jou:
         # print(f"Node {n.id} exc_stack: {type(n.exc_stack)} = {n.exc_stack}")
-        if n.metric:
-            # Pass the entire metric structure for the new format
-            if isinstance(n.metric.value, dict) and "metric_names" in n.metric.value:
-                metrics.append(n.metric.value)
-            else:
-                # Handle legacy format by wrapping it in the new structure
-                metrics.append(
-                    {
-                        "metric_names": [
-                            {
-                                "metric_name": n.metric.name or "value",
-                                "lower_is_better": not n.metric.maximize,
-                                "description": n.metric.description or "",
-                                "data": [
-                                    {
-                                        "dataset_name": "default",
-                                        "final_value": n.metric.value,
-                                        "best_value": n.metric.value,
-                                    }
-                                ],
-                            }
-                        ]
-                    }
-                )
-        else:
-            metrics.append(None)
+        metrics.append(format_metric(n.metric))
 
         # Track whether this is the best node
         is_best_node.append(n is best_node)
