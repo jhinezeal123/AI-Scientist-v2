@@ -1,6 +1,7 @@
 """Library, approval and remote Working endpoints."""
 from typing import Literal
 import asyncio
+import json
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import Field, field_validator
 
@@ -363,8 +364,19 @@ def library_router(store, workspace_root):
             from fastapi.responses import Response
             from email.utils import formatdate
             media = 'text/html' if path.suffix == '.html' else 'application/json'
-            return Response(path.read_bytes(), media_type=media,
-                headers={'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Last-Modified', 'Last-Modified': formatdate(path.stat().st_mtime, usegmt=True), 'Content-Security-Policy': "sandbox allow-scripts allow-downloads; default-src 'self' https://cdnjs.cloudflare.com; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'"})
+            content = path.read_bytes()
+            modified = path.stat().st_mtime
+            if name == 'logs/0-run/unified_tree_viz.html' and 'logs/0-run/search-state.json' in detail['artifacts']:
+                # Apply the current viewer to saved runs without rewriting their
+                # historical artifacts or evaluating/selecting nodes again.
+                from ai_scientist.treesearch.utils.run_tree import render_search_state
+                state_path = root / 'logs/0-run/search-state.json'
+                if state_path.is_symlink() or state_path.is_junction() or not state_path.resolve().is_relative_to(root.resolve()):
+                    raise HTTPException(404, 'Artifact not found')
+                content = call(render_search_state, json.loads(state_path.read_text(encoding='utf-8')), root.name)
+                modified = max(modified, state_path.stat().st_mtime)
+            return Response(content, media_type=media,
+                headers={'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Last-Modified', 'Last-Modified': formatdate(modified, usegmt=True), 'Content-Security-Policy': "sandbox allow-scripts allow-downloads; default-src 'self' https://cdnjs.cloudflare.com; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'"})
         return FileResponse(path, filename=path.name)
 
     return router

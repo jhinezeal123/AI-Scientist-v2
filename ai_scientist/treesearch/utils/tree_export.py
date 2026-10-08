@@ -404,78 +404,18 @@ def generate(cfg, jou: Journal, out_path: Path):
 
 
 def create_unified_viz(cfg, current_stage_viz_path):
-    """
-    Create a unified visualization that shows all completed stages in a tabbed interface.
-    This will be placed in the main log directory.
-    """
-    # The main log directory is two levels up from the stage-specific visualization
+    """Export one tree for all journals, retaining ancestry across stages."""
+    from .run_tree import build_run_tree, render_run_tree, render_search_state
+
     log_dir = current_stage_viz_path.parent.parent
-
-    # Get the current stage name from the path
-    current_stage = current_stage_viz_path.parent.name
-    if current_stage.startswith("stage_"):
-        # Extract the stage number from the directory name
-        parts = current_stage.split("_")
-        if len(parts) >= 2 and parts[1].isdigit():
-            stage_num = parts[1]
-            current_stage = f"Stage_{stage_num}"
-
-    # Create a combined visualization at the top level
     unified_viz_path = log_dir / "unified_tree_viz.html"
-
-    # Copy the template files
-    template_dir = Path(__file__).parent / "viz_templates"
-
-    with open(template_dir / "template.html", encoding='utf-8') as f:
-        html = f.read()
-
-    with open(template_dir / "template.js", encoding='utf-8') as f:
-        js = f.read()
-
-    # Get completed stages by checking directories
-    completed_stages = get_completed_stages(log_dir)
-
-    # Try to load the current stage's tree data to use as a basis
-    try:
-        current_stage_data_path = current_stage_viz_path.parent / "tree_data.json"
-        if current_stage_data_path.exists():
-            with open(current_stage_data_path, "r") as f:
-                base_data = json.load(f)
-                # Add the necessary metadata
-                base_data["current_stage"] = current_stage
-                base_data["completed_stages"] = completed_stages
-        else:
-            # If we can't load the tree data, create a minimal structure
-            base_data = {
-                "current_stage": current_stage,
-                "completed_stages": completed_stages,
-                # Add empty layout and edges to prevent errors
-                "layout": [],
-                "edges": [],
-            }
-    except Exception as e:
-        print(f"Error loading stage data: {e}")
-        # Create a minimal data structure that won't cause JS errors
-        base_data = {
-            "current_stage": current_stage,
-            "completed_stages": completed_stages,
-            "layout": [],
-            "edges": [],
-        }
-
-    # Replace the placeholder in the JS with our data
-    base_data['stage_paths'] = {}
-    for directory in sorted(log_dir.iterdir(), key=lambda path: int(path.name.split('_')[-2]) if path.name.startswith('stage_') and path.name.split('_')[-2].isdigit() else 0):
-        if directory.is_dir() and directory.name.startswith('stage_') and (directory / 'tree_data.json').is_file():
-            base_data['stage_paths']['Stage_' + directory.name.split('_')[1]] = directory.name
-    base_data['stage_paths'].update(getattr(cfg, 'unified_stage_paths', {}) or {})
-    js = js.replace('"PLACEHOLDER_TREE_DATA"', json.dumps(base_data).replace('<', '\\u003c'))
-
-    # Replace the placeholder in the HTML with our JS
-    html = html.replace("<!-- placeholder -->", js)
-
-    # Write the unified visualization
-    with open(unified_viz_path, "w", encoding='utf-8') as f:
-        f.write(html)
-
+    state_path = log_dir / 'search-state.json'
+    if state_path.is_file():
+        html = render_search_state(json.loads(state_path.read_text(encoding='utf-8')), log_dir.parent.parent.name)
+    else:
+        journals = {directory.name: json.loads((directory / 'journal.json').read_text(encoding='utf-8'))
+                    for directory in log_dir.glob('stage_[1-4]_*')
+                    if directory.is_dir() and (directory / 'journal.json').is_file()}
+        html = render_run_tree(build_run_tree(journals, title=cfg.exp_name))
+    unified_viz_path.write_text(html, encoding='utf-8')
     print(f"[green]Created unified visualization at {unified_viz_path}[/green]")

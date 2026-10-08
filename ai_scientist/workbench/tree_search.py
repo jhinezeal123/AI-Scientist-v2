@@ -221,12 +221,20 @@ class TreeSearchRun:
         return MetricValue(metric.value, name=metric.name, maximize=metric.direction == 'maximize')
 
     def checkpoint(self, manager):
-        write_json(self.logs / 'search-state.json', {
+        state = {
             'status': self.status,
             'options': self.options.model_dump(), 'stages': [asdict(stage) for stage in manager.stages],
             'transitions': [asdict(item) for item in manager.stage_history],
             'journals': {name: journal_snapshot(journal) for name, journal in manager.journals.items()},
-            'stage_results': self.stage_results})
+            'stage_results': self.stage_results,
+            'selected_node_id': getattr(self, 'selected_node_id', None)}
+        write_json(self.logs / 'search-state.json', state)
+        from ai_scientist.treesearch.utils.run_tree import render_search_state
+        html = render_search_state(state, self.root.name)
+        target = self.logs / 'unified_tree_viz.html'
+        temporary = target.with_suffix('.html.tmp')
+        temporary.write_text(html, encoding='utf-8')
+        temporary.replace(target)
 
     def save_stage(self, stage, journal):
         self.stage_results[stage.name] = [{'id': node.id, 'parent_id': node.parent.id if node.parent else None,
@@ -264,8 +272,8 @@ class TreeSearchRun:
                 self.manager.run(exec_callback=None, step_callback=self.save_stage)
             finally:
                 self.checkpoint(self.manager)
-            # The original journals keep substages separate. Reuse their exporter
-            # on combined journals so each main-stage tab shows all of its branches.
+            # Keep original stage journals as evidence; the unified viewer combines
+            # every node once using its original ID and parent relationship.
             cfg.unified_stage_paths = {}
             for number, main_name in self.manager.main_stage_dict.items():
                 records = {}
@@ -284,6 +292,7 @@ class TreeSearchRun:
             completed = {self.manager.parse_stage_names(stage.name)[0] for stage in self.manager.stages}
             if best is None or best.id not in self.nodes:
                 raise ValueError('Tree search produced no verified working implementation')
+            self.selected_node_id = best.id
             best_root, manifest, payload = self.nodes[best.id]
             # Publish the verified selected solution; all other nodes remain immutable.
             import shutil

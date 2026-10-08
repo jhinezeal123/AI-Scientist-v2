@@ -28,8 +28,9 @@ mọi node chạy tuần tự qua kết nối SSH đó. Proposal vẫn phải đ
 Các lượt mới dùng `experiment/YYYY-MM-DD_<idea_title>_attempt_N/` bên trong
 thư mục project, cùng cấp với `library/` (N tăng để
 tránh trùng tên), chứa `idea.md`, `idea.json`, `logs/0-run/`,
-`token_tracker.json`, report và bằng chứng dừng. Bốn cây nằm trong các thư mục
-stage của `logs/0-run/`, kèm `unified_tree_viz.html` theo cách repo gốc.
+`token_tracker.json`, report và bằng chứng dừng. Journal và bản xuất riêng của
+từng giai đoạn nằm trong các thư mục stage của `logs/0-run/`. `unified_tree_viz.html` hiển thị
+một cây duy nhất nối node của toàn bộ lượt Working, dùng màu phân biệt stage.
 SQLite giữ đường dẫn tương đối trong project. Experiment Workbench đã lưu ở
 `workspace/experiments/` được di chuyển vào đúng project khi backend khởi động,
 giữ nguyên bytes/hash. Migration kiểm tra project/run trong `idea.json`, không
@@ -89,7 +90,9 @@ workspace thực thi của experiment thuộc project đó; report/code cũ gi�
    kế thừa không tính là một bước mới. Stage có thể hoàn tất sớm.
 3. Bấm “Bắt đầu Working”. Các nhánh draft/debug/improve chạy qua một terminal
    SSH; backend thu bằng chứng, chọn kết quả và xác nhận Kaggle dừng.
-4. GUI hiện đường dẫn đầy đủ bên trong project. “Mở cây thí nghiệm” mở viewer gốc với bốn tab; “Artifacts đã lưu” mở danh sách
+4. GUI hiện đường dẫn đầy đủ bên trong project. “Mở cây thí nghiệm” mở một cây
+   chung ở trên và chi tiết node ở dưới. Chọn node để xem code/metric/feedback;
+   màu thể hiện stage, nút “Xem node cha” đi theo quan hệ đã lưu. “Artifacts đã lưu” mở danh sách
    file. Tạo lượt Working mới cấp `attempt_N` mới, không đổi node/artifact cũ.
 
 Các prompt nằm trong `ai_scientist/workbench/system_prompt/`, alias trong
@@ -160,3 +163,20 @@ Ngoài phạm vi: tự động viết/review PDF không được yêu cầu tron
   nguyên SHA256, thư mục chung cũ đã được dọn khi rỗng. Browser mở được cây/report
   sau migration và tạo lượt `attempt_2` hoàn tất tại vị trí mới; hash lượt đầu
   vẫn giữ nguyên. Không mở Kaggle thật hoặc gọi Codex thật.
+
+## Viewer một cây — 2026-10-08
+
+- Node kế thừa giữa các stage được gộp theo ID; màu là stage tạo ra node lần
+  đầu. Bản sao baseline không làm mất cạnh cha/con của node gốc. Không nối các
+  node chỉ vì chúng được chạy liên tiếp; nhiều draft độc lập giữ nguyên gốc.
+- Tái sử dụng journal, thuật toán layout và cách biểu diễn metric của exporter
+  gốc. Render SVG tương tác trong trang, không cần tải p5 hoặc fetch từng stage.
+- Cây nằm trên; nội dung node nằm dưới và chiếm toàn chiều ngang. Code/log
+  thu gọn, chỉ mở khi cần. Node lỗi vẫn có màu stage và nhãn “Có lỗi”.
+- URL viewer của run cũ render bằng journal đã lưu và template hiện tại, không
+  ghi lại artifact lịch sử hoặc gọi agent để chọn kết quả. Lượt mới lưu HTML
+  gộp tại mỗi checkpoint. Khi run đang chạy, viewer kiểm tra cập nhật mỗi 15
+  giây; run đã dừng không poll. Có nút “Cập nhật cây” để tải lại thủ công.
+- 9 kiểm tra local đạt; kiểm tra browser trên run thật đã hoàn tất `20070c81`
+  thấy đúng 4 node/3 cạnh, bốn màu stage, chọn node/code/node cha hoạt động và
+  chi tiết nằm dưới cây. Không mở lại phiên Kaggle.
