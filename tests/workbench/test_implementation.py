@@ -178,7 +178,7 @@ def test_retired_http_execution_preserves_ownership_and_saved_artifacts(tmp_path
         yield MCP(),[]
     app=create_app(SimpleNamespace(workspace_root=tmp_path,shutdown_seconds=1,kaggle_username='verified-user'),
                    bindings=SimpleNamespace(runtime=runtime,request_type=request_type),mcp_connection=mcp)
-    root=tmp_path/'.workbench/projects'/project/'runs'/run['id']
+    root=store.directory(project)/'runs'/run['id']
     root.mkdir(parents=True)
     (root/'notebook.ipynb').write_text('{"cells": []}',encoding='utf-8')
     with TestClient(app) as client:

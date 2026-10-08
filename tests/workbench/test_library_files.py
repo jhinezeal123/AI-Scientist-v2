@@ -14,7 +14,7 @@ from test_working import fixture
 def test_versioned_files_and_staged_copies_preserve_approved_content(tmp_path):
     store = ProjectStore(tmp_path / 'projects')
     project = store.create_project('Files')['id']
-    assert (store.root / project / 'library').is_dir()
+    assert (store.directory(project) / 'library').is_dir()
     source = store.save_resource(project, {'kind':'text','title':'Rules','content':'UNIQUE_SOURCE_V1'})
     idea = store.save_idea(project, 'Read rules')
     context = store.context_snapshot(project, idea['id'], [source['id']])

@@ -1,4 +1,4 @@
-export type Project = {id: string; name: string; created_at: string};
+export type Project = {id: string; name: string; created_at: string; directory_name:string;library_path:string};
 export type Resource = {id: string; kind: 'text'|'url'|'dataset'; title: string; url: string|null;
   content: string; status: string; version: number; content_sha256: string;
   file_path?:string;file_sha256?:string;file_bytes?:number};

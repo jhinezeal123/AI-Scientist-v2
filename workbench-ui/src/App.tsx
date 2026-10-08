@@ -133,7 +133,7 @@ export default function App() {
               await api(`/projects/${projectId}/import-readiness`, 'POST'); setRevision(n => n+1); setNotice('Đã nhập nguồn competition đã đọc ở T01.');
             })}>Nhập nguồn T01</button></div>
             <p className="muted">Nguồn được lưu thành file riêng theo phiên bản. Agent nhận đường dẫn và tự tìm, đọc phần cần thiết.</p>
-            <code className="source-id">.workbench/projects/{projectId}/library/</code>
+            <code className="source-id">{project.library_path}</code>
             {!resources.length && <p className="empty">Chưa có nguồn. Thêm nguồn ở form bên cạnh hoặc nhập bản đọc T01.</p>}
             {resources.map(resource => <article className="resource" key={resource.id}>
               <div className="panel-head"><h3>{resource.title}</h3><button disabled={busy} onClick={() => {setEditing(resource); setForm({kind: resource.kind,title: resource.title,url: resource.url || '',content: resource.content});}}>Sửa nguồn</button></div>

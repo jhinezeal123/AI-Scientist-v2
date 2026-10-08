@@ -9,6 +9,7 @@ import sqlite3
 import uuid
 
 from .library import LibraryFiles
+from .named_paths import PATH_LOCK, checked_child, folder_title, rename_folder, unique_title
 
 
 SCHEMA = """
@@ -54,11 +55,53 @@ class ProjectStore:
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._directories = {}
+        self._discover_projects()
         for project in self.list_projects():
+            self._name_project_directory(project['id'])
             with self.connection(project['id']) as connection:
                 self._migrate_schema(connection)
-                for row in connection.execute('SELECT * FROM resources'):
-                    self.library(project['id']).reference(dict(row))
+                sources = [dict(row) for row in connection.execute('SELECT * FROM resources')]
+            for source in sources:
+                title = self.library(project['id']).register(source)
+                if title != source['title']:
+                    self.save_resource(project['id'], {**source, 'title':title}, source['id'], source['version'])
+                else:
+                    self.library(project['id']).reference(source)
+
+    def _discover_projects(self):
+        with PATH_LOCK:
+            directories = {}
+            for directory in self.root.iterdir():
+                if not directory.is_dir() or directory.is_symlink() or directory.is_junction():
+                    continue
+                database = directory / 'project.sqlite'
+                if not database.is_file() or database.is_symlink():
+                    continue
+                connection = sqlite3.connect(database)
+                try:
+                    row = connection.execute('SELECT id FROM project_meta').fetchone()
+                finally:
+                    connection.close()
+                if row is None or not re.fullmatch(r'[0-9a-f]{32}', row[0]):
+                    raise ValueError('Invalid project database identity')
+                if row[0] in directories:
+                    raise ValueError('Duplicate project database identity')
+                directories[row[0]] = directory
+            self._directories = directories
+
+    def _name_project_directory(self, project_id):
+        with PATH_LOCK:
+            old = self.directory(project_id)
+            with self.connection(project_id) as connection:
+                title = connection.execute('SELECT name FROM project_meta WHERE id=?', (project_id,)).fetchone()[0]
+            name = unique_title(folder_title(title), [item.name for item in self.root.iterdir() if item != old])
+            destination = checked_child(self.root, name)
+            if old.name != name:
+                rename_folder(old, destination)
+                self._directories[project_id] = destination
+            with self.connection(project_id) as connection:
+                connection.execute('UPDATE project_meta SET name=? WHERE id=?', (name, project_id))
 
     @staticmethod
     def _migrate_schema(connection):
@@ -83,8 +126,10 @@ class ProjectStore:
     def _path(self, project_id):
         if not re.fullmatch(r"[0-9a-f]{32}", project_id):
             raise KeyError("Project not found")
-        directory = self.root / project_id
-        if directory.is_symlink() or not directory.resolve().is_relative_to(self.root):
+        directory = self._directories.get(project_id)
+        if directory is None:
+            raise KeyError('Project not found')
+        if directory.is_symlink() or directory.is_junction() or not directory.resolve().is_relative_to(self.root):
             raise KeyError("Project not found")
         database = directory / "project.sqlite"
         if database.is_symlink():
@@ -107,20 +152,23 @@ class ProjectStore:
             connection.close()
 
     def create_project(self, name):
-        project_id = uuid.uuid4().hex
-        database = self._path(project_id)
-        database.parent.mkdir()
-        (database.parent / 'library').mkdir()
-        connection = sqlite3.connect(database)
-        try:
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.executescript(SCHEMA)
-            connection.executescript(IMPLEMENTATION_SCHEMA)
-            connection.execute("INSERT INTO project_meta VALUES(?,?,?,4)",
-                               (project_id, name.strip(), datetime.now(timezone.utc).isoformat()))
-            connection.commit()
-        finally:
-            connection.close()
+        with PATH_LOCK:
+            name = unique_title(folder_title(name), [item.name for item in self.root.iterdir()])
+            project_id = uuid.uuid4().hex
+            directory = checked_child(self.root, name)
+            directory.mkdir()
+            (directory / 'library').mkdir()
+            self._directories[project_id] = directory
+            connection = sqlite3.connect(directory / 'project.sqlite')
+            try:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.executescript(SCHEMA)
+                connection.executescript(IMPLEMENTATION_SCHEMA)
+                connection.execute("INSERT INTO project_meta VALUES(?,?,?,4)",
+                                   (project_id, name, datetime.now(timezone.utc).isoformat()))
+                connection.commit()
+            finally:
+                connection.close()
         return self.project(project_id)
 
     def project(self, project_id):
@@ -128,13 +176,12 @@ class ProjectStore:
             row = connection.execute("SELECT * FROM project_meta WHERE id=?", (project_id,)).fetchone()
             if row is None:
                 raise KeyError("Project not found")
-            return dict(row)
+            return {**dict(row), 'directory_name':self.directory(project_id).name,
+                    'library_path':str(self.directory(project_id) / 'library')}
 
     def list_projects(self):
-        projects = []
-        for directory in self.root.iterdir():
-            if re.fullmatch(r"[0-9a-f]{32}", directory.name) and (directory / "project.sqlite").is_file():
-                projects.append(self.project(directory.name))
+        self._discover_projects()
+        projects = [self.project(project_id) for project_id in tuple(self._directories)]
         return sorted(projects, key=lambda project: project["created_at"], reverse=True)
 
     def resources(self, project_id):
@@ -148,7 +195,8 @@ class ProjectStore:
         status = "provided_text" if content.strip() else "reference_only"
         if not title or (not content.strip() and not url):
             raise ValueError("A title and text or URL are required")
-        with self.connection(project_id) as connection:
+        with PATH_LOCK, self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
             if resource_id is None:
                 resource_id, version = uuid.uuid4().hex, 1
             else:
@@ -158,6 +206,7 @@ class ProjectStore:
                 if existing["version"] != expected_version:
                     raise StoreConflict("Resource changed; reload before saving")
                 version = existing["version"] + 1
+            title = self.library(project_id).register({'id':resource_id, 'title':title})
             row = {"id": resource_id, "kind": body["kind"], "title": title, "url": url,
                    "content": content, "status": status, "version": version,
                    "content_sha256": digest(canonical({"kind": body["kind"], "title": title,
