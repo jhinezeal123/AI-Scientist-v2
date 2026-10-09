@@ -48,4 +48,54 @@ and selected scientific outputs require a user-approved Working run.
 - Python syntax compilation: passed.
 - Diff whitespace check: passed.
 - Backend restart on 8011: startup completed, health status ok.
-- Browser workflow and new Kaggle run: left for user QA; no new session launched.
+- Browser workflow: exercised on 2026-10-09; results below.
+- New Kaggle execution: not exercised; no new session launched.
+
+## Browser QA — 2026-10-09
+
+Browser-use drove the running app on `http://127.0.0.1:8011/`, using project
+`QA M2-02 Etc Output`. No API fixtures or unit tests supplied the workflow.
+
+Passed:
+
+- Existing Etc roots and a retry child appeared in one tree. A new Improve
+  was added under the correct parent, with a different mode accent.
+- Wheel zoom changed scale from 0.6539 to 0.8278 without scrolling the page;
+  dragging changed the translation by exactly the drag distance. Fit and
+  node selection worked. The separate full-screen tree opened run detail.
+- Improve opened Training/Research Idea with the pinned parent; Etc opened
+  the Etc form with desired-output input and without Research checkboxes.
+- All five optional outputs started unchecked. Plots, PDF and Review could
+  be selected while Summary and Report remained off. These choices survived
+  save/edit, planning, approval and page reload, becoming read-only in Run.
+- Real Codex planning and approval created exactly one child, increasing
+  the tree from 3 to 4 runs. Working exposed hardware/TTL and one start
+  action, with no automatic stage-budget controls. The `tuning` tag appeared.
+- The parent delete action was disabled; the new unstarted leaf was eligible.
+  After user confirmation, deleting QA run
+  `4180d513ab624ebbb9a4360ebd4c40c7` returned the tree to 3 runs. The node did
+  not reappear after reload, and its owned `runs/<id>` directory was absent.
+  This run had not executed: removing a populated artifact directory remains
+  untested. The approved QA idea/proposal and planning diagnostics remain.
+- Saved baseline showed code and memory_journal file references. Older run
+  outputs and logs remained accessible. Browser console inspection showed
+  no JavaScript errors before the deliberate backend reloads.
+
+Planning initially failed with a generic ValueError. The first worker failed;
+the second worker completed but the planning service rejected its result.
+Earlier failures did not retain enough detail to prove their exact cause.
+Adapter-authored error diagnostics and a validated `proposal-result.json` are
+now saved. Planner prompts explicitly restrict `data_refs` to selected Library
+IDs and keep parent artifact links in the separate baseline. The next browser
+planning attempt succeeded as proposal `a76a0c553c12483893b7bfd7d26ad1b8`.
+
+Not verified by this browser session: remote artifact fetching, execution-time
+self-repair, distinct SSH sessions for actual child execution, omitted finishing
+steps, generation of selected scientific outputs, and deletion of a populated
+run folder. These require a separately approved live Working run. A browser
+reload proves persisted UI state, not process-restart recovery of a live session.
+
+Screenshots (local, ignored QA artifacts):
+
+- `.workbench/acceptance/project-tree-2026-10-09/browser-tree.jpg`
+- `.workbench/acceptance/project-tree-2026-10-09/browser-scope.jpg`

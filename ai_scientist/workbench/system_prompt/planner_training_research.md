@@ -19,6 +19,10 @@ task. For child runs, read the pinned parent code and memory_journal files;
 artifact_refs contain short titles and links, with bytes fetched by Working
 only when needed. Do not invent contents of unread artifacts.
 Do not add citation search or visual review. Use selected Library references.
+data_refs is exclusively a list of exact id values from context.resources.
+Never put file paths, artifact:// links, parent_run_id, code hashes or baseline
+file names in data_refs. Describe parent artifacts in implementation_steps;
+they are already approved separately in variant.baseline.artifact_refs.
 
 READY SCHEMA:
 {{ready_schema}}

@@ -63,6 +63,24 @@ class RuntimeWorker:
                 self.uncertain_error is not None and isinstance(exc, self.uncertain_error))
             status = "unknown" if unknown else "interrupted" if self.closed else "failed"
             failure = {**self.state, "status": status}
+            # Persist only adapter-authored messages, never model output or stderr.
+            known_errors = {
+                'Codex CLI output exceeded its configured size limit',
+                'Codex CLI event stream was not UTF-8',
+                'Codex CLI emitted an invalid JSONL event',
+                'Codex CLI emitted an invalid event',
+                'Codex CLI turn failed',
+                'Codex CLI reported an error',
+                'Codex CLI stream has no completed agent message',
+                'Codex CLI turn did not complete cleanly',
+                'Codex CLI final response was not valid JSON',
+                'Codex CLI final response does not match the agent result schema',
+                'Codex CLI final response is missing text',
+                'Workbench results must have an empty files envelope',
+                'Role result text must contain one JSON object',
+            }
+            if isinstance(exc, ValueError) and str(exc) in known_errors:
+                failure['error'] = str(exc)
             if isinstance(exc, ValidationError):
                 allowed = ROLE_PAYLOADS[request.role].model_fields
                 failure['validation_errors'] = [

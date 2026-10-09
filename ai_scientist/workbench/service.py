@@ -55,6 +55,10 @@ class PlanningService:
                 raise ValueError("Selected context is too large for the Windows CLI argument limit")
             _, payload = await self.worker.run(request)
             body = payload.model_dump(exclude_none=True)
+            # Keep the validated proposal candidate for diagnosing a rejected
+            # citation without exposing raw CLI events or stderr in the UI.
+            (workdir / 'proposal-result.json').write_text(
+                json.dumps(body, ensure_ascii=False, indent=2), encoding='utf-8')
             if not payload.needs_clarification:
                 mode, _ = snapshot_settings(context['snapshot'])
                 if mode == 'etc':
@@ -82,6 +86,10 @@ class PlanningService:
             elif isinstance(exc, ValidationError):
                 fields = [".".join(str(part) for part in item['loc']) or '$' for item in exc.errors(include_input=False)[:5]]
                 error = "Codex trả payload không đúng schema tại: " + ", ".join(fields) + ". Chưa lưu proposal; thử lại rõ ràng."
+            elif isinstance(exc, ValueError) and str(exc) == 'Planner cited a source outside the selected context':
+                error = ('Codex đưa đường dẫn hoặc ID ngoài Library đã chọn vào data_refs. '
+                         'Code, journal và artifact của cha thuộc baseline riêng; '
+                         'data_refs chỉ được chứa ID nguồn đã chọn. Chưa lưu proposal.')
             await asyncio.to_thread(self.store.plan_failed, project_id, idea_id, error)
 
     async def answer(self, project_id, idea_id, proposal_id, version, text):
