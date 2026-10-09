@@ -17,6 +17,18 @@ export default function SourceDetails({projectId,resource,busy,deletionBlocked,o
     {!!(resource.urls?.length || resource.url) && <div className="stack">{(resource.urls?.length ? resource.urls : [resource.url!]).map(url=>
       <a key={url} href={url} target="_blank" rel="noreferrer">{url} ↗</a>)}</div>}
     {resource.attachment && <ImportedSource key={`${resource.id}:${resource.version}`} projectId={projectId} resource={resource}/>}
+    {resource.provenance && <details className="source-origin"><summary>Nguồn gốc từ Output</summary>
+      <p><a href={`/?project=${projectId}&run=${resource.provenance.run_id}`}>Run {resource.provenance.run_id.slice(0,8)} ↗</a>
+        {' · '}{resource.provenance.path || 'Nội dung Output'}</p>
+      <p className="muted">Copy lúc {new Date(resource.provenance.copied_at).toLocaleString('vi-VN')}.
+        {' '}Trạng thái run lúc copy: {resource.provenance.run_state};{' '}
+        {resource.provenance.stop_confirmed ? 'đã xác nhận Kaggle dừng' : 'chưa xác nhận Kaggle dừng'}.</p>
+      {resource.provenance.output_status!=='completed' && <p className="alert">Đây là bản copy từ Output chưa hoàn tất.</p>}
+      {!!resource.provenance.limitations.length && <ul>{resource.provenance.limitations.map((value,index)=><li key={index}>{value}</li>)}</ul>}
+      <code className="source-id">Proposal {resource.provenance.proposal_id} · v{resource.provenance.proposal_version}</code>
+      <code className="source-id">Context SHA256 {resource.provenance.context_sha256}</code>
+      <code className="source-id">Bản gốc {resource.provenance.bytes} bytes · SHA256 {resource.provenance.sha256}</code>
+    </details>}
     <details><summary>Xem nội dung và dấu kiểm tra</summary><pre>{resource.content || 'Chưa cung cấp nội dung nguồn. App chưa tải trang này.'}</pre><code className="source-id">SHA256 {resource.content_sha256}</code></details>
     </>}
     <div className="actions source-actions">

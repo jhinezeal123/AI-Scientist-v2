@@ -154,6 +154,8 @@ class LibraryFiles:
             if source.get('attachment') and source['attachment'].get('manifest_sha256') != attachment['manifest_sha256']:
                 raise ValueError('Pinned ingestion manifest hash mismatch')
             result['attachment'] = attachment
+            if metadata.get('provenance'):
+                result['provenance'] = metadata['provenance']
         return result
 
     def _metadata(self, source):

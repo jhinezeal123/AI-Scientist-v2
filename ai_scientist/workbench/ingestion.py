@@ -103,4 +103,13 @@ def source_summary(metadata):
                   'Text theo trang: pages/page-NNNN.md (số trang bắt đầu từ 1).']
     if metadata.get('text'):
         lines.append('Text đã trích: text.md')
+    origin = metadata.get('provenance')
+    if origin:
+        lines += [f"Bản sao từ Output: Run {origin['run_id']} · {origin.get('path') or 'nội dung Output'}",
+                  f"Proposal: {origin['proposal_id']} v{origin['proposal_version']}",
+                  f"Context SHA256: {origin['context_sha256']}",
+                  f"Trạng thái run khi copy: {origin['run_state']} · Output {origin['output_status']}",
+                  f"Đã xác nhận Kaggle dừng khi copy: {origin['stop_confirmed']}",
+                  f"Thời điểm copy: {origin['copied_at']}",
+                  *('Giới hạn từ Output: ' + value for value in origin.get('limitations', []))]
     return '\n\n'.join([*lines, *metadata['issues']])

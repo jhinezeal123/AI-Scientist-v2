@@ -78,6 +78,13 @@ class RetryInput(StrictModel):
     request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
+class OutputCopyInput(StrictModel):
+    kind: Literal['file', 'text']
+    title: str = Field(min_length=1, max_length=240)
+    sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    path: str | None = Field(default=None, min_length=1, max_length=2000)
+
+
 class VariantInput(StrictModel):
     request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     title: str = Field(min_length=1, max_length=80)
@@ -350,6 +357,10 @@ def library_router(store, workspace_root):
         if call(request.app.state.working.record, project_id, run_id):
             return call(request.app.state.working.records.logs, project_id, run_id, cursor, limit)
         return call(request.app.state.logs.delta, project_id, run_id, cursor, limit)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/output/library', status_code=201)
+    def copy_output(project_id: str, run_id: str, body: OutputCopyInput, request: Request):
+        return call(request.app.state.working.copy_output, project_id, run_id, **body.model_dump())
 
     @router.get('/projects/{project_id}/runs/{run_id}/log-window')
     def log_window(project_id: str, run_id: str, request: Request, offset: int = 0,

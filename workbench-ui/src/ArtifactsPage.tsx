@@ -1,8 +1,9 @@
 import {useEffect,useState} from 'react';
 import {api,Project,RunOutput} from './api';
 import ArtifactLinks from './ArtifactLinks';
+import OutputToLibrary from './OutputToLibrary';
 
-type SavedRun = {id:string;purpose:string;artifacts:string[];output?:RunOutput};
+type SavedRun = {id:string;purpose:string;artifacts:string[];output?:RunOutput;deleted_at:string|null};
 
 export default function ArtifactsPage({projectId,runId,outputOnly=false}:{projectId:string;runId:string;outputOnly?:boolean}) {
   const [project,setProject]=useState<Project|null>(null);
@@ -38,6 +39,8 @@ export default function ArtifactsPage({projectId,runId,outputOnly=false}:{projec
       </>}
       {!names.length ? <p className="empty">{outputOnly ? 'Run chưa có file Output đã thu. Kết quả dạng nội dung nằm ở chi tiết run.' : 'Run chưa có artifact đã lưu.'}</p>
         : <ArtifactLinks projectId={projectId} runId={runId} names={names} previews={outputOnly}/>}
+      {outputOnly && run.output && !run.deleted_at && <OutputToLibrary key={`${projectId}:${runId}`}
+        projectId={projectId} runId={runId} output={run.output}/>}
     </section>}
   </main></div>;
 }

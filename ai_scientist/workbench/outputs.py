@@ -1,9 +1,12 @@
 """Project-owned Etc bundles; execution and collection use the shared Working path."""
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 import json
+from pathlib import PurePosixPath
 
 from .modes import snapshot_settings
 from .named_paths import PATH_LOCK, checked_child, folder_title, filesystem_path
+from .store import StoreConflict
 
 
 def prepare_output(store, project_id, run_id, approved):
@@ -82,5 +85,65 @@ def output_detail(root, record, artifact_dir, state, artifacts):
         'directory': str(root) if artifact_dir.startswith('output/') else None,
         'status': 'completed' if state == 'COMPLETED' else 'partial' if state in {'FAILED', 'CANCELLED'} else 'pending',
         'summary': summary.get('summary', ''), 'limitations': summary.get('limitations', []),
+        'summary_sha256': hashlib.sha256(summary['summary'].encode('utf-8')).hexdigest()
+            if summary.get('summary', '').strip() else None,
         'files': files, 'stop_confirmed': bool(record and record['stop_confirmed']),
     }
+
+
+def copy_to_library(store, project_id, run_id, record, *, kind, title, sha256, path=None):
+    """Copy selected, verified bytes into the existing Library import pipeline."""
+    from .ingestion import MAX_FILE_BYTES
+    run = store.run(project_id, run_id)
+    approved = store.approved_snapshot(project_id, run_id)
+    if run['deleted_at'] or snapshot_settings(approved['snapshot'])[0] != 'etc' or record is None:
+        raise StoreConflict('Chọn Output của một Run Etc chưa bị xóa')
+    if not title.strip():
+        raise ValueError('Nhập tiêu đề nguồn Library')
+    summary = record['summary'] or {}
+    if kind == 'text':
+        if path is not None:
+            raise ValueError('Nội dung Output không có đường dẫn file')
+        text = summary.get('summary', '')
+        if not text.strip():
+            raise StoreConflict('Run chưa có nội dung Output để copy')
+        filename, data = 'output.txt', text.encode('utf-8')
+    elif kind == 'file':
+        name = PurePosixPath(path or '')
+        if (name.is_absolute() or len(name.parts) < 2 or name.parts[0] not in {'source', 'output'}
+                or name.as_posix() != path or any(part in {'.', '..'} or ':' in part or '\\' in part for part in name.parts)):
+            raise ValueError('Chọn đúng đường dẫn file Output đã thu')
+        item = next((item for item in (record['manifest'] or {}).get('files', []) if item['path'] == path), None)
+        if item is None or item['sha256'] != sha256:
+            raise StoreConflict('File đã thay đổi hoặc chưa được thu; tải lại Output rồi chọn lại')
+        if item['bytes'] > MAX_FILE_BYTES:
+            raise ValueError('File vượt giới hạn nhập 25 MB hiện tại của Library')
+        root = store.run_root(project_id, run_id, store.workspace)
+        target = root.joinpath(*name.parts)
+        if (not target.resolve().is_relative_to(root.resolve()) or any(
+                part.is_symlink() or part.is_junction() for part in (target, *target.parents)
+                if part.is_relative_to(root))):
+            raise ValueError('Linked Output file refused')
+        if not target.is_file() or target.stat().st_size != item['bytes']:
+            raise StoreConflict('File Output không còn khớp manifest đã thu')
+        with target.open('rb') as stream:
+            data = stream.read(MAX_FILE_BYTES + 1)
+        if len(data) != item['bytes']:
+            raise StoreConflict('File Output thay đổi trong khi đọc; tải lại rồi chọn lại')
+        filename = name.name
+    else:
+        raise ValueError('Chọn file hoặc nội dung Output')
+    actual_sha256 = hashlib.sha256(data).hexdigest()
+    if actual_sha256 != sha256:
+        raise StoreConflict('Output đã thay đổi; tải lại và chọn kết quả hiện hành trước khi copy')
+    provenance = {
+        'kind': 'etc_output', 'project_id': project_id, 'run_id': run_id,
+        'proposal_id': run['proposal_id'], 'proposal_version': run['proposal_version'],
+        'context_sha256': approved['context_sha256'], 'selection': kind, 'path': path,
+        'sha256': actual_sha256, 'bytes': len(data),
+        'copied_at': datetime.now(timezone.utc).isoformat(), 'run_state': run['state'],
+        'output_status': 'completed' if run['state'] == 'COMPLETED'
+            else 'partial' if run['state'] in {'FAILED', 'CANCELLED'} else 'pending',
+        'stop_confirmed': record['stop_confirmed'], 'limitations': summary.get('limitations', []),
+    }
+    return store.import_file(project_id, title, filename, data, provenance=provenance)

@@ -158,8 +158,8 @@ bố đã tích hợp chỉ vì file/module còn trong fork.
 | Task | Feature | Bàn giao cho user QA | Trạng thái |
 | --- | --- | --- | --- |
 | **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Đã bàn giao (`28d7342`); user cho phép tiếp tục M2-02 |
-| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai (`f9b13d7`); browser QA hai pipeline đạt, chờ user nghiệm thu |
-| **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Chưa bắt đầu |
+| **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai (`f9b13d7`); browser QA hai pipeline đạt, user duyệt và cho tiếp tục M2-03 |
+| **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Đã triển khai; chờ user QA |
 | **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Chưa bắt đầu |
 
 Thứ tự M2-01 → M2-02 → M2-03 → M2-04. Mỗi task có code/hướng dẫn và commit
@@ -345,6 +345,65 @@ giữ nguyên sau restart.
 
 **Phạm vi:** thao tác chọn kết quả/đặt tiêu đề, copy server-side, Library
 metadata/ingestion/provenance. Tận dụng import/version/naming hiện có.
+
+**Bàn giao M2-03 (2026-10-09):** mục Output trong Run Etc và trang File Output
+có nút **Thêm vào Library**. Chọn một file đã thu hoặc **Nội dung Output**, nhập
+tiêu đề rồi bấm **Copy vào Library**. Nguồn mới ở Library của chính project;
+link **Mở Library** chuyển đến danh sách nguồn. Không tự chọn nguồn vào idea.
+
+Backend dùng lại `ProjectStore.import_file`, `LibraryFiles`, ingestion và cách
+đặt tên thư mục/version hiện có. File được copy bytes gốc; nội dung text thành
+`output.txt` UTF-8. Library giữ `original.<định dạng>`, `source.md`,
+`ingestion.json` và text/pages nếu trích được. Tên trùng tạo thư mục có hậu tố
+theo Library, không ghi đè nguồn đã có. Bản copy độc lập với bundle Output;
+thay file Library về sau vẫn qua cơ chế tăng version hiện có.
+
+Metadata ghi run/proposal/version/context, loại kết quả, đường dẫn file,
+bytes/SHA256, thời điểm copy, trạng thái/giới hạn của Output và bằng chứng Stop
+tại thời điểm đó. Chi tiết nguồn có mục **Nguồn gốc từ Output**. File/nội dung
+được ghim hash lúc chọn; nếu đổi trước khi copy, backend từ chối và yêu cầu chọn
+lại. Chỉ đọc file thuộc manifest của Run Etc trong project, không đọc đường dẫn
+tùy ý hoặc file qua symlink/junction. Khóa đường dẫn hiện có phối hợp thao tác
+copy với đổi tên/xóa project/nguồn.
+
+Có thể copy phần kết quả đã thu của run chưa hoàn tất; nguồn ghi rõ trạng thái
+đó và không biến run thành COMPLETED. Copy không gọi Codex/Kaggle, không chạy
+code, không thêm approval, không thay mode/proposal/run hoặc nguồn đang chọn.
+Giới hạn nhập file 25 MB và trích text 2 MB vẫn là intake Library hiện có;
+file lớn hơn chưa được nghiệm thu trong task này. Không dùng URL/reference thay
+cho bản copy khi thao tác thành công.
+
+**Cách QA không cần mở phiên Kaggle mới:**
+
+1. Refresh `http://127.0.0.1:8011/`, chọn project **QA M2-02 Etc Output** và
+   Run `4a801ad1`. Ở Output bấm **Thêm vào Library**, chọn `output/sales.csv`,
+   đặt tiêu đề “Doanh thu giả — 100 dòng” rồi copy. **Mở Library**, chọn card
+   nguồn mới: tên/thư mục đúng, bản gốc CSV tải được; text đã trích đủ 100 dòng
+   dữ liệu. SHA256 bản gốc phải khớp SHA256 trong Nguồn gốc từ Output.
+2. Quay lại Run, mở **các file Output**, dùng nút copy ở trang này với
+   `output/summary.json`. Kiểm tra file gốc JSON vẫn có `row_count=100`,
+   `total_revenue=28931.41`; run/output gốc không đổi.
+3. Mở Run `3b630d65`, copy **Nội dung Output** với tiêu đề “Kết quả đếm nguồn”.
+   Nguồn Library có bản gốc `output.txt` và text đã trích, đúng nội dung Output
+   nói về 9 dòng/92 từ/553 ký tự. Nội dung không cần có file trên Kaggle để copy.
+4. Copy CSV lần nữa với cùng tiêu đề: Library tạo tên có hậu tố `(2)`; nguồn
+   thứ nhất và các phiên bản không bị ghi đè. Có thể xóa nguồn QA thừa bằng
+   nút xóa nguồn hiện có, kiểm tra CSV Output gốc vẫn mở được.
+5. Sang Idea, lưu draft Etc có đầu ra rồi chọn nguồn vừa copy, bấm xem context:
+   có đường dẫn Library/version/hash, không pump nội dung CSV vào context.
+   Làm tương tự với draft Training/Research trong cùng project. Không cần bấm
+   lập proposal hoặc Working để kiểm tra thao tác chọn/preview này.
+6. Refresh/backend restart rồi mở lại Library: provenance và bản gốc vẫn có.
+   Khi cần thử xóa run, chỉ dùng run QA không cần thiết: bản copy Library vẫn
+   mở được. Xóa run hiện tại là ẩn/khôi phục theo cơ chế đã có; bản copy không
+   đọc lại bundle gốc để mở/tải hay đưa cho agent.
+
+Nhánh binary/PDF, Output partial, file/hash đổi và file vượt intake chưa được
+QA qua browser ở lượt triển khai này. Build frontend, compile Python và review
+code được thực hiện trước bàn giao; các checkbox dưới đây dành cho user QA.
+Backend đã mở lại ở port 8011, health OK và không có job/Working chưa dừng.
+Body/snapshot/hash của cả 15 proposal trong 7 project giữ nguyên trước/sau
+khởi động. Chưa thực hiện thao tác copy thật trong lượt triển khai M2-03.
 
 **User QA:**
 

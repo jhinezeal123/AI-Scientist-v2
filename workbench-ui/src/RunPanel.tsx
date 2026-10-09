@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useState} from 'react';
-import {api, History, Idea, Variant, Working, RunMode, RunOutput, modeLabel} from './api';
+import {api, History, Idea, Variant, Working, RunMode, RunOutput, Resource, modeLabel} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 import ModeFields from './ModeFields';
+import OutputToLibrary from './OutputToLibrary';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   mode:RunMode;mode_legacy:boolean;desired_output:string;
@@ -19,11 +20,12 @@ type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:str
 
 const newRequestId=()=>crypto.randomUUID().replaceAll('-','');
 
-export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, defaultMode, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore, onCreateVariant}: {
+export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy, defaultMode, onWorking, onStop, onReconcile, onRetry, onDelete, onRestore, onCreateVariant, onOutputCopied}: {
   defaultMode:RunMode;
   projectId:string;selectedRunId:string;onSelect:(id:string)=>void;runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,stageIterations:number[]|null)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;
   onRetry:(id:string)=>Promise<string|undefined>;onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>;
+  onOutputCopied:(resource:Resource)=>void;
   onCreateVariant:(id:string,requestId:string,title:string,purpose:string,changeSummary:string,mode:RunMode,desiredOutput:string)=>Promise<Idea|undefined>}) {
   const [showDeleted,setShowDeleted]=useState(false);
   const visible=runs.filter(run=>Boolean(run.deleted_at)===showDeleted);
@@ -191,6 +193,8 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         {!!run.output.limitations.length && <><h4>Điều còn thiếu / giới hạn</h4><ul>{run.output.limitations.map((value,index)=><li key={index}>{value}</li>)}</ul></>}
         {!!run.output.files.length && <a href={`/?page=artifacts&view=output&project=${projectId}&run=${run.id}`} target="_blank" rel="noreferrer">
           Mở các file Output · {run.output.files.length} file ↗</a>}
+        {!run.deleted_at && <OutputToLibrary key={`${projectId}:${run.id}`} projectId={projectId} runId={run.id}
+          output={run.output} onCopied={onOutputCopied}/>}
       </div>}
       {run.mode!=='etc' && run.report_path === 'report.md' && <><h3>Report</h3><a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/report.md`} target="_blank" rel="noreferrer">Mở report ↗</a>
         {run.report_preview && <pre className="report-preview">{run.report_preview}</pre>}</>}

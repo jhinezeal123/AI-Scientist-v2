@@ -41,6 +41,7 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 .run-detail>h3{margin-top:28px}
 .artifacts-page-link{font:inherit}.artifacts-page main{margin:0 auto;max-width:1000px;padding:0 24px 32px}
 .output-file{display:grid;gap:10px;padding:14px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.output-file .actions{flex-wrap:wrap;gap:18px}
+.output-copy{margin-top:20px}.output-copy .actions{flex-wrap:wrap}.output-copy .alert{margin-top:14px}.source-origin{border-left:2px solid var(--line);padding-left:14px}.source-origin li{font-size:13px;line-height:1.7}
 .artifacts-page header{flex-wrap:wrap}.artifacts-page .stack a{padding:8px 0;border-bottom:1px solid var(--line)}
 .run-detail .live-log>summary{font-size:17px;font-weight:650}
 .log-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:14px 0 10px}

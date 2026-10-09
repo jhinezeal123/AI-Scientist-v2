@@ -1,10 +1,14 @@
 export type Project = {id: string; name: string; created_at: string; directory_name:string;library_path:string};
 export type RunMode = 'training_research'|'etc';
 export const modeLabel=(mode?:RunMode,legacy=false)=>legacy || !mode ? 'Phiên bản cũ' : mode==='etc' ? 'Etc' : 'Training/Research';
+export type OutputOrigin = {kind:'etc_output';project_id:string;run_id:string;proposal_id:string;proposal_version:number;
+  context_sha256:string;selection:'file'|'text';path:string|null;sha256:string;bytes:number;copied_at:string;
+  run_state:string;output_status:'completed'|'partial'|'pending';stop_confirmed:boolean;limitations:string[]};
 export type Resource = {id: string; kind: 'text'|'url'|'dataset'|'pdf'|'file'; title: string; url: string|null;
   content: string; status: string; version: number; content_sha256: string;
   file_path?:string;file_sha256?:string;file_bytes?:number;
   urls?:string[];deletion_pending?:boolean;deletion_error?:string|null;
+  provenance?:OutputOrigin;
   attachment?:{filename:string;original_file_path:string;original_sha256:string;original_bytes:number;
     manifest_file_path:string;manifest_sha256:string;page_count:number|null;processed_pages:number;text_pages:number;issues:string[]}};
 export type PlanBody = {needs_clarification: boolean; questions: string[]; paraphrase: string;
@@ -23,7 +27,7 @@ export type Idea = {id: string; title: string; text: string; state: string; erro
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
 export type Working = {phase:string;accelerator:string;ttl_seconds:number;started_at:string;agent_called:number;
   stop_confirmed:boolean;notebook_ref?:string;summary?:{succeeded:boolean;summary:string;limitations:string[];output_files:string[]}|null};
-export type RunOutput = {directory:string|null;status:'completed'|'partial'|'pending';summary:string;limitations:string[];
+export type RunOutput = {directory:string|null;status:'completed'|'partial'|'pending';summary:string;summary_sha256:string|null;limitations:string[];
   stop_confirmed:boolean;files:{path:string;bytes:number;sha256:string}[]};
 export type Context = {context_sha256: string; snapshot: {project_id: string;
   idea: {id: string; text: string;mode?:RunMode;desired_output?:string}; resources: Omit<Resource,'content'>[];variant?:Variant}};

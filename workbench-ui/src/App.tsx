@@ -18,7 +18,8 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState(initialPage.get('project') || lastProject());
   const [projectName, setProjectName] = useState('');
-  const [tab, setTab] = useState<ProjectSession['tab']>(()=>initialPage.has('run') ? 'Run' : readProjectSession(projectId).tab);
+  const [tab, setTab] = useState<ProjectSession['tab']>(()=>initialPage.get('view')==='library' ? 'Library'
+    : initialPage.has('run') ? 'Run' : readProjectSession(projectId).tab);
   const [resources, setResources] = useState<Resource[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [history, setHistory] = useState<History>({proposals: [], runs: []});
@@ -64,7 +65,8 @@ export default function App() {
   useEffect(() => {
     rememberProject(projectId);
     const saved=readProjectSession(projectId);
-    if (firstRestore.current && initialPage.has('run')) {
+    if (firstRestore.current && initialPage.get('view')==='library')saved.tab='Library';
+    else if (firstRestore.current && initialPage.has('run')) {
       saved.tab='Run';saved.runId=initialPage.get('run') || '';
     }
     firstRestore.current=false;
@@ -83,6 +85,7 @@ export default function App() {
     else url.searchParams.delete('project');
     if (projectId && tab==='Run' && runId)url.searchParams.set('run',runId);
     else url.searchParams.delete('run');
+    if (url.searchParams.get('view')==='library')url.searchParams.delete('view');
     if (url.href!==window.location.href)window.history.replaceState(null,'',url);
   },[sessionProject,projectId,tab,ideaId,selected,runId,mode]);
 
@@ -343,6 +346,7 @@ export default function App() {
         });}}/></div>}
         {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning || implementing}
           defaultMode={mode}
+          onOutputCopied={()=>setRevision(n=>n+1)}
           onCreateVariant={createVariant}
           onDelete={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRevision(n=>n+1);setNotice('Đã xóa run khỏi danh sách. Artifacts được giữ để khôi phục.');

@@ -521,6 +521,13 @@ class WorkingService:
                        output_available=bool(detail.get('output', {}).get('summary') or detail.get('output', {}).get('files')))
         return history
 
+    def copy_output(self, project_id, run_id, **selection):
+        from .named_paths import PATH_LOCK
+        from .outputs import copy_to_library
+        # Keep project/source deletion and folder renames out of the copy/import.
+        with PATH_LOCK:
+            return copy_to_library(self.store, project_id, run_id, self.record(project_id, run_id), **selection)
+
     async def retry(self, project_id, parent_run_id, request_id):
         self.store.run(project_id, parent_run_id)
         record = self.record(project_id, parent_run_id)

@@ -417,10 +417,13 @@ class ProjectStore:
                 connection.execute('DELETE FROM resources WHERE id=?', (resource_id,))
             return {'id':resource_id, 'deleted':True, 'removed_files':plan['files'], 'freed_bytes':plan['bytes']}
 
-    def import_file(self, project_id, title, filename, data, resource_id=None, expected_version=None):
+    def import_file(self, project_id, title, filename, data, resource_id=None, expected_version=None, *, provenance=None):
         from .ingestion import ingest, source_summary
         self.project(project_id)
         kind, metadata, files = ingest(filename, data)
+        if provenance is not None:
+            metadata['provenance'] = provenance
+            files['ingestion.json'] = canonical(metadata).encode('utf-8')
         with PATH_LOCK:
             published = None
             library = self.library(project_id)
