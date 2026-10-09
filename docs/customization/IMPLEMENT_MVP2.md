@@ -8,6 +8,25 @@ mỗi node là một run/phiên SSH riêng, draft/improve do user chọn, tự s
 run; summary/report/plots/PDF/review là checkbox. Nội dung bốn stage bên dưới
 ghi lại kế hoạch và lần triển khai M2-04 trước thay đổi này.
 
+## Trạng thái đóng MVP2 — 2026-10-09
+
+Thiết kế đã nghiệm thu là [PROJECT_RUN_TREE.md](PROJECT_RUN_TREE.md):
+
+- Một cây chung cho project; mỗi node một run và một phiên SSH riêng.
+- Proposal tạo một draft; user chọn Improve hoặc Etc để tạo run con.
+  Agent tự sửa lỗi trong cùng run, không tự tạo debug node/bốn stage.
+- Training/Research dùng Node/Journal và các module Summary, journal2report,
+  plotting, writeup/compiler, review của repo gốc theo checkbox đã duyệt.
+- Etc thực thi trực tiếp, bắt buộc mô tả đầu ra, lưu Output và copy kết quả
+  thành nguồn Library độc lập. Hai mode dùng chung Library.
+- Run con nhận code và memory_journal đã ghim; artifact cha cấp qua link.
+  Chỉ xóa node lá đã dừng, xóa file thật trên ổ đĩa.
+
+Các mô tả bốn stage/AgentManager và GUI card trong các mục dưới đây là lịch sử
+kế hoạch M2-04 trước khi user thay thiết kế, không phải hành vi run mới.
+Không sửa scope/approval của các run lịch sử. Phạm vi QA và các nhánh chưa thử
+được ghi rõ trong release note và báo cáo project run tree.
+
 ## 1. Yêu cầu đã chốt
 
 Một project có hai mode dùng chung Library:
@@ -28,7 +47,9 @@ không đổi mode của run đang chạy hoặc lịch sử và không làm m�
 Task chia theo feature; **user tự QA/demo sau mỗi task**. Agent bàn giao code,
 hướng dẫn thao tác và checklist, chờ user duyệt trước khi làm task tiếp theo.
 M2-01/M2-02/M2-03 đã được user duyệt. M2-02 có hai pipeline browser QA thật.
-M2-04 đã triển khai và chờ user QA; luồng MVP2 trọn vẹn chưa nghiệm thu.
+M2-04 và thiết kế project run tree thay thế đã được QA bằng browser, Codex CLI
+và Kaggle SSH thật; user nghiệm thu và cho đóng MVP2 ngày 2026-10-09.
+Bản chốt: [MVP2_RELEASE.md](MVP2_RELEASE.md).
 
 ## 2. So sánh hành vi
 
@@ -165,7 +186,7 @@ bố đã tích hợp chỉ vì file/module còn trong fork.
 | **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Đã bàn giao (`28d7342`); user cho phép tiếp tục M2-02 |
 | **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai (`f9b13d7`); browser QA hai pipeline đạt, user duyệt và cho tiếp tục M2-03 |
 | **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Đã triển khai (`dca41a4`); user duyệt và cho tiếp tục M2-04 |
-| **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Đã triển khai; chờ user QA |
+| **M2-04** | Training/Research dùng lại repo gốc | Theo thiết kế project run tree thay thế: mỗi node một run; outputs tùy chọn dùng module gốc | Đã nghiệm thu; feature `95026aa`, live QA/fixes `70bb6b5`; user duyệt đóng MVP2 |
 
 Thứ tự M2-01 → M2-02 → M2-03 → M2-04. Mỗi task có code/hướng dẫn và commit
 riêng; user QA rồi duyệt task tiếp. Refactor cấu trúc cần thiết giữ hành vi,
