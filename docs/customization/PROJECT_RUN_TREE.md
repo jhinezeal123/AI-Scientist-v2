@@ -99,3 +99,141 @@ Screenshots (local, ignored QA artifacts):
 
 - `.workbench/acceptance/project-tree-2026-10-09/browser-tree.jpg`
 - `.workbench/acceptance/project-tree-2026-10-09/browser-scope.jpg`
+
+## Live Codex / Kaggle QA — 2026-10-09
+
+The user authorized actual Codex CLI calls and Kaggle SSH sessions. Browser-use
+created proposals and started CPU runs in `QA Project Tree — live 09-10 (2)`
+(`ae58ccc219304c68913d35400fab62f4`). The normal backend configuration was not
+edited; a separate QA config allows 25 minutes Working with a 30-minute CPU TTL.
+
+Verified live workflows:
+
+- Draft `faffeb33caff4d6c839fe39db3d4cd49` generated real synthetic data,
+  source, 31 loss points, 96 predictions and metrics. A read-only local
+  recalculation confirmed the 64/16/16 split and all three MSEs. Its workload
+  succeeded, but journal serialization failed before scientific finishing.
+- Improve `e287a095b04b4a4fa49814084947e26b` read pinned parent code and
+  memory_journal and lazily fetched `output/metrics.json`. SHA256 matched the
+  approved reference, and all current-minus-parent MSE differences were zero.
+  The new SSH session was distinct from its parent. A missing local dependency
+  stopped research finishing, while source and outputs remained available.
+- Improve `c3ea17bb7a314f429e24467a63b45723` completed execution, original
+  Summary and original journal2report. Plots, PDF, Review and seed evaluation
+  were `not_requested`. The saved summary/report use the measured MSEs and
+  explicitly limit claims to a small, single-seed reproducibility check.
+- Each of the three runs has its own `working-stop.json` confirming Kaggle
+  status `complete` and `stopped: true`; failures did not leave sessions active.
+- Execution command records show real failed shell/check commands followed by
+  successful commands in the same run, without creating a debug child.
+- A backend process restart retained the three-node lineage and the approved
+  unstarted node; no old node was automatically replayed. This verifies idle
+  restart persistence, not recovery from an abrupt interruption during work.
+- In the narrow browser viewport, all three SVG node rectangles fit inside
+  the tree after reload, without pressing Fit. Direct node selection worked.
+
+Live QA exposed and fixed:
+
+1. New-project SQLite migration used tuple rows where it needed named columns:
+   new connections now use the same `sqlite3.Row` factory as existing projects.
+2. Windows extended paths (`\\?\D:\...`) disagreed with upstream `Node.to_dict`
+   when calculating a relative experiment path. Normalize the display path at
+   the Workbench-to-upstream Node boundary, leaving filesystem long-path access.
+3. The backend environment lacked upstream data-preview and PDF/review import
+   dependencies. Added them to runtime requirements and the resolved lock;
+   all finishing-module imports and `pip check` passed after installation.
+4. Late backend errors could leave Training/Research memory summary success
+   true despite overall failure. The error path now marks success false in both
+   modes, retaining produced files and the original agent explanation.
+5. The tree fitted only once, so a responsive size change could clip nodes.
+   Refit on viewport/tree geometry changes, preserving user pan/zoom during
+   ordinary status polling. The production frontend build passed.
+
+Additional live evidence:
+
+- Improve `77183b3964cf44c9960586f43ff8791c` completed execution and original
+  plot aggregation with Summary/Report off. Its two PNGs show the 31-step loss
+  and the 16 held-out predictions, with MSE matching metrics. Both were viewed.
+  Direct journal evidence supplied the upstream interchange file without a
+  Summary or Report LLM call. The three selected tags remained informational;
+  exactly one child node and one new CPU session were created.
+- PDF compilation in that run exposed missing `pdflatex` and `bibtex` in the
+  Kaggle image. The run reported failed PDF/Review, retained the LaTeX draft,
+  compiler diagnostics, figures and measured outputs, and stopped Kaggle.
+  Backend now provisions the compiler/template packages in the same terminal
+  only when PDF is selected, before invoking the original writeup/compiler.
+- Shared Working instructions now recommend file-based scripts for nested
+  quoting and Python timing instead of assuming `/usr/bin/time` exists.
+- Responsive QA at the default narrow viewport and at 1280x900 confirmed all
+  node rectangles remained within the SVG frame; the viewport override was reset.
+- One PDF/Review planning attempt exceeded the existing 300-second CLI deadline
+  before producing a proposal. No run/session was created. Browser "Continue"
+  initiated a separate planning attempt with the saved idea/scope; that attempt
+  succeeded as proposal `0c5c150a973d45d89ddb9db69fbd1403`. There is insufficient
+  diagnostic evidence to attribute the first timeout to a particular provider.
+
+- Improve `918083a4b85a4dc3bf95e47e527fe56b` completed PDF and Review with
+  Summary, Report and Plots off. TeX provisioning succeeded in its own SSH
+  session. Original writeup/reflection/compiler produced a two-page, 82,332-byte
+  PDF (SHA256 `76e9a5798df4dbfa587ffe1fb1da6ffb949ce7ad7119b470752793448b2c1494`).
+  Both pages of the final revision were rendered and visually inspected: readable,
+  no clipping or overlap, truthful parent MSEs, no new-training/improvement claim.
+  Original Review returned valid structured feedback and `Reject`, appropriately
+  identifying the synthetic artifact audit's limited research contribution.
+  The run is COMPLETED and its stop receipt confirms Kaggle stopped.
+- Etc child `3f100a63170e45f7812a307d8f2b693e` of `c3ea17bb...` completed
+  through a distinct SSH session without Research stages. It fetched the parent
+  metrics on demand and verified the metrics/code/journal SHA256s. Its three
+  requested source/output files total 10,847 bytes; no training occurred.
+- Browser copied its `output/metrics-note.md` into Library as
+  `QA metrics note — bản copy Etc` (`5bfadacebb0343e283a74b58f4a47133`).
+  The 754-byte original/text copies match SHA256
+  `e7b99dd49611ae77473e8b1fb1e06eb661ea2682966876454ce6de183cfdf6b4`.
+  Library `source.md` additionally wraps the source title and provenance.
+- With action-time user confirmation, browser deleted the populated Etc leaf.
+  The tree count fell from six to five. Read-only disk inspection confirmed
+  both its output directory and `runs/3f100a63...` directory are absent.
+  The Library copy retained its exact hash and remained available in the GUI.
+  The parent with an existing child still had its Delete action disabled.
+
+- Training/Research `46be710474d244fb83973d26611aff5a` completed a
+  standard-library foreground wait with all five finishing options off. It
+  created no Research pipeline or generated Summary/Report/Plots/PDF/Review;
+  journal and memory still saved and Kaggle stopped. This was not a successful
+  cancellation test: `QA_STOP_READY` appeared together with completion after
+  180 seconds because the donor transport retained a fixed 128-byte tail.
+- Fixed that transport in the donor repository's
+  `interface_ai_scientist/terminal_remote.py`: retain only bytes that could be
+  a partial command-result marker, emitting other progress immediately.
+  Syntax and every split boundary of a short-log/result-marker sequence passed.
+  The fix is used when a new persistent terminal starts; existing terminals
+  are not restarted or replayed.
+
+- Follow-up `79b735bb15f0484d9eaea281e3901b1b` reused the pinned wait.py
+  unchanged in another CPU session. Browser observed the standalone
+  `QA_STOP_READY` line while no standalone `QA_WAIT_COMPLETED` line existed,
+  then clicked Stop. The run transitioned to CANCELLED; saved memory has
+  `succeeded: false`, `stop_confirmed: true`, and its stop receipt confirms
+  Kaggle status `complete`. Final log ends with RuntimeCancelled and confirmed
+  shutdown, with no script completion line or newly collected done.json.
+  Cancellation does not claim uncollected remote files were absent.
+- Restored the backend to the normal config on port 8011 after all QA sessions
+  stopped. Health returned `ok`. Browser reload retained the seven remaining
+  nodes and their states; no active QA run or automatic replay was observed.
+  Runtime's last CLI job remains `failed` because it was cancelled, while the
+  backend itself is healthy. The separate 25-minute QA config is retained as
+  evidence, not used by the restarted backend.
+
+Coverage limits: these actual sessions used CPU and the ICBINB PDF template.
+GPU/TPU execution, ICML writeup, every checkbox combination, and abrupt process
+termination during live work were not exercised by this session. This verifies
+normal cancellation and idle restart, not arbitrary crash recovery. Three
+failed historical QA nodes remain visible to document the bugs, followed by
+successful verification nodes; failures were not silently relabelled.
+
+Additional screenshots under the ignored acceptance directory:
+
+- `live-tree-final.jpg` — final lineage and CANCELLED verification node.
+- `library-after-leaf-deletion.jpg` — independent copied source after deletion.
+- `pdf-review-page-1.png`, `pdf-review-page-2.png` — rendered final PDF.
+- `stop-confirmed.jpg` — cancellation workflow evidence.

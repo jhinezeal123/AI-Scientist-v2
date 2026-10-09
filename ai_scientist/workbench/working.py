@@ -325,8 +325,7 @@ class WorkingService:
                                                   'limitations': ['Chưa hoàn thành công việc đã duyệt.'], 'output_files': []})
             elif record:
                 summary = record['summary']
-                if is_etc:
-                    summary['succeeded'] = False
+                summary['succeeded'] = False
                 summary['limitations'].append(f'Backend chưa xác minh đủ kết quả ({type(exc).__name__}). Xem log Working.')
                 self.records.update(*key, summary=summary)
         finally:

@@ -2,6 +2,8 @@ Work on Kaggle through terminal.py only. This helper uses the existing SSH sessi
 
 exec takes a quoted Bash command and optional --timeout SECONDS. write takes a remote relative path and a local filename. read takes a remote relative path.
 
+For multi-line logic or nested quotes, write a local Python/Bash file, transfer it with terminal.py write, then exec a simple command to run that file. Avoid deeply nested python -c commands across the local shell and remote Bash. Measure durations with Python time.perf_counter; do not assume /usr/bin/time is installed.
+
 For a child run, code and memory_journal are pinned files under baseline/. Read baseline/manifest.json. Parent artifacts are titles and artifact:// links. Use terminal.py fetch "artifact://RUN_ID/path" to copy a needed file into baseline/artifacts/ in this session, then read it through terminal.py. Never reconnect to the parent's SSH session or inject all artifact contents into context.
 
 Bash cwd and exports persist across commands. Write implementation files under source/ and all requested results under output/ in the remote directory.

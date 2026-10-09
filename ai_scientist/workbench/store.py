@@ -284,6 +284,7 @@ class ProjectStore:
             (directory / 'output').mkdir()
             self._directories[project_id] = directory
             connection = sqlite3.connect(directory / 'project.sqlite')
+            connection.row_factory = sqlite3.Row
             try:
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.executescript(SCHEMA)

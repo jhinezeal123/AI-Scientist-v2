@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from .journal import Journal, Node, journal_snapshot
 from .models import ResearchPlan, SearchOptions, WorkingPayload
 from .run_graph import memory_document, write_run_json
+from .named_paths import display_path
 
 
 def save_node(root, approved, payload, commands, run_id):
@@ -22,7 +23,9 @@ def save_node(root, approved, payload, commands, run_id):
     node.is_buggy = not payload.succeeded
     node._term_out = [str(item.get('output', '')) for item in commands]
     node.exec_time = sum(item.get('elapsed_seconds', 0) or 0 for item in commands)
-    node.exp_results_dir = str(root / 'output')
+    # Upstream Node.to_dict compares this path with os.getcwd(). Windows'
+    # extended namespace must be removed at that serialization boundary.
+    node.exp_results_dir = display_path(root / 'output')
     journal = Journal()
     journal.append(node)
     write_run_json(root / 'journal.json', {**journal_snapshot(journal), 'run_id': run_id,

@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {History} from './api';
 
 type Run=History['runs'][number];
@@ -49,13 +49,20 @@ export default function ProjectRunTree({runs,selectedId,onSelect,large=false}:{r
   const svg=useRef<SVGSVGElement>(null);
   const [view,setView]=useState({x:20,y:20,k:1});
   const drag=useRef<{x:number;y:number;vx:number;vy:number;moved:boolean;node:string|null}|null>(null);
-  const fit=()=>{
+  const fit=useCallback(()=>{
     const box=svg.current?.getBoundingClientRect();if (!box)return;
     const k=Math.min(1.1,Math.max(.001,Math.min((box.width-30)/graph.width,(box.height-30)/graph.height)));
     setView({k,x:(box.width-graph.width*k)/2,y:(box.height-graph.height*k)/2});
-  };
-  const initialized=useRef(false);
-  useEffect(()=>{if (runs.length && !initialized.current){fit();initialized.current=true;}},[runs.length]);
+  },[graph.width,graph.height]);
+  useEffect(()=>{
+    const element=svg.current;if (!element)return;
+    // The sidebar and responsive grid may resize after the first data load.
+    // Refit on geometry changes, while ordinary status polling preserves pan/zoom.
+    fit();
+    const observer=new ResizeObserver(fit);
+    observer.observe(element);
+    return ()=>observer.disconnect();
+  },[fit]);
   useEffect(()=>{
     const element=svg.current;if (!element)return;
     const wheel=(event:WheelEvent)=>{

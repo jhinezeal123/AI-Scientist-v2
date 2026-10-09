@@ -24,3 +24,10 @@ igraph>=0.11,<2
 coolname
 shutup
 tiktoken
+# Original ParallelAgent data preview, imported by research finishing support.
+pandas>=2,<4
+genson>=1,<2
+# Upstream plotting, PDF writeup and review imports.
+Pillow
+PyMuPDF
+pymupdf4llm

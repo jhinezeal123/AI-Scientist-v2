@@ -295,6 +295,7 @@ class ResearchPipeline:
         from ai_scientist.llm import get_response_from_llm
         module = workshop if self.plan.writeup=='icbinb' else normal
         pages = 4 if self.plan.writeup=='icbinb' else 8
+        self.prepare_tex()
         template = Path(module.__file__).parent / ('blank_icbinb_latex' if pages==4 else 'blank_icml_latex')
         local = self.root / 'latex'
         shutil.copytree(template,local)
@@ -332,7 +333,38 @@ class ResearchPipeline:
         from pypdf import PdfReader
         if not PdfReader(pdf).pages:
             raise ValueError('PDF không có trang hợp lệ')
-        return ['research/paper.pdf','research/latex/template.tex','research/latex/compile.log']
+        return ['research/paper.pdf','research/latex/template.tex','research/latex/compile.log',
+                'research/tex-bootstrap.log']
+
+    def prepare_tex(self):
+        """Provision upstream templates' compiler only for an explicitly selected PDF."""
+        styles = ['cleveref.sty', 'subfigure.sty', 'times.sty', 'natbib.sty']
+        packages = ['texlive-latex-extra', 'texlive-fonts-recommended']
+        if self.plan.writeup == 'icml':
+            styles += ['algorithm.sty', 'algorithmic.sty']
+            packages.append('texlive-science')
+        checks = ['command -v pdflatex', 'command -v bibtex', 'command -v kpsewhich']
+        checks += ['kpsewhich ' + shlex.quote(style) for style in styles]
+        check = ' && '.join(checks)
+        result = self.remote_exec(check, 30)
+        diagnostics = [result.get('text', '')]
+        if result['returncode'] != 0:
+            self.owner.service.records.append_log(*self.owner.key,
+                'PDF: đang chuẩn bị compiler và packages TeX trong phiên Kaggle…\n', 'backend')
+            # Keep package inventory out of the live log. Installation remains
+            # foreground work in this same terminal, bounded by the run deadline.
+            command = ('command -v apt-get >/dev/null && '
+                'export DEBIAN_FRONTEND=noninteractive && '
+                'apt-get update -qq >/tmp/ai-scientist-tex-install.log 2>&1 && '
+                'apt-get install -y --no-install-recommends ' + shlex.join(packages) +
+                ' >>/tmp/ai-scientist-tex-install.log 2>&1; '
+                'tex_status=$?; if [ "$tex_status" -ne 0 ]; then '
+                'tail -n 20 /tmp/ai-scientist-tex-install.log; exit "$tex_status"; fi; ' + check)
+            result = self.remote_exec(command, 360)
+            diagnostics.append(result.get('text', ''))
+        (self.root / 'tex-bootstrap.log').write_text('\n'.join(diagnostics), encoding='utf-8')
+        if result['returncode'] != 0:
+            raise RuntimeError('Không chuẩn bị được TeX trong Kaggle; xem research/tex-bootstrap.log')
 
     def compile_draft(self, response, local):
         from ai_scientist.perform_icbinb_writeup import compile_latex
