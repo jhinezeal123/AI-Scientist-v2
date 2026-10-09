@@ -1,0 +1,6 @@
+mcp>=1.12,<2
+kagglesdk==0.1.37
+cryptography>=45,<51
+requests>=2.32,<3
+# Browser is loaded only when cookie recovery needs login.
+patchright>=1.50,<2

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "accounts": {
+    "my-account.txt": {
+      "alias": "my-account",
+      "username": "YOUR_KAGGLE_USERNAME",
+      "browser": "coccoc",
+      "token_file": "profiles/my-account/token.txt",
+      "profile_dir": "profiles/my-account",
+      "cookie_file": "profiles/my-account/web-session.json"
+    }
+  }
+}

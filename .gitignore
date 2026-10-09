@@ -177,6 +177,10 @@ templates/*/*.png
 results/
 # MVP 0 local config, SQLite state, run artifacts, and generated UI dependencies.
 .workbench/
+# Bundled Kaggle core: account secrets and transient session keys are local only.
+/kaggle mcp/profiles/
+/kaggle mcp/.runtime/
+/kaggle mcp/logs/
 workbench-ui/node_modules/
 workbench-ui/dist/
 workbench-ui/.vite/
