@@ -1,34 +1,25 @@
-"""One stdio MCP session for the app lifetime; no SDK or account credentials."""
+"""Backend-owned Kaggle proxy lifecycle and the retired response decoder."""
 from contextlib import asynccontextmanager
 import asyncio
+import importlib.util
 import json
-import os
-import sys
-
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from .ssh_terminal import DonorSession
 
 
 @asynccontextmanager
-async def connect_mcp(config):
-    # The MCP owns its proxy lifecycle and verifies its identity. The backend
-    # must not borrow or start a separate legacy service on port 80.
-    # MCP's default Windows environment omits PROGRAMDATA. Win32 OpenSSH needs
-    # it even for `ssh -V`; without it the donor's SSH exits 255 silently.
-    donor_env = {}
-    if sys.platform == 'win32' and os.environ.get('PROGRAMDATA'):
-        donor_env['PROGRAMDATA'] = os.environ['PROGRAMDATA']
-    if os.environ.get('AI_SCIENTIST_KAGGLE_PROXY_PORT'):
-        donor_env['AI_SCIENTIST_KAGGLE_PROXY_PORT'] = os.environ['AI_SCIENTIST_KAGGLE_PROXY_PORT']
-    params = StdioServerParameters(command=str(config.donor_python),
-                                  args=[str(config.donor_root / "mcp_server.py")],
-                                  cwd=str(config.donor_root), env=donor_env)
-    async with stdio_client(params) as (reader, writer):
-        async with ClientSession(reader, writer) as session:
-            async with asyncio.timeout(20):
-                await session.initialize()
-                tools = await session.list_tools()
-            yield session, [tool.name for tool in tools.tools]
+async def connect_kaggle(config):
+    # Load just the bundle's stdlib-only proxy manager, without modifying sys.path
+    # or importing its SDK/account modules into the backend process.
+    spec = importlib.util.spec_from_file_location('workbench_kaggle_proxy', config.donor_root / 'proxy_control.py')
+    manager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager)
+    proxy = await asyncio.to_thread(manager.ensure_proxy)
+    try:
+        yield DonorSession(config)
+    finally:
+        if proxy and proxy.poll() is None:
+            proxy.terminate()
+            await asyncio.to_thread(proxy.wait, 5)
 
 
 def decode_result(result):

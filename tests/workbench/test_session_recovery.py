@@ -12,19 +12,21 @@ from ai_scientist.workbench.app import create_app
 from ai_scientist.workbench.store import ProjectStore
 from ai_scientist.workbench.working_store import WorkingStore
 from test_planning import FakeRuntime, ready, request_type
-from test_working import Donor, MCP
+from test_working import Donor, Bootstrap
 
 
-def application(tmp_path, runtime, mcp, monkeypatch, donor=None):
+def application(tmp_path, runtime, bootstrap, monkeypatch, donor=None):
+    selected = donor or Donor()
+    selected.start = bootstrap.start
     @asynccontextmanager
     async def connection(config):
-        yield mcp, ['kaggle_ssh_start']
+        yield selected
 
     monkeypatch.setattr('ai_scientist.workbench.working.DonorSession', lambda config: donor or Donor())
     config = SimpleNamespace(workspace_root=tmp_path, shutdown_seconds=.1,
                              kaggle_username='verified-user', kaggle_account_alias='fixture-account')
     return create_app(config, bindings=SimpleNamespace(runtime=runtime, request_type=request_type),
-                      mcp_connection=connection)
+                      kaggle_connection=connection)
 
 
 def wait_until(operation, condition):
@@ -38,8 +40,8 @@ def wait_until(operation, condition):
 
 
 def test_discussion_answer_approval_artifacts_survive_full_restarts(tmp_path, monkeypatch):
-    runtime, mcp = FakeRuntime(), MCP()
-    app = application(tmp_path, runtime, mcp, monkeypatch)
+    runtime, bootstrap = FakeRuntime(), Bootstrap()
+    app = application(tmp_path, runtime, bootstrap, monkeypatch)
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': 'Paper'}).json()['id']
         other = client.post('/api/projects', json={'name': 'Competition'}).json()['id']
@@ -50,9 +52,9 @@ def test_discussion_answer_approval_artifacts_survive_full_restarts(tmp_path, mo
         assert client.post(base + '/plan', json=plan).status_code == 202
         proposal = wait_until(lambda: client.get(base + '/proposals').json(), bool)[0]
         assert proposal['state'] == 'NEEDS_CLARIFICATION'
-    assert len(runtime.calls) == 1 and not mcp.calls
+    assert len(runtime.calls) == 1 and not bootstrap.calls
 
-    app = application(tmp_path, runtime, mcp, monkeypatch)
+    app = application(tmp_path, runtime, bootstrap, monkeypatch)
     with TestClient(app) as client:
         assert len(runtime.calls) == 1
         assert client.get(base + '/proposals').json()[0] == proposal
@@ -64,7 +66,7 @@ def test_discussion_answer_approval_artifacts_survive_full_restarts(tmp_path, mo
     assert len(runtime.calls) == 1
 
     runtime.clarify = False
-    app = application(tmp_path, runtime, mcp, monkeypatch)
+    app = application(tmp_path, runtime, bootstrap, monkeypatch)
     with TestClient(app) as client:
         assert client.get(base + '/ideas').json()[0] == saved_idea
         assert client.get(f'/api/projects/{other}/ideas').json() == []
@@ -82,8 +84,8 @@ def test_discussion_answer_approval_artifacts_survive_full_restarts(tmp_path, mo
         (root / 'context.json').write_text(artifact, encoding='utf-8')
         pinned = client.get(base + '/proposals').json()[0]
 
-    with TestClient(application(tmp_path, runtime, mcp, monkeypatch)) as client:
-        assert len(runtime.calls) == 2 and not mcp.calls
+    with TestClient(application(tmp_path, runtime, bootstrap, monkeypatch)) as client:
+        assert len(runtime.calls) == 2 and not bootstrap.calls
         assert client.get(base + '/proposals').json()[0] == pinned
         repeated = client.post(base + f'/proposals/{current["id"]}/approve', json=approval)
         assert repeated.json()['id'] == run['id']
@@ -94,7 +96,7 @@ def test_discussion_answer_approval_artifacts_survive_full_restarts(tmp_path, mo
 
 
 def test_interrupted_planning_waits_for_an_explicit_request(tmp_path, monkeypatch):
-    runtime, mcp = FakeRuntime(), MCP()
+    runtime, bootstrap = FakeRuntime(), Bootstrap()
     runtime.clarify = False
     store = ProjectStore(tmp_path / '.workbench/projects')
     project = store.create_project('Interrupted')['id']
@@ -104,18 +106,18 @@ def test_interrupted_planning_waits_for_an_explicit_request(tmp_path, monkeypatc
     state = tmp_path / '.workbench/runtime-state.json'
     state.write_text(json.dumps({'status': 'running', 'request_id': 'old', 'role': 'mvp0_plan'}))
     base = f'/api/projects/{project}'
-    with TestClient(application(tmp_path, runtime, mcp, monkeypatch)) as client:
+    with TestClient(application(tmp_path, runtime, bootstrap, monkeypatch)) as client:
         recovered = client.get(base + '/ideas').json()[0]
         assert recovered['state'] == 'FAILED' and 'khởi động lại' in recovered['error']
         assert client.get('/health').json()['runtime_job'] == 'interrupted'
-        assert not runtime.calls and not mcp.calls
+        assert not runtime.calls and not bootstrap.calls
         assert client.post(base + '/plan', json={'idea_id': idea['id'], 'resource_ids': [source['id']]}).status_code == 202
         wait_until(lambda: client.get(base + '/proposals').json(), bool)
-        assert len(runtime.calls) == 1 and not mcp.calls
+        assert len(runtime.calls) == 1 and not bootstrap.calls
 
 
 def test_source_change_only_invalidates_dependent_pending_proposals(tmp_path, monkeypatch):
-    runtime, mcp = FakeRuntime(), MCP()
+    runtime, bootstrap = FakeRuntime(), Bootstrap()
     store = ProjectStore(tmp_path / '.workbench/projects')
     project = store.create_project('Source versions')['id']
     source = store.save_resource(project, {'title': 'Paper', 'content': 'Version one'})
@@ -139,7 +141,7 @@ def test_source_change_only_invalidates_dependent_pending_proposals(tmp_path, mo
     with store.connection(project) as connection:
         connection.execute("UPDATE ideas SET state='AWAITING_APPROVAL' WHERE id=?", (idea_ids[0],))
     base = f'/api/projects/{project}'
-    with TestClient(application(tmp_path, runtime, mcp, monkeypatch)) as client:
+    with TestClient(application(tmp_path, runtime, bootstrap, monkeypatch)) as client:
         proposals = {item['id']: item for item in client.get(base + '/proposals').json()}
         ideas = {item['id']: item for item in client.get(base + '/ideas').json()}
         assert ideas[idea_ids[0]]['state'] == 'NEEDS_REVIEW'
@@ -151,14 +153,14 @@ def test_source_change_only_invalidates_dependent_pending_proposals(tmp_path, mo
             'version': 1, 'context_sha256': proposals[proposal_ids[0]]['context_sha256']})
         assert rejected.status_code == 409
         assert 'cần xem lại' in rejected.json()['detail']
-        assert not runtime.calls and not mcp.calls
+        assert not runtime.calls and not bootstrap.calls
     assert store.approved_snapshot(project, run['id']) == frozen
 
 
 @pytest.mark.parametrize('phase', ['starting', 'working', 'awaiting_stop'])
 def test_working_restart_only_stops_the_existing_session(tmp_path, monkeypatch, phase):
-    runtime, mcp, donor = FakeRuntime(), MCP(), Donor()
-    app = application(tmp_path, runtime, mcp, monkeypatch, donor)
+    runtime, bootstrap, donor = FakeRuntime(), Bootstrap(), Donor()
+    app = application(tmp_path, runtime, bootstrap, monkeypatch, donor)
     store = app.state.store
     project = store.create_project('Working restart')['id']
     source = store.save_resource(project, {'title': 'Notes', 'content': 'Approved evidence'})
@@ -179,14 +181,15 @@ def test_working_restart_only_stops_the_existing_session(tmp_path, monkeypatch, 
                        manifest={'files': [], 'command_count': 2})
     records.append_log(project, run, 'Saved log before restart\n')
     path = f'/api/projects/{project}/runs/{run}'
-    with TestClient(application(tmp_path, runtime, mcp, monkeypatch, donor)) as client:
+    with TestClient(application(tmp_path, runtime, bootstrap, monkeypatch, donor)) as client:
         detail = wait_until(lambda: client.get(path).json(), lambda item: item['working']['stop_confirmed'])
         assert detail['state'] == ('COMPLETED' if phase == 'awaiting_stop' else 'FAILED')
-        assert 'Kaggle dừng' in detail['report_preview']
+        assert 'report_preview' not in detail
+        assert client.get(path + '/artifacts/working-stop.json').json()['stopped'] is True
         assert client.get(path + '/logs').json()['entries'][0]['text'] == 'Saved log before restart\n'
     calls = list(donor.calls)
-    with TestClient(application(tmp_path, runtime, mcp, monkeypatch, donor)) as client:
+    with TestClient(application(tmp_path, runtime, bootstrap, monkeypatch, donor)) as client:
         assert client.get(path).json()['state'] == detail['state']
-        assert client.get(path + '/artifacts/report.md').status_code == 200
-    assert not runtime.calls and not mcp.calls and not donor.opens
+        assert client.get(path + '/artifacts/working-stop.json').json()['stopped'] is True
+    assert not runtime.calls and not bootstrap.calls and not donor.opens
     assert donor.calls == calls and calls == [('stop', run), ('status', run)]

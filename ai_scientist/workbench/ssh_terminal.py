@@ -17,6 +17,18 @@ class TerminalDisconnected(RuntimeError):
     pass
 
 
+def kaggle_environment():
+    """Pass OS/browser/SSH necessities, without ambient provider credentials."""
+    allowed = {'ALLUSERSPROFILE', 'APPDATA', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)',
+        'COMPUTERNAME', 'COMSPEC', 'HOMEDRIVE', 'HOMEPATH', 'LOCALAPPDATA', 'PATH', 'PATHEXT',
+        'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PSMODULEPATH', 'SYSTEMDRIVE',
+        'SYSTEMROOT', 'TEMP', 'TMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR',
+        'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'LOGNAME', 'SHELL', 'TMPDIR', 'USER',
+        'AI_SCIENTIST_KAGGLE_PROXY_PORT'}
+    return {**{key: value for key, value in os.environ.items() if key.upper() in allowed},
+            'PYTHONUTF8': '1'}
+
+
 def transfer_library_file(terminal, name, data):
     """Respect the donor's 1 MB write limit while retaining exact original bytes."""
     if len(data) <= 1_000_000:
@@ -50,13 +62,43 @@ class DonorSession:
     def __init__(self, config):
         self.config = config
 
+    def _json(self, action, arguments=None, timeout=60):
+        # Native CLI shares the existing account/state boundary. No MCP transport.
+        command = [str(self.config.donor_python), '-m', 'interface_ai_scientist', action,
+                   '--account', self.config.kaggle_account_alias]
+        process = subprocess.Popen(command, cwd=self.config.donor_root, env=kaggle_environment(),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=os.name != 'nt', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        try:
+            output, _ = process.communicate(json.dumps(arguments).encode() if arguments is not None else None, timeout=timeout)
+            if process.returncode:
+                raise RuntimeError(f'Kaggle {action} failed; outcome must be reconciled')
+            value = json.loads(output)
+            if not isinstance(value, dict):
+                raise ValueError('Expected a Kaggle object response')
+            return value
+        finally:
+            if process.poll() is None:
+                from .agents.codex import HeadlessCliRuntime
+                HeadlessCliRuntime._kill_tree(process)
+                process.wait(timeout=5)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream:
+                    stream.close()
+
+    def start(self, arguments):
+        return self._json('start', arguments, timeout=270)
+
+    def account_idle(self):
+        return self._json('idle', timeout=60)
+
     def command(self, action, session_id):
         return [str(self.config.donor_python), '-m', 'interface_ai_scientist', action, '--session', session_id,
                 '--account', self.config.kaggle_account_alias]
 
     def call(self, action, session_id, timeout=40):
         result = subprocess.run(self.command(action, session_id), cwd=self.config.donor_root,
-                                capture_output=True, timeout=timeout)
+                                capture_output=True, timeout=timeout, env=kaggle_environment())
         if result.returncode:
             raise RuntimeError(f'Kaggle {action} failed; no new notebook was submitted')
         if action == 'status':
@@ -66,13 +108,14 @@ class DonorSession:
     def open(self, session_id, on_output):
         process = subprocess.Popen(self.command('bridge', session_id), cwd=self.config.donor_root,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   start_new_session=os.name != 'nt')
+                                   start_new_session=os.name != 'nt', env=kaggle_environment())
         return SshTerminal(process, on_output)
 
     def inspect(self, kernel_ref):
         command = [str(self.config.donor_python), '-m', 'interface_ai_scientist', 'inspect',
                    '--account', self.config.kaggle_account_alias, '--kernel-ref', kernel_ref]
-        result = subprocess.run(command, cwd=self.config.donor_root, capture_output=True, timeout=40)
+        result = subprocess.run(command, cwd=self.config.donor_root, capture_output=True, timeout=40,
+                                env=kaggle_environment())
         if result.returncode:
             raise RuntimeError('Cannot verify the old Kaggle notebook; no new run was submitted')
         return json.loads(result.stdout)

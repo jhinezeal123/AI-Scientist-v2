@@ -175,9 +175,9 @@ def test_retired_http_execution_preserves_ownership_and_saved_artifacts(tmp_path
             raise AssertionError('T05 must never submit/train or call MCP')
     @asynccontextmanager
     async def mcp(config):
-        yield MCP(),[]
+        yield MCP()
     app=create_app(SimpleNamespace(workspace_root=tmp_path,shutdown_seconds=1,kaggle_username='verified-user'),
-                   bindings=SimpleNamespace(runtime=runtime,request_type=request_type),mcp_connection=mcp)
+                   bindings=SimpleNamespace(runtime=runtime,request_type=request_type),kaggle_connection=mcp)
     root=store.directory(project)/'runs'/run['id']
     root.mkdir(parents=True)
     (root/'notebook.ipynb').write_text('{"cells": []}',encoding='utf-8')

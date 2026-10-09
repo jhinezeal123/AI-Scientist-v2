@@ -6,7 +6,7 @@
 2. Trong **Run**, chọn card của lượt đã duyệt.
 3. Chọn CPU, GPU **T4 x2**, hoặc TPU; chọn thời gian tối đa của phiên.
 4. Bấm **Bắt đầu Working**. Backend mở notebook bootstrap riêng tư bằng
-   `kaggle_ssh_start`, kết nối SSH, rồi gọi Codex local để viết và chạy code trong Kaggle.
+   CLI nội bộ `start`, kết nối SSH, rồi gọi Codex local để viết và chạy code trong Kaggle.
 5. Xem **Log Working**. Backend thu `source/` và `output/`, kiểm tra byte count/SHA256,
    lưu journal, manifest và report, yêu cầu dừng phiên và kiểm tra trạng thái Kaggle.
 6. Khi cần, bấm **Dừng Working**. Khi lượt kết thúc, bấm **Tạo lượt Working mới**

@@ -10,7 +10,6 @@ import time
 
 from .ssh_terminal import AgentTerminalBridge, DonorSession, collect_files
 from .store import StoreConflict
-from .kaggle import decode_result
 from .working_store import WorkingStore, TERMINAL
 from .system_prompt import load_prompt
 from .modes import snapshot_settings
@@ -41,8 +40,8 @@ def sources(approved):
 
 
 class WorkingService:
-    def __init__(self, planner, config, view, mcp, *, donor=None, stop_seconds=120, poll_seconds=3):
-        self.planner, self.config, self.view, self.mcp = planner, config, view, mcp
+    def __init__(self, planner, config, view, *, donor=None, stop_seconds=120, poll_seconds=3):
+        self.planner, self.config, self.view = planner, config, view
         self.store = planner.store
         self.records = WorkingStore(self.store)
         self.donor = donor or DonorSession(config)
@@ -84,8 +83,7 @@ class WorkingService:
             # Old ambiguous saves may have no readable notebook. Check all active
             # sessions, including older versions, without altering or replaying it.
             try:
-                account_observation = decode_result(await asyncio.wait_for(
-                    self.mcp.call_tool('workbench_account_idle', {'account': self.config.kaggle_account_alias}), 60))
+                account_observation = await asyncio.wait_for(asyncio.to_thread(self.donor.account_idle), 70)
             except Exception as exc:
                 raise StoreConflict('Chưa xác minh được phiên UNKNOWN cũ hoặc trạng thái toàn account') from exc
             owners = {ref.split('/', 1)[0] for ref in unresolved_refs}
@@ -163,7 +161,7 @@ class WorkingService:
                      'competition_sources': competitions, 'dataset_sources': datasets}
         deadline = time.monotonic() + min(300, ttl)
         while True:
-            result = decode_result(await asyncio.wait_for(self.mcp.call_tool('kaggle_ssh_start', arguments), 270))
+            result = await asyncio.wait_for(asyncio.to_thread(self.donor.start, arguments), 280)
             if result.get('session_id') != run_id:
                 raise ValueError('Kaggle SSH session identity mismatch')
             if self.config.kaggle_username and not result.get('notebook_ref', '').startswith(self.config.kaggle_username + '/'):

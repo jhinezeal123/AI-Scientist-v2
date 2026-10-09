@@ -177,10 +177,10 @@ def test_http_planner_approval_gate_never_calls_mcp_or_coder(tmp_path):
             raise AssertionError("No MCP workload call is authorized in T04")
     @asynccontextmanager
     async def connection(config):
-        yield MCP(), ["push_notebook"]
+        yield MCP()
     config = SimpleNamespace(workspace_root=tmp_path, shutdown_seconds=2)
     bindings = SimpleNamespace(runtime=fake, request_type=request_type)
-    with TestClient(create_app(config, bindings=bindings, mcp_connection=connection)) as client:
+    with TestClient(create_app(config, bindings=bindings, kaggle_connection=connection)) as client:
         project = client.post('/api/projects',json={'name':'test'}).json()['id']
         base = '/api/projects/'+project
         source = client.post(base+'/resources',json={'kind':'text','title':'data','content':'real data'}).json()

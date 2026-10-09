@@ -1,5 +1,8 @@
 # Kaggle core bundled with AI Scientist
 
+The folder name is retained from the packaging request; the runtime is native
+Python/CLI, with no MCP server.
+
 This is a selected source snapshot of `jhinezeal123/kaggle_token` at
 `9bf4c85c8e060ebe022f285c1667a0edf5d4635f`, not a clone/submodule of the old MCP.
 See `SOURCE.json` for source hashes and extraction notes.
@@ -11,7 +14,8 @@ See `SOURCE.json` for source hashes and extraction notes.
 - Token profile resolution and the original account proxy connection pool.
 - Account-wide idle verification and cookie recovery/login support, needed
   when an older ambiguous notebook cannot be reconciled by its reference.
-- Two MCP tools: `kaggle_ssh_start` and `workbench_account_idle`.
+- Native backend operations: `bootstrap_service.start` and `account_runtime.account_idle`.
+  The backend calls CLI actions `start`/`idle` through its existing SSH adapter.
 
 The old notebook builder/preflight, browser log/output download, cancel tools,
 quota/account administration UI, datasets tool suite and agent_platform are
@@ -43,17 +47,17 @@ original ACL logic, and no Codex credentials are transferred to Kaggle.
 The bundle uses its own localhost token proxy on **8013**, with a health/root
 identity check. It never borrows the old donor proxy on port 80. For a port
 conflict set `AI_SCIENTIST_KAGGLE_PROXY_PORT` for the backend process; the SDK
-and proxy use the same value. The MCP server stops a proxy it created on exit.
+and proxy use the same value. The backend stops a proxy it created on shutdown.
 Tailcat downloads its pinned release and verifies SHA256 on first use.
 
 From the repository root:
 
 ```powershell
 .\.venv-mvp0\Scripts\python.exe -m pip install -r "kaggle mcp/requirements.txt"
-.\.venv-mvp0\Scripts\python.exe "kaggle mcp/mcp_server.py"
 ```
 
-Normally the backend launches the MCP itself. Do not start a second service
-for normal GUI use. The external `D:/Documents/kaggle_token` checkout is not
+The backend loads the proxy manager and calls the Kaggle CLI directly.
+There is no MCP server, tool registration or MCP connection for normal GUI use.
+The external `D:/Documents/kaggle_token` checkout is not
 required after configuring this bundle. Saved stopped runs remain readable;
 live sessions created by the external checkout retain its private state there.

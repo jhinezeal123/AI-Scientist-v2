@@ -36,7 +36,7 @@ ACCELERATORS = ('cpu', 'NvidiaTeslaT4', 'TpuV5E8', 'TpuV6E8')
 
 @contextmanager
 def request_lock(session_id):
-    """Serialize bootstrap admission and cancellation across MCP/CLI processes."""
+    """Serialize bootstrap admission and cancellation across CLI processes."""
     if not re.fullmatch('[0-9a-f]{32}', session_id):
         raise ValueError('Expected a UUID request ID')
     locks = DEFAULT_STATE / 'locks'
@@ -464,7 +464,7 @@ def state_for(session_id, state_root=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Kaggle SDK bootstrap and Tailcat SSH')
-    parser.add_argument('action', choices=('prepare', 'push', 'connect', 'ssh', 'shell', 'bridge', 'status', 'inspect', 'stop', 'network'))
+    parser.add_argument('action', choices=('start', 'idle', 'prepare', 'push', 'connect', 'ssh', 'shell', 'bridge', 'status', 'inspect', 'stop', 'network'))
     parser.add_argument('--account')
     parser.add_argument('--config', type=Path)
     parser.add_argument('--state-root', type=Path, default=DEFAULT_STATE)
@@ -484,6 +484,17 @@ def main():
         parser.error('Choose a bootstrap TTL of at least 60 seconds')
     if args.wait_seconds < 1:
         parser.error('SSH wait must be a positive number of seconds')
+    if args.action == 'start':
+        from .bootstrap_service import start
+        arguments = json.load(sys.stdin)
+        if not isinstance(arguments, dict) or arguments.get('account') != args.account:
+            parser.error('Bootstrap account must match the selected account')
+        print(json.dumps(start(**arguments), ensure_ascii=False))
+        return
+    if args.action == 'idle':
+        from account_runtime import account_idle
+        print(json.dumps(account_idle(args.account), ensure_ascii=False))
+        return
     if args.action == 'prepare':
         state = prepare(args)
         print(json.dumps(descriptor(state), ensure_ascii=False))

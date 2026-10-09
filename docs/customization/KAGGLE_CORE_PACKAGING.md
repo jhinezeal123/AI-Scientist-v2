@@ -13,7 +13,9 @@ Lõi Kaggle nằm tại `kaggle mcp/`, lấy từ donor
   và tái sử dụng kết nối HTTPS. SDK giữ pin `kagglesdk==0.1.37`.
 - `account_runtime.py`, `cookie_client.py`, `auto_login/`: xác minh account
   và phiên đang chạy; dùng lại recovery/login gốc khi cookie hết hạn.
-- `mcp_server.py`: chỉ cung cấp `kaggle_ssh_start`, `workbench_account_idle`.
+- `bootstrap_service.start`, `account_runtime.account_idle`: hàm Python nội bộ;
+  backend gọi CLI `start`/`idle` qua adapter `DonorSession` hiện có.
+  Đã xóa MCP server/registration và bỏ dependency MCP trực tiếp.
 
 Không mang theo `agent_platform`, giao diện quản lý account, suite tool cũ,
 notebook builder/preflight, tải log/artifact bằng browser hoặc tool dataset.
@@ -31,9 +33,10 @@ Workbench tiếp tục quản lý code, log, thu output và dừng phiên qua SS
 ```
 
 Tên trường `donor_*` được giữ để tương thích config và adapter hiện có.
-Cả MCP và CLI SSH dùng chung Python của Workbench. Proxy riêng chạy trên
+CLI Kaggle/SSH dùng chung Python của Workbench. Proxy riêng chạy trên
 `127.0.0.1:8013`, kiểm tra đúng tên dịch vụ và thư mục root trước khi dùng.
-MCP sở hữu vòng đời proxy; backend không còn tự khởi động proxy legacy port 80.
+Backend tải trực tiếp proxy manager và sở hữu vòng đời proxy port 8013.
+Không còn tiến trình/kết nối MCP trong luồng Working.
 Có thể đổi port bằng `AI_SCIENTIST_KAGGLE_PROXY_PORT` trước khi mở backend.
 
 Chỉ profile được chọn của `huynhtrungcuong` được cấu hình local trong
@@ -62,13 +65,13 @@ Sau khi build frontend theo [hướng dẫn chạy](MVP0_RUN_GUIDE.md), mở bac
 .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --port 8011
 ```
 
-Backend tự khởi động MCP và proxy. Không cần mở một MCP thứ hai. Sau khi
+Backend tự khởi động proxy và gọi các action CLI. Sau khi
 di chuyển repo sang máy/thư mục khác, cập nhật đường dẫn config và cấu hình
 credential local; source không phụ thuộc checkout `D:/Documents/kaggle_token`.
 Phiên cũ tạo ở donor bên ngoài vẫn giữ private state ở đó; các run đã dừng
 và artifact trong project tiếp tục đọc được.
 
-## QA ngày 2026-10-09
+## QA bản đóng gói MCP ban đầu ngày 2026-10-09 (lịch sử)
 
 Kiểm tra local: import toàn bộ lõi, pin SDK, danh sách đúng hai MCP tool,
 health proxy xác minh root bản đóng gói, account idle `huynhtrungcuong`,
@@ -110,3 +113,41 @@ File QA trong project được giữ để user mở lại; dữ liệu `.workbe
 
 QA này kiểm chứng CPU bootstrap/SSH/thu file/STOP của bản đóng gói; không
 chạy lại GPU, TPU, auto-login hết hạn hoặc toàn bộ tính năng MVP2.
+
+
+## Chuyển sang backend CLI trực tiếp
+
+Theo yêu cầu user, backend quản lý Kaggle trực tiếp, agent chỉ dùng terminal
+SSH đã mở. Không còn MCP server, MCP tool hoặc vòng initialize/list_tools/
+call_tool. Hai thao tác start/idle đã thành action CLI nội bộ; khóa request ID,
+submit intent, resume cùng session, TTL, thu file/hash và STOP được giữ nguyên.
+CLI thừa hưởng các biến OS/SSH/browser cần thiết và port proxy đã cấu hình;
+không thừa hưởng token/API key provider từ môi trường backend.
+
+Health trả `kaggle_backend: cli`. Lệnh khởi động backend và config `donor_*`
+hiện có giữ nguyên. Legacy submission helper không được gắn vào app;
+response decoder lịch sử còn lại không import hoặc khởi động MCP.
+
+### QA CLI ngày 2026-10-09
+
+Qua GUI tạo idea **CPU — backend CLI trực tiếp**, gọi Codex CLI lập proposal
+`2427e060bbb7492e89ac8cf93abd80fb`, duyệt và chạy đúng một phiên CPU TTL 600 giây.
+Run `e35fe0e1a34148d6b129fb45fcdbc7f7`, cùng project QA ở trên, **COMPLETED**.
+
+- Bootstrap SDK và SSH qua CLI trực tiếp. Agent chạy 2 lệnh, tính tổng bình
+  phương 1…1000 bằng thư viện chuẩn: `333833500`, `verified=true`, Linux,
+  Python 3.13.15, tính trong `0.000089584` giây.
+- Thu script 1017 bytes và JSON 238 bytes, tổng 1255 bytes; hash cả hai
+  khớp manifest. Đối chiếu lại phép tính và hash bằng local Python.
+- STOP xác nhận `complete`, `stopped=true` lúc
+  `2026-10-09T13:07:56.511333+00:00`; idle CLI xác nhận 0 phiên đang chạy.
+- SSH ghi `known_hosts` đúng trong `.runtime/.../<run_id>/`, không tạo file
+  nhầm ở root. Backend shutdown đóng cả port 8011 và proxy 8013; restart
+  vẫn đọc run/output/log và health trả `kaggle_backend=cli`.
+- Không có tiến trình MCP của bundle. Kiểm thử adapter CLI, Working/idle,
+  restart và các API bị ảnh hưởng đã qua; fixture cũ được đồng bộ với cwd
+  workspace và tùy chọn report mặc định tắt của MVP2. `pip check` qua.
+
+Bằng chứng local: `.workbench/acceptance/kaggle-cli-2026-10-09/`, gồm
+`evidence.json`, `completed-after-restart.png`, `backend.log`. QA không chạy
+GPU/TPU hoặc thử cookie hết hạn; các cơ chế đó dùng lại từ lõi donor.

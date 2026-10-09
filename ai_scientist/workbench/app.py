@@ -1,10 +1,10 @@
-"""Compose the local GUI, project store, shared Codex worker and MCP lifetime."""
+"""Compose the local GUI, project store, shared Codex worker and Kaggle backend."""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from .kaggle import connect_mcp
+from .kaggle import connect_kaggle
 from .runtime import load_runtime
 from .worker import RuntimeWorker
 from .api import library_router
@@ -15,7 +15,7 @@ from .monitor_store import MonitorStore
 from .working import WorkingService
 
 
-def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
+def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
     @asynccontextmanager
     async def lifespan(app):
         loaded = bindings or load_runtime(config)
@@ -32,10 +32,9 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
         service.view = app.state.view
         app.state.logs = MonitorStore(store)
         try:
-            async with mcp_connection(config) as (session, names):
-                app.state.mcp = session
-                app.state.mcp_tools = names
-                app.state.working = WorkingService(service, config, app.state.view, session)
+            async with kaggle_connection(config) as session:
+                app.state.kaggle_backend = 'cli'
+                app.state.working = WorkingService(service, config, app.state.view, donor=session)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.working.check_idle
                 await app.state.working.recover()
@@ -58,7 +57,7 @@ def create_app(config, *, bindings=None, mcp_connection=connect_mcp):
     @app.get("/health")
     async def health():
         return {"status": "ok", "runtime_job": app.state.worker.state["status"],
-                "mcp_tools": app.state.mcp_tools}
+                "kaggle_backend": app.state.kaggle_backend}
 
     frontend = config.workspace_root / "workbench-ui/dist"
     if frontend.is_dir():

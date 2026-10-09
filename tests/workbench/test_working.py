@@ -78,21 +78,20 @@ class Donor:
                 'status': 'complete' if self.confirm.is_set() else 'running', 'stopped': self.confirm.is_set()}
 
 
-class MCP:
+class Bootstrap:
     def __init__(self, pending=False, failure=False):
         self.calls = []
         self.pending, self.failure = pending, failure
 
-    async def call_tool(self, name, body):
-        self.calls.append((name, body))
-        assert name == 'kaggle_ssh_start'
+    def start(self, body):
+        self.calls.append(('start', body))
         if self.failure:
-            raise RuntimeError('fixture MCP disconnect')
+            raise RuntimeError('fixture Bootstrap disconnect')
         run_id = body.get('request_id') or body['session_id']
         result = {'session_id': run_id, 'account': 'fixture-account', 'ttl_seconds': 1800,
                   'remote_directory': '/fixture/' + run_id, 'notebook_ref': 'verified-user/fixture-' + run_id,
                   'submission_status': 'CONFIRMED', 'ssh_status': 'PENDING' if self.pending and len(self.calls) == 1 else 'READY'}
-        return SimpleNamespace(structuredContent=result, isError=False)
+        return result
 
 
 class Runtime:
@@ -134,13 +133,14 @@ class Runtime:
             'limitations': ['Simulated Kaggle, no real model training'], 'output_files': ['output/test.csv']}), files={})
 
 
-def fixture(tmp_path, runtime=None, mcp=None, donor=None):
-    runtime, mcp, donor = runtime or Runtime(), mcp or MCP(), donor or Donor()
+def fixture(tmp_path, runtime=None, bootstrap=None, donor=None):
+    runtime, bootstrap, donor = runtime or Runtime(), bootstrap or Bootstrap(), donor or Donor()
     store, project, run, worker, planner, implementation = setup(tmp_path, runtime)
     config = SimpleNamespace(workspace_root=tmp_path, kaggle_username='verified-user',
         kaggle_account_alias='fixture-account', working_seconds=900, kaggle_session_seconds=1800)
-    service = WorkingService(planner, config, implementation.view, mcp, donor=donor, stop_seconds=.01, poll_seconds=.01)
-    return store, project, run['id'], worker, planner, service, runtime, mcp, donor
+    donor.start = bootstrap.start
+    service = WorkingService(planner, config, implementation.view, donor=donor, stop_seconds=.01, poll_seconds=.01)
+    return store, project, run['id'], worker, planner, service, runtime, bootstrap, donor
 
 
 async def wait_for(predicate):
@@ -156,7 +156,7 @@ def test_unstarted_approvals_do_not_block_but_remote_or_active_runs_still_do(tmp
     import pytest
     from ai_scientist.workbench.store import StoreConflict
     async def scenario():
-        store, project, original, worker, planner, service, runtime, mcp, donor = fixture(tmp_path)
+        store, project, original, worker, planner, service, runtime, bootstrap, donor = fixture(tmp_path)
         approved = store.approved_snapshot(project, original)
         idea = store.save_idea(project, 'Another prepared idea')
         context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
@@ -190,7 +190,7 @@ def test_unstarted_approvals_do_not_block_but_remote_or_active_runs_still_do(tmp
 
 def test_working_success_pending_resume_outputs_stop_and_unlimited_new_runs(tmp_path):
     async def check():
-        store, project, run, worker, planner, service, runtime, mcp, donor = fixture(tmp_path, mcp=MCP(pending=True))
+        store, project, run, worker, planner, service, runtime, bootstrap, donor = fixture(tmp_path, bootstrap=Bootstrap(pending=True))
         assert (await service.start(project, run, 'NvidiaT4', 1800))['state'] == 'STARTING'
         with pytest.raises(StoreConflict):
             await service.start(project, run)
@@ -199,9 +199,9 @@ def test_working_success_pending_resume_outputs_stop_and_unlimited_new_runs(tmp_
         assert detail['state'] == 'COMPLETED' and detail['working']['stop_confirmed']
         assert len(runtime.calls) == len(donor.opens) == 1
         assert donor.opens[0][1].stop_requested and donor.opens[0][1].closed
-        assert mcp.calls[0][1]['request_id'] == run and mcp.calls[0][1]['accelerator'] == 'NvidiaT4'
-        assert mcp.calls[0][1]['competition_sources'] == ['fixture-data']
-        assert mcp.calls[1][1] == {'account': 'fixture-account', 'session_id': run, 'wait_seconds': 60}
+        assert bootstrap.calls[0][1]['request_id'] == run and bootstrap.calls[0][1]['accelerator'] == 'NvidiaT4'
+        assert bootstrap.calls[0][1]['competition_sources'] == ['fixture-data']
+        assert bootstrap.calls[1][1] == {'account': 'fixture-account', 'session_id': run, 'wait_seconds': 60}
         assert 'output/test.csv' in detail['artifacts'] and 'working-stop.json' in detail['artifacts']
         assert not any('terminal-access' in name for name in detail['artifacts'])
         assert not (runtime.calls[0].workdir / 'terminal-access.json').exists()
@@ -223,15 +223,15 @@ def test_working_success_pending_resume_outputs_stop_and_unlimited_new_runs(tmp_
     asyncio.run(check())
 
 
-@pytest.mark.parametrize('failure', ['agent', 'mcp'])
+@pytest.mark.parametrize('failure', ['agent', 'bootstrap'])
 def test_failures_stop_and_never_replay(tmp_path, failure):
     async def check():
-        _, project, run, worker, planner, service, runtime, mcp, donor = fixture(
-            tmp_path, runtime=Runtime(fail=failure == 'agent'), mcp=MCP(failure=failure == 'mcp'))
+        _, project, run, worker, planner, service, runtime, bootstrap, donor = fixture(
+            tmp_path, runtime=Runtime(fail=failure == 'agent'), bootstrap=Bootstrap(failure=failure == 'bootstrap'))
         await service.start(project, run)
         await service.tasks[project, run]
         assert service.detail(project, run)['state'] == 'FAILED'
-        assert len(mcp.calls) == 1 and len(runtime.calls) == (failure == 'agent')
+        assert len(bootstrap.calls) == 1 and len(runtime.calls) == (failure == 'agent')
         assert service.record(project, run)['stop_confirmed']
         await service.close(1); await planner.close(); await worker.close(1)
     asyncio.run(check())
@@ -239,7 +239,7 @@ def test_failures_stop_and_never_replay(tmp_path, failure):
 
 def test_stop_proof_gates_completion_retry_and_restart(tmp_path):
     async def check():
-        store, project, run, worker, planner, service, runtime, mcp, donor = fixture(tmp_path)
+        store, project, run, worker, planner, service, runtime, bootstrap, donor = fixture(tmp_path)
         donor.confirm.clear()
         await service.start(project, run)
         await wait_for(lambda: service.record(project, run)['phase'] == 'awaiting_stop')
@@ -250,11 +250,11 @@ def test_stop_proof_gates_completion_retry_and_restart(tmp_path):
             await service.start(project, run)
         await service.close(1)
         donor.confirm.set()
-        restored = WorkingService(planner, service.config, service.view, mcp, donor=donor, poll_seconds=.01)
+        restored = WorkingService(planner, service.config, service.view, donor=donor, poll_seconds=.01)
         await restored.recover()
         await restored.tasks[project, run]
         assert store.run(project, run)['state'] == 'COMPLETED'
-        assert len(runtime.calls) == len(mcp.calls) == len(donor.opens) == 1
+        assert len(runtime.calls) == len(bootstrap.calls) == len(donor.opens) == 1
         await restored.close(1); await planner.close(); await worker.close(1)
     asyncio.run(check())
 
@@ -294,14 +294,15 @@ def test_store_rejects_unproven_or_wrong_notebook_completion(tmp_path):
 
 
 def test_working_http_routes_ownership_and_artifact_allowlist(tmp_path, monkeypatch):
-    runtime, mcp, donor = Runtime(), MCP(), Donor()
+    runtime, bootstrap, donor = Runtime(), Bootstrap(), Donor()
+    donor.start = bootstrap.start
     @asynccontextmanager
     async def connection(config):
-        yield mcp, ['kaggle_ssh_start']
+        yield donor
     monkeypatch.setattr('ai_scientist.workbench.working.DonorSession', lambda config: donor)
     config = SimpleNamespace(workspace_root=tmp_path, shutdown_seconds=1,
         kaggle_username='verified-user', kaggle_account_alias='fixture-account')
-    app = create_app(config, bindings=SimpleNamespace(runtime=runtime, request_type=__import__('test_planning').request_type), mcp_connection=connection)
+    app = create_app(config, bindings=SimpleNamespace(runtime=runtime, request_type=__import__('test_planning').request_type), kaggle_connection=connection)
     project, run = approved_run(app.state.store)
     other = app.state.store.create_project('Other')['id']
     path = f'/api/projects/{project}/runs/{run["id"]}'

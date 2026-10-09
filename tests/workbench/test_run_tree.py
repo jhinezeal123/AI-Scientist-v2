@@ -12,7 +12,7 @@ from ai_scientist.workbench.experiments import prepare_experiment
 from test_implementation import approved_run
 from test_planning import FakeRuntime
 from test_session_recovery import application
-from test_working import MCP
+from test_working import Bootstrap
 
 
 def saved_tree():
@@ -67,8 +67,8 @@ def test_run_tree_rejects_cycles_and_escapes_untrusted_content():
 
 
 def test_saved_run_url_uses_current_view_without_mutating_artifacts(tmp_path, monkeypatch):
-    runtime, mcp = FakeRuntime(), MCP()
-    app = application(tmp_path, runtime, mcp, monkeypatch)
+    runtime, bootstrap = FakeRuntime(), Bootstrap()
+    app = application(tmp_path, runtime, bootstrap, monkeypatch)
     store = app.state.store
     project, run = approved_run(store)
     root = prepare_experiment(store, tmp_path, project, run['id'], store.approved_snapshot(project, run['id']))
@@ -86,4 +86,4 @@ def test_saved_run_url_uses_current_view_without_mutating_artifacts(tmp_path, mo
         other = store.create_project('Other')['id']
         assert client.get(path.replace(project, other)).status_code == 404
     assert before == {path.name: path.read_bytes() for path in logs.iterdir() if path.is_file()}
-    assert not runtime.calls and not mcp.calls
+    assert not runtime.calls and not bootstrap.calls

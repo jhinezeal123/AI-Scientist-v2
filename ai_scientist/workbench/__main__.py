@@ -20,7 +20,7 @@ async def smoke(app, config):
             config.workspace_root, timeout_seconds=120)
         result, payload = await app.state.worker.run(request)
         print(json.dumps({"status": "ready", "payload": payload.model_dump(),
-                          "session_id": result.session_id, "mcp_tools": app.state.mcp_tools}))
+                          "session_id": result.session_id, "kaggle_backend": app.state.kaggle_backend}))
 
 
 def main():

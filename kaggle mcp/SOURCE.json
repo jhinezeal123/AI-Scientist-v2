@@ -19,10 +19,11 @@
   "extracted_from": [
     "interface_old/kaggle_pool.py: _IClient and _client_for",
     "interface_old/workbench.py: workbench_account_idle validation",
-    "interface_old/sdk_client.py: pinned SDK version guard"
+    "interface_old/sdk_client.py: pinned SDK version guard",
+    "interface_ai_scientist/mcp_tools.py: orchestration as bootstrap_service.start, registration removed"
   ],
   "adaptations": [
-    "Minimal MCP tools: SSH start and account idle",
+    "Native CLI start/idle operations called by Workbench; no MCP registration or server",
     "Independent proxy port 8013 with service-root identity",
     "SDK endpoint uses bundled proxy",
     "Cookie recovery imports slim account_runtime instead of old tool suite",

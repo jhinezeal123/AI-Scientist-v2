@@ -65,12 +65,12 @@ def test_health_during_worker_and_shutdown(tmp_path):
     @asynccontextmanager
     async def connection(config):
         try:
-            yield object(), ["list_accounts"]
+            yield object()
         finally:
             closed.append(True)
 
     config = SimpleNamespace(workspace_root=tmp_path, shutdown_seconds=2)
-    app = create_app(config, bindings=SimpleNamespace(runtime=WaitingRuntime()), mcp_connection=connection)
+    app = create_app(config, bindings=SimpleNamespace(runtime=WaitingRuntime()), kaggle_connection=connection)
 
     async def check():
         async with app.router.lifespan_context(app):

@@ -1,64 +1,52 @@
-"""Environment regression for the backend-owned MCP subprocess."""
-import asyncio
-from contextlib import asynccontextmanager
+"""Native Kaggle CLI boundary: explicit account, JSON input and OS environment."""
+import json
 from types import SimpleNamespace
 
 import pytest
 
-from ai_scientist.workbench import kaggle
+from ai_scientist.workbench import ssh_terminal
 
 
-@pytest.mark.parametrize('platform,programdata,port,expected', [
-    ('win32', r'C:\ProgramData', None, {'PROGRAMDATA': r'C:\ProgramData'}),
-    ('win32', None, None, {}),
-    ('linux', r'C:\ProgramData', None, {}),
-    ('win32', r'C:\ProgramData', '8023', {'PROGRAMDATA': r'C:\ProgramData',
-        'AI_SCIENTIST_KAGGLE_PROXY_PORT': '8023'}),
-])
-def test_mcp_inherits_only_required_environment(monkeypatch, tmp_path, platform, programdata, port, expected):
+@pytest.mark.parametrize('action', ['start', 'idle'])
+@pytest.mark.parametrize('port', [None, '8023'])
+def test_native_cli_account_and_environment(monkeypatch, tmp_path, action, port):
     captured = []
-    monkeypatch.setattr(kaggle, 'sys', SimpleNamespace(platform=platform))
+    monkeypatch.setenv('PROGRAMDATA', r'C:\ProgramData')
+    monkeypatch.setenv('KAGGLE_API_TOKEN', 'must-not-be-inherited')
+    monkeypatch.setenv('OPENAI_API_KEY', 'must-not-be-inherited')
     if port is None:
         monkeypatch.delenv('AI_SCIENTIST_KAGGLE_PROXY_PORT', raising=False)
     else:
         monkeypatch.setenv('AI_SCIENTIST_KAGGLE_PROXY_PORT', port)
-    monkeypatch.setenv('KAGGLE_API_TOKEN', 'must-not-be-inherited')
-    if programdata is None:
-        monkeypatch.delenv('PROGRAMDATA', raising=False)
-    else:
-        monkeypatch.setenv('PROGRAMDATA', programdata)
 
-    @asynccontextmanager
-    async def stdio(params):
-        captured.append(params)
-        yield 'reader', 'writer'
+    class Process:
+        returncode = 0
+        stdin = stdout = stderr = None
 
-    class Session:
-        def __init__(self, reader, writer):
-            assert (reader, writer) == ('reader', 'writer')
+        def __init__(self, command, **options):
+            captured.append({'command': command, **options})
 
-        async def __aenter__(self):
-            return self
+        def communicate(self, data, timeout):
+            captured[-1].update(data=data, timeout=timeout)
+            return b'{"verified":true}', b''
 
-        async def __aexit__(self, *args):
-            pass
+        def poll(self):
+            return self.returncode
 
-        async def initialize(self):
-            pass
-
-        async def list_tools(self):
-            return SimpleNamespace(tools=[SimpleNamespace(name='kaggle_ssh_start')])
-
-    monkeypatch.setattr(kaggle, 'stdio_client', stdio)
-    monkeypatch.setattr(kaggle, 'ClientSession', Session)
-    config = SimpleNamespace(donor_python=tmp_path / 'python.exe', donor_root=tmp_path)
-
-    async def connect():
-        async with kaggle.connect_mcp(config) as (_, names):
-            assert names == ['kaggle_ssh_start']
-
-    asyncio.run(connect())
-    assert len(captured) == 1
-    assert captured[0].env == expected
-    assert captured[0].cwd == str(tmp_path)
-    assert captured[0].args == [str(tmp_path / 'mcp_server.py')]
+    monkeypatch.setattr(ssh_terminal.subprocess, 'Popen', Process)
+    config = SimpleNamespace(donor_python=tmp_path/'python.exe', donor_root=tmp_path/'kaggle mcp',
+                             kaggle_account_alias='selected-account')
+    donor = ssh_terminal.DonorSession(config)
+    arguments = {'account': config.kaggle_account_alias, 'request_id': 'a'*32}
+    result = donor.start(arguments) if action == 'start' else donor.account_idle()
+    assert result == {'verified': True} and len(captured) == 1
+    call = captured[0]
+    assert call['command'] == [str(config.donor_python), '-m', 'interface_ai_scientist', action,
+                               '--account', 'selected-account']
+    assert call['cwd'] == config.donor_root
+    assert call['env']['PROGRAMDATA'] == r'C:\ProgramData'
+    assert call['env'].get('AI_SCIENTIST_KAGGLE_PROXY_PORT') == port
+    assert 'KAGGLE_API_TOKEN' not in call['env'] and 'OPENAI_API_KEY' not in call['env']
+    assert call['env']['PYTHONUTF8'] == '1'
+    assert (json.loads(call['data']) if action == 'start' else call['data']) == (arguments if action == 'start' else None)
+    assert call['timeout'] == (270 if action == 'start' else 60)

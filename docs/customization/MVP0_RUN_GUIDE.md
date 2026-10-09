@@ -36,7 +36,7 @@ Chạy PowerShell tại `D:\Documents\AI-Scientist-v2`:
 & .\.venv-mvp0\Scripts\python.exe -m ai_scientist.workbench --port 8011
 ```
 
-Mở **http://127.0.0.1:8011/**. Lệnh này khởi động backend, MCP Kaggle qua stdio và
+Mở **http://127.0.0.1:8011/**. Lệnh này khởi động backend, proxy Kaggle và
 serve GUI đã build. Chỉ chạy một backend cho workspace. Dừng bằng `Ctrl+C`, rồi dùng
 cùng lệnh để mở lại. Project không nằm trong browser và không phụ thuộc port.
 
@@ -70,7 +70,7 @@ Sửa đường dẫn tuyệt đối trong `.workbench/config.local.json` cho m�
 `donor_root`, `donor_python`, `workspace_root`, `codex_executable`; chọn
 `codex_model`, `codex_reasoning_effort`, `kaggle_account_alias` và `kaggle_username`.
 Example hiện dùng `gpt-6-luna`/`max`, alias `jhin_access_token.txt`, username
-`huynhtrungcuong`. Alias là tên account đã đăng ký trong donor, không phải token.
+`huynhtrungcuong`. Alias là tên account đã đăng ký trong lõi Kaggle, không phải token.
 Backend tìm lại Codex CLI khi đường dẫn cũ không còn tồn tại sau cập nhật, qua PATH
 và bản desktop hiện có. Model/reasoning/account vẫn lấy từ config bạn đã chọn.
 

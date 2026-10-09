@@ -14,7 +14,7 @@ from ai_scientist.workbench.models import PlanPayload, WorkingProposal
 from ai_scientist.workbench.store import StoreConflict
 from ai_scientist.workbench.ssh_terminal import collect_files
 from test_planning import request_type
-from test_working import Donor, MCP, Runtime, Terminal, fixture
+from test_working import Donor, Bootstrap, Runtime, Terminal, fixture
 
 
 @pytest.fixture(autouse=True)
@@ -51,15 +51,16 @@ def test_idea_to_working_without_training_fields_or_legacy_gates(tmp_path, monke
             body = proposal(data_refs=[item['id'] for item in context['resources']])
             return SimpleNamespace(text=json.dumps(body), files={})
 
-    runtime, donor, mcp = GenericRuntime(), Donor(), MCP()
+    runtime, donor, bootstrap = GenericRuntime(), Donor(), Bootstrap()
+    donor.start = bootstrap.start
     @asynccontextmanager
     async def connection(config):
-        yield mcp, ['kaggle_ssh_start']
+        yield donor
     guard_legacy(monkeypatch)
     monkeypatch.setattr('ai_scientist.workbench.working.DonorSession', lambda config: donor)
     config = SimpleNamespace(workspace_root=tmp_path, shutdown_seconds=1,
         kaggle_username='verified-user', kaggle_account_alias='fixture-account')
-    app = create_app(config, bindings=SimpleNamespace(runtime=runtime, request_type=request_type), mcp_connection=connection)
+    app = create_app(config, bindings=SimpleNamespace(runtime=runtime, request_type=request_type), kaggle_connection=connection)
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': 'Generic Working'}).json()['id']
         base = '/api/projects/' + project
@@ -79,7 +80,7 @@ def test_idea_to_working_without_training_fields_or_legacy_gates(tmp_path, monke
         saved = proposals[0]
         assert saved['state'] == 'AWAITING_APPROVAL'
         assert not any(field in saved['body'] for field in ('split', 'metric'))
-        assert saved['body']['budget'] == {} and len(runtime.calls) == 1 and mcp.calls == []
+        assert saved['body']['budget'] == {} and len(runtime.calls) == 1 and bootstrap.calls == []
         approved = client.post(base + '/proposals/' + saved['id'] + '/approve', json={
             'version': saved['version'], 'context_sha256': saved['context_sha256']})
         assert approved.status_code == 200
@@ -93,8 +94,8 @@ def test_idea_to_working_without_training_fields_or_legacy_gates(tmp_path, monke
         assert detail['state'] == 'COMPLETED' and detail['working']['stop_confirmed']
         assert detail['attempts'] == [] and 'collection' not in detail
         assert client.get(path + '/artifacts/output/test.csv').text == 'id,prediction\n1,7\n'
-        assert mcp.calls[0][1]['dataset_sources'] == (['fixture-owner/example'] if with_reference else [])
-        assert mcp.calls[0][1]['competition_sources'] == []
+        assert bootstrap.calls[0][1]['dataset_sources'] == (['fixture-owner/example'] if with_reference else [])
+        assert bootstrap.calls[0][1]['competition_sources'] == []
         assert [call.role for call in runtime.calls] == ['mvp0_plan', 'mvp0_working']
         assert client.post(path + '/implement').status_code == client.post(path + '/submit').status_code == 410
 
@@ -151,7 +152,7 @@ def test_failed_legacy_run_retries_into_working_without_rebuilding_bundle(tmp_pa
 
 def test_legacy_reconcile_only_reads_pinned_status(tmp_path, monkeypatch):
     async def check():
-        store, project, old, worker, planner, service, runtime, mcp, donor = fixture(tmp_path)
+        store, project, old, worker, planner, service, runtime, bootstrap, donor = fixture(tmp_path)
         identity = {'kernel_ref': 'verified-user/old-notebook', 'username': 'verified-user', 'version': 1}
         with store.connection(project) as connection:
             connection.execute("UPDATE runs SET state='UNKNOWN',identity_json=? WHERE id=?", (json.dumps(identity), old))
@@ -163,7 +164,7 @@ def test_legacy_reconcile_only_reads_pinned_status(tmp_path, monkeypatch):
         guard_legacy(monkeypatch)
         updated = await service.reconcile(project, old)
         assert updated['state'] == 'REMOTE_SUCCEEDED' and updated['identity'] == {**identity, 'status': 'complete'}
-        assert receipts == [identity['kernel_ref']] and runtime.calls == mcp.calls == []
+        assert receipts == [identity['kernel_ref']] and runtime.calls == bootstrap.calls == []
         donor.inspect = lambda kernel_ref: {'notebook_ref': 'wrong/notebook', 'status': 'complete', 'stopped': True}
         with pytest.raises(StoreConflict):
             await service.reconcile(project, old)
@@ -183,20 +184,18 @@ def test_unknown_unreadable_notebook_requires_verified_account_idle(tmp_path, ca
             connection.execute("UPDATE runs SET state='UNKNOWN',identity_json=? WHERE id=?", (json.dumps(identity), old))
         donor.inspect = lambda ref: (_ for _ in ()).throw(RuntimeError('fixture inaccessible notebook'))
         calls = []
-        class AccountMCP:
-            async def call_tool(self, name, body):
-                calls.append((name, body))
-                assert name == 'workbench_account_idle' and body == {'account': 'fixture-account'}
-                if case == 'unavailable':
-                    raise RuntimeError('fixture unavailable')
-                receipt = {'account': 'fixture-account', 'username': 'verified-user',
-                           'active_session_count': 0, 'idle': True, 'observed_at': '2026-10-07T08:44:52Z'}
-                if case == 'running': receipt.update(active_session_count=1, idle=False)
-                if case == 'wrong_owner': receipt['username'] = 'other-user'
-                if case == 'wrong_account': receipt['account'] = 'other-account'
-                if case == 'bad_count': receipt['active_session_count'] = False
-                return SimpleNamespace(structuredContent=receipt, isError=False)
-        service.mcp = AccountMCP()
+        def account_idle():
+            calls.append('idle')
+            if case == 'unavailable':
+                raise RuntimeError('fixture unavailable')
+            receipt = {'account': 'fixture-account', 'username': 'verified-user',
+                       'active_session_count': 0, 'idle': True, 'observed_at': '2026-10-07T08:44:52Z'}
+            if case == 'running': receipt.update(active_session_count=1, idle=False)
+            if case == 'wrong_owner': receipt['username'] = 'other-user'
+            if case == 'wrong_account': receipt['account'] = 'other-account'
+            if case == 'bad_count': receipt['active_session_count'] = False
+            return receipt
+        donor.account_idle = account_idle
         if case == 'idle':
             proof = await service.check_idle()
             assert proof['idle'] and proof['unresolved_notebooks'] == [identity['kernel_ref']]

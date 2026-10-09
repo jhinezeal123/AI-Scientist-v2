@@ -6,16 +6,16 @@ from . import session
 
 
 def start(account: str, ttl_seconds: int = 480, accelerator: str = 'cpu',
-                     competition_sources: list[str] | None = None,
-                     dataset_sources: list[str] | None = None, wait_seconds: int = 240,
-                     session_id: str | None = None, request_id: str | None = None) -> dict:
+          competition_sources: list[str] | None = None,
+          dataset_sources: list[str] | None = None, wait_seconds: int = 240,
+          session_id: str | None = None, request_id: str | None = None) -> dict:
     """Submit one private Kaggle bootstrap, wait for SSH, and return its terminal command.
 
     Accelerators: cpu, NvidiaTeslaT4 (T4 x2), TpuV5E8, TpuV6E8.
     gpu/NvidiaT4 select T4; tpu selects v5e-8. Tokyo is the selected relay.
     With session_id, ONLY wait/reconnect to that saved session, never submit.
     Its accelerator, TTL and sources remain the saved values. Account must match.
-    On PENDING or UNKNOWN, reuse the returned session_id in this tool.
+    On PENDING or UNKNOWN, reuse the returned session_id in this operation.
     request_id makes backend admission idempotent, including interrupted calls.
     A new call without session_id/request_id starts a new session.
     Code, logs, files and STOP marker are handled in the persistent SSH terminal.
@@ -80,4 +80,4 @@ def start(account: str, ttl_seconds: int = 480, accelerator: str = 'cpu',
     except (TimeoutError, OSError, RuntimeError) as exc:
         return {**result, 'ssh_status': 'PENDING' if isinstance(exc, TimeoutError) else 'UNAVAILABLE',
                 'error_type': type(exc).__name__,
-                'required_action': 'Call kaggle_ssh_start with this session_id to check SSH without submitting again.'}
+            'required_action': 'Call start with this session_id to check SSH without submitting again.'}

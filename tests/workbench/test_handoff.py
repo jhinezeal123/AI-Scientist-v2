@@ -87,10 +87,10 @@ def test_unselected_data_is_rejected_and_empty_context_is_allowed(tmp_path):
             raise AssertionError('A rejected context cannot authorize provider work')
     @asynccontextmanager
     async def connection(config):
-        yield NoWorkMCP(), ['push_notebook']
+        yield NoWorkMCP()
     config = SimpleNamespace(workspace_root=tmp_path, shutdown_seconds=2)
     bindings = SimpleNamespace(runtime=runtime, request_type=request_type)
-    with TestClient(create_app(config, bindings=bindings, mcp_connection=connection)) as client:
+    with TestClient(create_app(config, bindings=bindings, kaggle_connection=connection)) as client:
         project = client.post('/api/projects', json={'name': 'T09 fixture'}).json()['id']
         base = '/api/projects/' + project
         idea = client.post(base + '/ideas', json={'text': 'Fixture idea'}).json()
