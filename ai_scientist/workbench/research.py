@@ -61,7 +61,8 @@ class ResearchPipeline:
         self.root = owner.root / 'research'
         self.root.mkdir(exist_ok=True)
         self.client = CodexResearchClient(owner)
-        requested = {'tree':True, 'multi_seed':bool(self.plan.seeds), 'summary':self.plan.summary,
+        execution = 'execution' if getattr(owner, 'single_run', False) else 'tree'
+        requested = {execution:True, 'multi_seed':bool(self.plan.seeds) and not getattr(owner, 'single_run', False), 'summary':self.plan.summary,
                      'report':self.plan.report, 'plots':self.plan.plots,
                      'writeup':self.plan.writeup != 'none', 'review':self.plan.review}
         self.state = {'format':1, 'run_id':owner.key[1], 'context_sha256':owner.approved['context_sha256'],
@@ -71,7 +72,7 @@ class ResearchPipeline:
                                     for name, enabled in requested.items()}}
         self.seed_results = {}
         self.limitations = []
-        self.state['components']['tree']['status'] = 'running'
+        self.state['components'][execution]['status'] = 'running'
         self.save()
 
     def save(self):
@@ -154,6 +155,17 @@ class ResearchPipeline:
         from .tree_search import write_json
         artifacts = []
         journals = self.journals()
+        if getattr(self.owner, 'single_run', False):
+            journal = journals[1]
+            summary = get_stage_summary(journal, 'One user-controlled run', self.owner.service.config.codex_model, self.client)
+            if not isinstance(summary, dict) or not summary:
+                raise ValueError('Summary chưa trả JSON hợp lệ')
+            write_json(self.root / 'summary.json', summary)
+            # Upstream plotting/writeup read this interchange filename; it
+            # describes this single run and does not schedule a tuning stage.
+            write_json(self.owner.logs / 'baseline_summary.json',
+                       {'best node': self.node_log(journal.nodes[0]), 'best node with different seeds': []})
+            return ['research/summary.json', 'logs/0-run/baseline_summary.json']
         for number, journal in journals.items():
             self.owner.check_running()
             stage = self.owner.manager.main_stage_dict[number]
@@ -394,3 +406,52 @@ class ResearchPipeline:
         self.state['status'] = 'completed' if succeeded else 'failed'
         self.save()
         return succeeded,self.limitations
+
+    def run_single(self, success):
+        """Independent optional outputs for one run; no search or seed nodes."""
+        self.set('execution', 'completed' if success else 'failed',
+                 '' if success else 'Run chưa thực hiện thành công mục tiêu đã duyệt.', ['execution.json', 'journal.json'])
+        self.step('summary', self.summarize)
+        # The original plot/PDF readers need their baseline interchange file.
+        # A direct node log supplies it without an unrequested summarizer call.
+        if (self.plan.plots or self.plan.writeup != 'none') and not self.plan.summary:
+            self.state['dependencies'] = {'journal_evidence': {'status': 'running', 'artifacts': []}}
+            self.save()
+            try:
+                from .run_graph import write_run_json
+                journal = self.journals()[1]
+                write_run_json(self.owner.logs / 'baseline_summary.json',
+                               {'best node': self.node_log(journal.nodes[0]), 'best node with different seeds': []})
+                self.state['dependencies']['journal_evidence'] = {'status': 'completed', 'artifacts': ['logs/0-run/baseline_summary.json']}
+            except Exception as exc:
+                self.state['dependencies']['journal_evidence'] = {'status': 'failed', 'reason': str(exc)[:300]}
+                self.limitations.append('Thiếu bằng chứng journal cho plots/PDF.')
+            self.save()
+        self.step('report', self.report)
+        for name, operation in (('plots', self.plots), ('writeup', self.writeup)):
+            if self.state['components'][name]['status'] == 'not_requested':
+                continue
+            ready = (self.state['components']['summary']['status'] == 'completed'
+                     or self.state.get('dependencies', {}).get('journal_evidence', {}).get('status') == 'completed')
+            if ready:
+                self.step(name, operation)
+            else:
+                self.set(name, 'blocked', 'Chưa đủ bằng chứng thí nghiệm để tạo đầu ra này.')
+        if self.plan.review and not self.plan.report and self.plan.writeup == 'none':
+            # A text review can use the factual execution journal directly.
+            from ai_scientist.perform_llm_review import perform_review
+            def review_journal():
+                text = (self.owner.root / 'memory_journal.json').read_text(encoding='utf-8')
+                result = perform_review(text, self.owner.service.config.codex_model, self.client,
+                                        num_fs_examples=0, num_reflections=1, num_reviews_ensemble=1)
+                if not isinstance(result, dict) or not result:
+                    raise ValueError('Review chưa trả JSON hợp lệ')
+                (self.owner.root / 'review_text.txt').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+                return ['review_text.txt']
+            self.step('review', review_journal)
+        else:
+            self.step('review', self.review)
+        complete = all(item['status'] in {'completed', 'not_requested'} for item in self.state['components'].values())
+        self.state['status'] = 'completed' if complete else 'failed'
+        self.save()
+        return complete, self.limitations

@@ -112,7 +112,8 @@ class RemoteSearchAgent:
 
 
 class TreeSearchRun:
-    def __init__(self, service, key, approved, descriptor, terminal, options):
+    def __init__(self, service, key, approved, descriptor, terminal, options, *, single_run=False):
+        self.single_run = single_run
         self.service, self.key, self.approved = service, key, approved
         self.descriptor, self.terminal, self.options = descriptor, terminal, options
         self.root = service.view.root(*key)

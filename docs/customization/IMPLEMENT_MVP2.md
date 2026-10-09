@@ -3,6 +3,11 @@
 Cập nhật: **2026-10-09**, Asia/Saigon. Nền bàn giao: `mvp1-2026-10-08`.
 Roadmap: [PRODUCT_ROADMAP.md, mục 6](PRODUCT_ROADMAP.md#6-mvp-2--general-implementation-agent-cho-workshop-và-paper).
 
+**Thiết kế hiện hành:** [Project run tree](PROJECT_RUN_TREE.md). User đã đổi sang
+mỗi node là một run/phiên SSH riêng, draft/improve do user chọn, tự sửa lỗi trong
+run; summary/report/plots/PDF/review là checkbox. Nội dung bốn stage bên dưới
+ghi lại kế hoạch và lần triển khai M2-04 trước thay đổi này.
+
 ## 1. Yêu cầu đã chốt
 
 Một project có hai mode dùng chung Library:

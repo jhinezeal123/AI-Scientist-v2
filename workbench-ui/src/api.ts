@@ -26,6 +26,7 @@ export type Variant = {project_id:string;idea_id:string;parent_run_id:string;par
     result:Record<string,unknown>;artifact_refs:{path:string;bytes:number;sha256:string;kind?:string}[];
     text_files:{path:string;stage_path:string;kind:string;available:boolean;bytes?:number;sha256?:string;reason?:string}[]}};
 export type Idea = {id: string; title: string; text: string; state: string; error: string|null; created_at: string;deleted_at?:string|null;variant?:Variant|null;
+  research?:ResearchPlan|null;tags?:string[];
   mode:RunMode;desired_output:string;mode_legacy?:boolean;
   conversation: ({role:'user';text:string;reply_to:string}|{role:'assistant';proposal_id:string;version:number;body:PlanBody})[]};
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
@@ -34,9 +35,10 @@ export type Working = {phase:string;accelerator:string;ttl_seconds:number;starte
 export type RunOutput = {directory:string|null;status:'completed'|'partial'|'pending';summary:string;summary_sha256:string|null;limitations:string[];
   stop_confirmed:boolean;files:{path:string;bytes:number;sha256:string}[]};
 export type Context = {context_sha256: string; snapshot: {project_id: string;
-  idea: {id: string; text: string;mode?:RunMode;desired_output?:string}; resources: Omit<Resource,'content'>[];variant?:Variant}};
+  idea: {id: string; text: string;mode?:RunMode;desired_output?:string;run_model?:string;research?:ResearchPlan|null;tags?:string[]}; resources: Omit<Resource,'content'>[];variant?:Variant}};
 export type History = {proposals: {id: string; version: number; state: string; context_sha256: string}[];
   runs: {id: string; proposal_id: string; proposal_version?:number; idea_id?:string|null; state: string; error: string|null;deleted_at?:string|null;
+    title?:string;parent_run_id?:string|null;tags?:string[];run_model?:'single'|'legacy';can_delete?:boolean;
     mode?:RunMode;desired_output?:string;mode_legacy?:boolean;
     purpose?: string; idea_text?:string; proposal_objective?:string; context_sha256?:string;
     variant?:Pick<Variant,'parent_run_id'|'purpose'|'change_summary'>|null;

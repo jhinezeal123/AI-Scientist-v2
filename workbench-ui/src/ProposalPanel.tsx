@@ -23,7 +23,8 @@ export default function ProposalPanel({idea,proposals,resources,busy,onOpenParen
   const latest = proposals.filter(p => p.idea_id === idea?.id).sort((a,b) => b.version-a.version)[0];
   const pinnedIdea=latest?.context_snapshot.idea;
   const settingsMatch=!!idea && (pinnedIdea?.mode || 'training_research')===idea.mode
-    && (pinnedIdea?.desired_output || '')===idea.desired_output;
+    && (pinnedIdea?.desired_output || '')===idea.desired_output
+    && (!pinnedIdea?.run_model || JSON.stringify(pinnedIdea.research || null)===JSON.stringify(idea.research || null));
   const changedSources=latest?.context_snapshot.resources.filter(source=>!resources.some(current=>
     !current.deletion_pending && current.id===source.id && current.version===source.version && current.content_sha256===source.content_sha256)) || [];
   const answered = latest?.state === 'STALE' && latest.body.needs_clarification

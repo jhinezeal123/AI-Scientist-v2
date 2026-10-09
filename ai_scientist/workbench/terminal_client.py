@@ -9,7 +9,7 @@ import urllib.request
 
 def main():
     parser = argparse.ArgumentParser(description='Commands on the already-open Kaggle terminal')
-    parser.add_argument('action', choices=('exec', 'read', 'write'))
+    parser.add_argument('action', choices=('exec', 'read', 'write', 'fetch'))
     parser.add_argument('value', help='Shell command for exec, relative remote path for read/write')
     parser.add_argument('file', nargs='?', help='Local file for write')
     parser.add_argument('--timeout', type=int, default=120)
@@ -18,6 +18,8 @@ def main():
     body = {'action': args.action}
     if args.action == 'exec':
         body.update(command=args.value, timeout=args.timeout)
+    elif args.action == 'fetch':
+        body['link'] = args.value
     else:
         body['path'] = args.value
         if args.action == 'write':
@@ -29,6 +31,12 @@ def main():
     try:
         with urllib.request.urlopen(request, timeout=args.timeout + 30) as response:
             result = json.load(response)
+    except urllib.error.HTTPError as exc:
+        try:
+            reason = json.load(exc).get('error', 'request_rejected')
+        except (ValueError, OSError):
+            reason = 'request_rejected'
+        raise SystemExit(f'Terminal request rejected ({reason}); the request was not replayed')
     except (urllib.error.URLError, TimeoutError):
         raise SystemExit('Kaggle terminal unavailable; the command was not replayed')
     if args.action == 'exec':
@@ -38,6 +46,8 @@ def main():
         raise SystemExit(0 if result['returncode'] == 0 else 1)
     if args.action == 'read':
         print(base64.b64decode(result['data']).decode('utf-8', 'replace'), end='')
+    elif args.action == 'fetch':
+        print(json.dumps(result))
     else:
         print(json.dumps({'written_bytes': result['bytes']}))
 

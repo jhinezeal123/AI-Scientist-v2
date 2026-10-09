@@ -79,13 +79,16 @@ class WorkingStore:
             descriptor = json.loads(record['descriptor_json']) if record['descriptor_json'] else None
             if descriptor and receipt.get('notebook_ref') != descriptor['notebook_ref']:
                 raise StoreConflict('Stop receipt belongs to a different Kaggle notebook')
-            approved = connection.execute('SELECT context_snapshot_json FROM proposals JOIN runs ON runs.proposal_id=proposals.id WHERE runs.id=?', (run_id,)).fetchone()
-            mode, _ = snapshot_settings(json.loads(approved['context_snapshot_json']))
+            approved = connection.execute('SELECT context_snapshot_json,body_json FROM proposals JOIN runs ON runs.proposal_id=proposals.id WHERE runs.id=?', (run_id,)).fetchone()
+            snapshot = json.loads(approved['context_snapshot_json'])
+            mode, _ = snapshot_settings(snapshot)
+            research = json.loads(approved['body_json']).get('research') or {}
+            report_requested = research.get('report', snapshot['idea'].get('run_model') != 'single')
             if mode == 'etc' and report_path is not None:
                 raise StoreConflict('Etc saves Output instead of a research report')
             if outcome == 'COMPLETED' and (not record['summary_json'] or not record['manifest_json']
-                    or (mode != 'etc' and report_path != 'report.md')):
-                raise StoreConflict('Working outputs and report are not durable')
+                    or (mode != 'etc' and report_requested and report_path != 'report.md')):
+                raise StoreConflict('Working outputs or selected report are not durable')
             if outcome == 'COMPLETED' and mode == 'etc' and json.loads(record['manifest_json']).get('complete') is not True:
                 raise StoreConflict('Etc output collection is incomplete')
             if outcome == 'COMPLETED' and json.loads(record['summary_json']).get('succeeded') is not True:

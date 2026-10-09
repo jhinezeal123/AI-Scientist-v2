@@ -34,12 +34,12 @@ class PlanningService:
             return {"idea_id": idea_id, "state": "PLANNING"}
 
     async def create_variant(self, project_id, parent_run_id, request_id, title, purpose, change_summary,
-                             mode=None, desired_output=None):
+                             mode=None, desired_output=None, research=None, tags=None):
         if self.view is None:
             raise RuntimeError('Run view is required to capture a safe variant baseline')
         baseline, texts = await asyncio.to_thread(self.view.variant_baseline, project_id, parent_run_id)
         return await asyncio.to_thread(self.store.create_variant_idea, project_id, parent_run_id, request_id,
-                                       title, purpose, change_summary, baseline, texts, mode, desired_output)
+                                       title, purpose, change_summary, baseline, texts, mode, desired_output, research, tags)
 
     async def _plan(self, project_id, idea_id, context):
         try:
@@ -59,6 +59,9 @@ class PlanningService:
                 mode, _ = snapshot_settings(context['snapshot'])
                 if mode == 'etc':
                     body.pop('research', None)
+                elif context['snapshot']['idea'].get('run_model') == 'single':
+                    # User checkboxes, rather than model suggestions, own output scope.
+                    body['research'] = ResearchPlan.model_validate(context['snapshot']['idea'].get('research') or {}).model_dump()
                 elif 'mode' in context['snapshot']['idea'] and 'research' not in body:
                     body['research'] = ResearchPlan().model_dump()
                 ready = WorkingProposal.model_validate(body)

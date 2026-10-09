@@ -44,8 +44,8 @@ class WorkbenchConfig(BaseModel):
 
 class ResearchPlan(StrictModel):
     """Research outputs explicitly visible in the proposal before approval."""
-    summary: bool = True
-    report: bool = True
+    summary: bool = False
+    report: bool = False
     plots: bool = False
     writeup: Literal['none', 'icbinb', 'normal'] = 'none'
     review: bool = False
@@ -61,10 +61,6 @@ class ResearchPlan(StrictModel):
             raise ValueError('Seed evaluation stages must be distinct stage numbers 1–4')
         if self.seeds and not self.seed_stages:
             raise ValueError('Choose the stages for approved seed evaluation')
-        if self.review and not self.report and self.writeup == 'none':
-            raise ValueError('Review requires an approved report or paper')
-        if (self.plots or self.writeup != 'none') and not self.summary:
-            raise ValueError('Plots and paper require approved experiment summaries')
         return self
 
 

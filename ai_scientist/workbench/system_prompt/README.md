@@ -6,14 +6,14 @@ không cần restart backend sau khi tính năng này đã được nạp.
 
 | Alias trong backend | File gốc | Vai trò |
 | --- | --- | --- |
-| `planner.training_research` | `planner_training_research.md` | Proposal nghiên cứu với bốn stage hiện có |
+| `planner.training_research` | `planner_training_research.md` | Proposal cho một draft/improve run |
 | `planner.etc` | `planner_etc.md` | Proposal triển khai trực tiếp theo đầu ra user mô tả |
 | `working.agent` | `working_agent.md` | Prompt trực tiếp gửi cho Codex CLI |
 | `working.instructions` | `working_instructions.md` | Hướng dẫn được lưu vào `working-request.json` |
 | `working.etc` | `working_etc.md` | Prompt hoàn chỉnh cho Working Etc trực tiếp, không cây/report nghiên cứu |
 | `search.node` | `search_node.md` | Tạo/chạy node Tree Search |
 | `search.node_instructions` | `search_node_instructions.md` | Hướng dẫn thực hiện node |
-| `search.query` | `search_query.md` | Đọc kết quả của node |
+| `search.query` | `search_query.md` | Adapter Codex cho các module đầu ra tùy chọn |
 | `search.stage_goals` | `search_stage_goals.json` | Mục tiêu bốn stage |
 
 `aliases.json` ánh xạ alias sang đường dẫn file tương đối trong thư mục này.
@@ -41,3 +41,7 @@ Muốn dùng bản prompt khác, sửa tên file trong ánh xạ. Backend vẫn 
 
 Proposal vẫn là ngữ cảnh riêng do người dùng duyệt. Sửa prompt không sửa mode,
 mô tả đầu ra hoặc hash của các proposal/run đã lưu.
+
+Working hiện hành chạy một run trên một phiên SSH riêng. Các alias search.node,
+search.node_instructions và search.stage_goals dành cho engine cũ, không được
+gọi bởi Working hiện hành. Tag research/tuning/ablation chỉ là metadata GUI.

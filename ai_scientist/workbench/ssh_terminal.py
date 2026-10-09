@@ -170,7 +170,7 @@ class SshTerminal:
 
 class AgentTerminalBridge:
     """Give the agent terminal access without Kaggle MCP or account credentials."""
-    def __init__(self, terminal, workdir, *, on_command=None):
+    def __init__(self, terminal, workdir, *, on_command=None, fetch_artifact=None):
         self.terminal, self.workdir = terminal, Path(workdir)
         self.token = secrets.token_urlsafe(32)
         bridge = self
@@ -190,15 +190,21 @@ class AgentTerminalBridge:
                         raise ValueError('Invalid request size')
                     body = json.loads(self.rfile.read(size))
                     action = body.pop('action')
-                    if action not in {'exec', 'read', 'write'}:
+                    started = time.monotonic()
+                    if action == 'fetch' and fetch_artifact is not None:
+                        if set(body) != {'link'}:
+                            raise ValueError('Invalid artifact fetch arguments')
+                        result = fetch_artifact(body['link'])
+                    elif action not in {'exec', 'read', 'write'}:
                         raise ValueError('This action belongs to the backend')
-                    allowed = {'exec': {'command', 'timeout'}, 'read': {'path', 'offset'},
-                               'write': {'path', 'data'}}[action]
-                    if not set(body).issubset(allowed):
-                        raise ValueError('Invalid terminal arguments')
-                    result = bridge.terminal.request(action, **body)
+                    else:
+                        allowed = {'exec': {'command', 'timeout'}, 'read': {'path', 'offset'},
+                                   'write': {'path', 'data'}}[action]
+                        if not set(body).issubset(allowed):
+                            raise ValueError('Invalid terminal arguments')
+                        result = bridge.terminal.request(action, **body)
                     if action == 'exec' and on_command is not None:
-                        on_command({'command':body['command'], **result})
+                        on_command({'command':body['command'], **result, 'elapsed_seconds': time.monotonic() - started})
                     data = json.dumps(result).encode()
                     self.send_response(200)
                 except (ValueError, KeyError, TypeError, RuntimeError, OSError) as exc:

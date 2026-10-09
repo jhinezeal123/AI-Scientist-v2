@@ -1,5 +1,5 @@
 import {FormEvent, useEffect, useRef, useState} from 'react';
-import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal, RunMode, modeLabel} from './api';
+import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal, RunMode, ResearchPlan, modeLabel} from './api';
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
@@ -7,6 +7,7 @@ import FileImport from './FileImport';
 import SourceCards from './SourceCards';
 import ProjectDeletion from './ProjectDeletion';
 import ModeFields from './ModeFields';
+import ResearchOptions, {emptyResearch} from './ResearchOptions';
 import {statusText} from './sourceStatus';
 import {loadProjectData} from './projectData';
 import {forgetProject, lastProject, ProjectSession, readProjectSession, rememberProject, saveProjectSession} from './projectSession';
@@ -19,7 +20,7 @@ export default function App() {
   const [projectId, setProjectId] = useState(initialPage.get('project') || lastProject());
   const [projectName, setProjectName] = useState('');
   const [tab, setTab] = useState<ProjectSession['tab']>(()=>initialPage.get('view')==='library' ? 'Library'
-    : initialPage.has('run') ? 'Run' : readProjectSession(projectId).tab);
+    : initialPage.has('run') || initialPage.get('view')==='run' ? 'Run' : readProjectSession(projectId).tab);
   const [resources, setResources] = useState<Resource[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [history, setHistory] = useState<History>({proposals: [], runs: []});
@@ -35,6 +36,10 @@ export default function App() {
   const [editingMode,setEditingMode] = useState<RunMode>('training_research');
   const [desiredOutput,setDesiredOutput] = useState('');
   const [editingIdea,setEditingIdea] = useState<Idea|null>(null);
+  const [research,setResearch]=useState<ResearchPlan>(emptyResearch);
+  const [runTags,setRunTags]=useState<string[]>([]);
+  const [branch,setBranch]=useState<{parentId:string;title:string;mode:RunMode;requestId:string}|null>(null);
+  const [branchChanges,setBranchChanges]=useState('');
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState<Resource|null>(null);
   const [replacing,setReplacing] = useState<Resource|null>(null);
@@ -66,12 +71,13 @@ export default function App() {
     rememberProject(projectId);
     const saved=readProjectSession(projectId);
     if (firstRestore.current && initialPage.get('view')==='library')saved.tab='Library';
-    else if (firstRestore.current && initialPage.has('run')) {
+    else if (firstRestore.current && (initialPage.has('run') || initialPage.get('view')==='run')) {
       saved.tab='Run';saved.runId=initialPage.get('run') || '';
     }
     firstRestore.current=false;
     setTab(saved.tab);setRunId(saved.runId);setSelected(saved.sourceIds);setIdeaId(saved.ideaId);setSessionProject(projectId);
     setMode(saved.mode);setDesiredOutput('');
+    setBranch(null);setBranchChanges('');setResearch(emptyResearch());setRunTags([]);
     setContext(null);setEditing(null);setForm(blank);setReplacing(null);
     setIdeaText(''); setTitle(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
     setError('');
@@ -178,7 +184,7 @@ export default function App() {
   const unavailable=loading || !!connectionError;
   const selectedIdea=ideas.find(idea=>idea.id===ideaId);
   const outputMissing=selectedIdea?.mode==='etc' && !selectedIdea.desired_output.trim();
-  const formMode=editingIdea ? editingMode : mode;
+  const formMode=branch ? branch.mode : editingIdea ? editingMode : mode;
   const parentSources=selectedIdea?.variant?.baseline.parent.sources || [];
   const changedParentSources=parentSources.filter(parent=>{
     const current=resources.find(source=>source.id===parent.id && !source.deletion_pending);
@@ -210,6 +216,7 @@ export default function App() {
       created=await api<Idea>(`/projects/${projectId}/runs/${id}/variants`,'POST',{
         request_id:requestId,title:variantTitle,purpose,change_summary:changeSummary,
         mode:variantMode,desired_output:variantOutput,
+        research:variantMode==='etc' ? null : research,tags:variantMode==='etc' ? [] : runTags,
       });
       const sources=created.variant?.baseline.parent.sources || [];
       setSelected(sources.map(source=>source.id).filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
@@ -220,11 +227,19 @@ export default function App() {
       setReviewedVariantSources(hasChanged ? '' : created.id);
       setIdeaId(created.id);setEditingIdea(null);setIdeaText('');setTitle('');setContext(null);setTab('Idea');
       setDesiredOutput('');
+      setBranch(null);setBranchChanges('');setResearch(emptyResearch());setRunTags([]);
       setRevision(n=>n+1);setNotice('Đã lưu idea biến thể ở trạng thái bản nháp. Chưa gọi planner hoặc tạo run.');
     });
     return created;
   }
   function openRun(id:string) {setTab('Run');setRunId(id);}
+  function beginBranch(id:string,branchMode:RunMode) {
+    const parent=history.runs.find(run=>run.id===id);
+    setBranch({parentId:id,title:parent?.title || 'Run '+id.slice(0,8),mode:branchMode,requestId:crypto.randomUUID().replaceAll('-','')});
+    setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput('');setBranchChanges('');
+    setResearch(emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');
+    setSelected((parent?.source_refs || []).map(source=>source.id).filter(id=>resources.some(source=>source.id===id && !source.deletion_pending)));
+  }
   return <div className="app">
     <aside className="rail">
       <div className="brand"><span className="brand-mark">∿</span><div>AI SCIENTIST<small>LOCAL WORKBENCH</small></div></div>
@@ -282,17 +297,35 @@ export default function App() {
               onCancel={()=>setReplacing(null)} onUpload={action} onSaved={source=>{setReplacing(null);setContext(null);setRevision(n=>n+1);
                 setNotice(`Đã nhập ${source.title} · v${source.version}: ${statusText(source.status)}.`);}}/></section>
         </div>}
-        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{editingIdea ? 'Sửa idea' : 'Idea mới'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Working chỉ thực hiện sau approval.</p>
-          <form className="stack" onSubmit={event => {event.preventDefault(); void action(async () => {
+        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{branch ? (formMode==='etc' ? 'Etc từ run đã chọn' : 'Improve từ run đã chọn') : editingIdea ? 'Sửa idea' : 'Idea mới · Draft'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Mỗi proposal được duyệt tạo đúng một run.</p>
+          {branch && <div className="context"><strong>Run cha: {branch.title}</strong><p>Run mới nhận code, memory_journal và liên kết artifact của cha.</p></div>}
+          <form className="stack" onSubmit={event => {event.preventDefault();
+            if(branch) {
+              void createVariant(branch.parentId,branch.requestId,title.trim(),ideaText.trim(),branchChanges.trim(),formMode,desiredOutput.trim());
+              return;
+            }
+            void action(async () => {
             const path = `/projects/${projectId}/ideas` + (editingIdea ? `/${editingIdea.id}` : '');
             const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {title,text: ideaText,mode:formMode,desired_output:desiredOutput,
-              ...(editingIdea ? {expected_text:editingIdea.text,expected_title:editingIdea.title,expected_mode:editingIdea.mode,expected_desired_output:editingIdea.desired_output} : {})});
+              research:formMode==='etc' ? null : research,tags:formMode==='etc' ? [] : runTags,
+              ...(editingIdea ? {expected_text:editingIdea.text,expected_title:editingIdea.title,expected_mode:editingIdea.mode,expected_desired_output:editingIdea.desired_output,
+                expected_research:editingIdea.research || null,expected_tags:editingIdea.tags || []} : {})});
             setIdeaId(idea.id); setIdeaText(''); setTitle(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea.');
             setDesiredOutput('');
-          });}}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
+            setResearch(emptyResearch());setRunTags([]);
+          });
+          }}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
           <ModeFields mode={formMode} desiredOutput={desiredOutput} disabled={busy || unavailable}
-            onMode={editingIdea ? setEditingMode : setMode} onOutput={setDesiredOutput}/>
-          <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} readOnly={!!editingIdea?.variant} onChange={e => setIdeaText(e.target.value)}/></label><div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim()}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>{editingIdea && <button type="button" onClick={() => {setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput('');}}>Hủy sửa idea</button>}</div></form>
+            onMode={value=>{if(branch)setBranch({...branch,mode:value,requestId:crypto.randomUUID().replaceAll('-','')});else if(editingIdea)setEditingMode(value);else setMode(value);}} onOutput={setDesiredOutput}/>
+          <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} readOnly={!!editingIdea?.variant} onChange={e => setIdeaText(e.target.value)}/></label>
+          {branch && <label>Thay đổi so với run cha<textarea rows={3} required maxLength={20000} value={branchChanges} onChange={e=>setBranchChanges(e.target.value)}/></label>}
+          {branch && formMode!=='etc' && <fieldset className="run-tag-options"><legend>Tag ghi nhớ</legend>
+            <div className="actions">{['research','tuning','ablation'].map(tag=><label className="check" key={tag}>
+              <input type="checkbox" checked={runTags.includes(tag)} onChange={e=>setRunTags(old=>e.target.checked ? [...old,tag] : old.filter(value=>value!==tag))}/><span>{tag}</span></label>)}</div>
+            <small className="muted">Chỉ để ghi nhớ; không thay đổi cách agent thực hiện.</small></fieldset>}
+          {formMode!=='etc' && <ResearchOptions value={research} onChange={setResearch} disabled={busy || unavailable}/>}
+          <div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim() || (!!branch && !branchChanges.trim())}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>
+            {(editingIdea || branch) && <button type="button" onClick={()=>{setEditingIdea(null);setBranch(null);setBranchChanges('');setIdeaText('');setTitle('');setDesiredOutput('');setResearch(emptyResearch());setRunTags([]);}}>Hủy</button>}</div></form>
           <IdeaCards key={projectId} ideas={ideas} selectedId={ideaId} busy={busy || unavailable} onSelect={selectIdea}
             onDelete={async id=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${id}`,'DELETE');setIdeaId('');setContext(null);setEditingIdea(null);setIdeaText('');setTitle('');
@@ -302,7 +335,7 @@ export default function App() {
             onRestore={async id=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục idea.');
             });}}
-            onEdit={idea=>{setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);setEditingMode(idea.mode);setDesiredOutput(idea.desired_output);}}
+            onEdit={idea=>{setBranch(null);setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);setEditingMode(idea.mode);setDesiredOutput(idea.desired_output);setResearch(idea.research || emptyResearch());setRunTags(idea.tags || []);}}
             onRename={async (idea,newTitle)=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${idea.id}/title`,'PATCH',{title:newTitle,expected_title:idea.title});
               setRevision(n=>n+1);setNotice('Đã lưu tiêu đề idea.');
@@ -343,34 +376,24 @@ export default function App() {
           setNotice(`Đã gửi câu trả lời và nguồn của v${proposal.version} cho Codex để lập proposal v${proposal.version + 1}.`);
         });}} onApprove={async proposal => {await action(async () => {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
+          setRunId(run.id);setTab('Run');
         });}}/></div>}
         {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning || implementing}
-          defaultMode={mode}
           onOutputCopied={()=>setRevision(n=>n+1)}
-          onCreateVariant={createVariant}
+          onBranch={beginBranch}
           onDelete={async id=>{await action(async()=>{
-            await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRevision(n=>n+1);setNotice('Đã xóa run khỏi danh sách. Artifacts được giữ để khôi phục.');
+            await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRunId('');setRevision(n=>n+1);setNotice('Đã xóa node lá và các file của run.');
           });}}
           onRestore={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục run.');
           });}}
-          onWorking={async (id,accelerator,ttl,stageIterations) => {
-          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl,
-            ...(stageIterations ? {search:{stage_iterations:stageIterations}} : {})});setRevision(n => n+1);
-            setNotice(stageIterations ? 'Đã bắt đầu Working: cây tìm kiếm 4 giai đoạn dùng chung một phiên Kaggle.' : 'Đã bắt đầu Working Etc: thực hiện trực tiếp và lưu Output.');});
+          onWorking={async (id,accelerator,ttl) => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl});setRevision(n => n+1);
+            setNotice('Đã bắt đầu Working cho run này trong một phiên SSH riêng.');});
         }} onStop={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/stop`, 'POST');setRevision(n => n+1);setNotice('Đã yêu cầu dừng Working. Backend sẽ xác nhận phiên Kaggle đã dừng.');});
         }} onReconcile={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/reconcile`, 'POST');setRevision(n => n+1);setNotice('Đã đối soát trạng thái qua MCP; không gửi notebook lần nữa.');});
-        }} onRetry={async id => {
-          let newId:string|undefined;
-          await action(async () => {
-            const run = await api<{id:string}>(`/projects/${projectId}/runs/${id}/retry`, 'POST',
-              {request_id:crypto.randomUUID().replaceAll('-','')});
-            newId=run.id;setRevision(n => n+1);
-            setNotice(`Đã tạo run ${run.id.slice(0,8)} từ proposal đã duyệt. Bấm Working khi sẵn sàng.`);
-          });
-          return newId;
         }}/>} 
       </>}
     </main>

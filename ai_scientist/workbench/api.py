@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import Field, field_validator
 
-from .models import StrictModel
+from .models import StrictModel, ResearchPlan
 from .modes import RunMode
 from .log_window import read_log_window
 from .resources import readiness_sources
@@ -42,6 +42,8 @@ class IdeaInput(StrictModel):
     title: str | None = Field(default=None, min_length=1, max_length=80)
     mode: RunMode = 'training_research'
     desired_output: str = Field(default='', max_length=20_000)
+    research: ResearchPlan | None = None
+    tags: list[Literal['research', 'tuning', 'ablation']] = Field(default_factory=list, max_length=3)
 
 
 class ContextInput(StrictModel):
@@ -56,6 +58,8 @@ class IdeaUpdate(IdeaInput):
     expected_title: str | None = Field(default=None, max_length=80)
     expected_mode: RunMode | None = None
     expected_desired_output: str | None = Field(default=None, max_length=20_000)
+    expected_research: ResearchPlan | None = None
+    expected_tags: list[str] | None = None
 
 
 class IdeaTitleUpdate(StrictModel):
@@ -92,6 +96,8 @@ class VariantInput(StrictModel):
     change_summary: str = Field(min_length=1, max_length=20_000)
     mode: RunMode | None = None
     desired_output: str | None = Field(default=None, max_length=20_000)
+    research: ResearchPlan | None = None
+    tags: list[Literal['research', 'tuning', 'ablation']] = Field(default_factory=list, max_length=3)
 
 
 class WorkingInput(StrictModel):
@@ -281,7 +287,11 @@ def library_router(store, workspace_root):
 
     @router.delete('/projects/{project_id}/runs/{run_id}')
     async def delete_run(project_id: str, run_id: str, request: Request):
-        return await change_deleted(request, project_id, 'runs', run_id, True)
+        service = getattr(request.app.state, 'service', None)
+        if service:
+            async with service.lock:
+                return await asyncio.to_thread(call, store.delete_run, project_id, run_id)
+        return await asyncio.to_thread(call, store.delete_run, project_id, run_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/restore')
     async def restore_run(project_id: str, run_id: str, request: Request):
@@ -289,13 +299,16 @@ def library_router(store, workspace_root):
 
     @router.post("/projects/{project_id}/ideas", status_code=201)
     def add_idea(project_id: str, body: IdeaInput):
-        return call(store.save_idea, project_id, body.text, body.title, body.mode, body.desired_output)
+        return call(store.save_idea, project_id, body.text, body.title, body.mode, body.desired_output,
+                    body.research.model_dump() if body.research else None, body.tags)
 
     @router.put("/projects/{project_id}/ideas/{idea_id}")
     def update_idea(project_id: str, idea_id: str, body: IdeaUpdate):
         return call(store.update_idea, project_id, idea_id, body.text, body.expected_text,
                     body.title, body.expected_title, body.mode, body.desired_output,
-                    body.expected_mode, body.expected_desired_output)
+                    body.expected_mode, body.expected_desired_output,
+                    body.research.model_dump() if body.research else None, body.tags,
+                    body.expected_research.model_dump() if body.expected_research else None, body.expected_tags)
 
     @router.patch("/projects/{project_id}/ideas/{idea_id}/title")
     def rename_idea(project_id: str, idea_id: str, body: IdeaTitleUpdate):
@@ -350,7 +363,8 @@ def library_router(store, workspace_root):
     @router.post('/projects/{project_id}/runs/{run_id}/variants', status_code=201)
     async def create_variant(project_id: str, run_id: str, body: VariantInput, request: Request):
         return await async_call(request.app.state.service.create_variant, project_id, run_id,
-                                body.request_id, body.title, body.purpose, body.change_summary, body.mode, body.desired_output)
+                                body.request_id, body.title, body.purpose, body.change_summary, body.mode, body.desired_output,
+                                body.research.model_dump() if body.research else None, body.tags)
 
     @router.get('/projects/{project_id}/runs/{run_id}/logs')
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):

@@ -12,7 +12,7 @@ BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'paylo
 ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
                   'submission-intent.json', 'launch-readiness.json', 'remote-identity.json',
                   'save-receipt.json', 'launch-diagnostic.json',
-                  'collection-manifest.json', 'result-facts.json', 'report.md', 'retry-feedback.json',
+                  'collection-manifest.json', 'result-facts.json', 'report.md', 'retry-feedback.json', 'memory_journal.json', 'execution.json',
                   'output/result.json', 'output/metrics.json', 'output/runner.log',
                   'submit-bundle/notebook.ipynb', 'submit-bundle/kernel-metadata.json', 'submit-bundle/bundle-manifest.json')
 
@@ -93,6 +93,9 @@ class RunView:
                     'available': True, 'bytes': len(data), 'sha256': sha256}
 
         baseline_texts = {}
+        if (root / 'memory_journal.json').is_file():
+            memory = read_text('memory_journal.json', 'baseline/memory_journal.json', 'memory_journal')
+            baseline['text_files'].append(memory)
         if run['report_path'] == 'report.md':
             report = read_text('report.md', 'baseline/report.md', 'report')
             baseline['text_files'].append(report)
@@ -210,7 +213,34 @@ class RunView:
                             {key: item[key] for key in ('path', 'bytes', 'sha256')})
         except (OSError, ValueError, KeyError, TypeError):
             baseline['result']['collection_manifest_status'] = 'unavailable'
-        baseline['artifact_refs'] = baseline['artifact_refs'][:64]
+        from .run_graph import artifact_reference, memory_document
+        # Legacy runs also provide a factual journal without rerunning them.
+        if not any(item.get('kind') == 'memory_journal' and item.get('available') for item in baseline['text_files']):
+            memory = memory_document(run, approved)
+            memory['summary'] = baseline['result'].get('working_summary', {}).get('summary', '')
+            memory['artifacts'] = [artifact_reference(run_id, item) for item in baseline['artifact_refs']]
+            text = json.dumps(memory, ensure_ascii=False, indent=2)
+            baseline_texts['baseline/memory_journal.json'] = text
+            baseline['text_files'] = [item for item in baseline['text_files'] if item.get('kind') != 'memory_journal']
+            baseline['text_files'].append({'path': 'memory_journal.json', 'stage_path': 'baseline/memory_journal.json',
+                'kind': 'memory_journal', 'available': True, 'bytes': len(text.encode('utf-8')),
+                'sha256': hashlib.sha256(text.encode('utf-8')).hexdigest()})
+        # Include scientific finishing outputs too, using the existing public
+        # artifact allowlist. Only references are captured; bytes stay on disk.
+        from .experiments import search_artifacts
+        refs = {item['path']: item for item in baseline['artifact_refs']}
+        public = set(self.detail(project_id, run_id)['artifacts']) | set(search_artifacts(root))
+        public.update(name for name in ('working-manifest.json', 'working-stop.json', 'working.log', 'output.json')
+                      if (root / name).is_file())
+        for name in sorted(public):
+            path = root.joinpath(*PurePosixPath(name).parts)
+            if (name in refs or not path.is_file() or not path.resolve().is_relative_to(root)
+                    or any(p.is_symlink() or p.is_junction() for p in (path, *path.parents) if p.is_relative_to(root))):
+                continue
+            with path.open('rb') as stream:
+                sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
+            refs[name] = {'path': name, 'bytes': path.stat().st_size, 'sha256': sha256}
+        baseline['artifact_refs'] = [artifact_reference(run_id, item) for item in refs.values()]
         return baseline, baseline_texts
 
     def detail(self, project_id, run_id):
@@ -225,6 +255,11 @@ class RunView:
         run['can_retry'] = not run['deleted_at'] and (run['state'] in {'FAILED','COMPLETED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING'} or (run['state'] == 'UNKNOWN' and self.allow_unknown_retry()))
         approved = self.store.approved_snapshot(project_id, run_id)
         run['purpose'] = approved['body']['objective']
+        with self.store.connection(project_id) as connection:
+            idea = connection.execute('SELECT title FROM ideas WHERE id=?', (approved['snapshot']['idea']['id'],)).fetchone()
+        run['title'] = (idea['title'] if idea else '') or approved['body']['objective'][:80]
+        run['run_model'] = approved['snapshot']['idea'].get('run_model', 'legacy')
+        run['tags'] = approved['snapshot']['idea'].get('tags', [])
         run.update(mode_metadata(approved['snapshot']))
         run['variant'] = approved['snapshot'].get('variant')
         if run['variant']:
@@ -263,6 +298,9 @@ class RunView:
             body = approved['body']
             selected_refs = set(body.get('data_refs', []))
             item['purpose'] = detail.get('purpose')
+            from .run_graph import parent_id
+            item.update(title=detail['title'], tags=detail['tags'], run_model=detail['run_model'],
+                        parent_run_id=parent_id(detail, snapshot), can_delete=detail['can_delete'])
             item.update({key: detail[key] for key in ('mode', 'desired_output', 'mode_legacy')})
             item['result_metric'] = detail.get('result_metric')
             # History describes the approved inputs as they were pinned at approval time.
