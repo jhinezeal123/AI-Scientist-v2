@@ -1,6 +1,6 @@
 """Environment regression for the backend-owned MCP subprocess."""
 import asyncio
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -8,15 +8,20 @@ import pytest
 from ai_scientist.workbench import kaggle
 
 
-@pytest.mark.parametrize('platform,programdata,expected', [
-    ('win32', r'C:\ProgramData', {'PROGRAMDATA': r'C:\ProgramData'}),
-    ('win32', None, {}),
-    ('linux', r'C:\ProgramData', {}),
+@pytest.mark.parametrize('platform,programdata,port,expected', [
+    ('win32', r'C:\ProgramData', None, {'PROGRAMDATA': r'C:\ProgramData'}),
+    ('win32', None, None, {}),
+    ('linux', r'C:\ProgramData', None, {}),
+    ('win32', r'C:\ProgramData', '8023', {'PROGRAMDATA': r'C:\ProgramData',
+        'AI_SCIENTIST_KAGGLE_PROXY_PORT': '8023'}),
 ])
-def test_mcp_inherits_only_required_windows_environment(monkeypatch, tmp_path, platform, programdata, expected):
+def test_mcp_inherits_only_required_environment(monkeypatch, tmp_path, platform, programdata, port, expected):
     captured = []
     monkeypatch.setattr(kaggle, 'sys', SimpleNamespace(platform=platform))
-    monkeypatch.setattr(kaggle.socket, 'create_connection', lambda *a, **k: nullcontext())
+    if port is None:
+        monkeypatch.delenv('AI_SCIENTIST_KAGGLE_PROXY_PORT', raising=False)
+    else:
+        monkeypatch.setenv('AI_SCIENTIST_KAGGLE_PROXY_PORT', port)
     monkeypatch.setenv('KAGGLE_API_TOKEN', 'must-not-be-inherited')
     if programdata is None:
         monkeypatch.delenv('PROGRAMDATA', raising=False)

@@ -25,6 +25,7 @@
     "Minimal MCP tools: SSH start and account idle",
     "Independent proxy port 8013 with service-root identity",
     "SDK endpoint uses bundled proxy",
-    "Cookie recovery imports slim account_runtime instead of old tool suite"
+    "Cookie recovery imports slim account_runtime instead of old tool suite",
+    "Quote OpenSSH known-hosts path for bundle folders containing spaces"
   ]
 }

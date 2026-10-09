@@ -42,10 +42,11 @@ cùng lệnh để mở lại. Project không nằm trong browser và không ph�
 
 ### Setup lần đầu
 
-Checkout đang dùng Python 3.12, Node 24/npm 11, donor tại `D:\Documents\kaggle_token`
-và hai virtualenv riêng. Donor phải có các dependencies, registry account, token và
-browser profile đã cấu hình theo README của donor. Đăng nhập Codex CLI và Kaggle bằng
-tài khoản của bạn trước khi dùng app; giữ credential trong donor, không đưa vào config/Git.
+Checkout đang dùng Python 3.12 và Node 24/npm 11. Lõi Kaggle đã đóng gói tại
+`kaggle mcp/`, dùng chung `.venv-mvp0` với backend. Setup account/token/cookie theo
+[README của lõi Kaggle](../../kaggle%20mcp/README.md); không cần checkout donor bên ngoài.
+Đăng nhập Codex CLI bằng tài khoản của bạn; credential Kaggle nằm trong
+`kaggle mcp/profiles/` được Git bỏ qua. Xem [cấu hình và QA bản đóng gói](KAGGLE_CORE_PACKAGING.md).
 
 ```powershell
 # Từ thư mục repo, nếu chưa có virtualenv:

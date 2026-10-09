@@ -280,7 +280,7 @@ def ssh_options(state):
     return ["-i", str(root / "id_ed25519"), "-o", "IdentitiesOnly=yes",
             "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", "-o", "ConnectionAttempts=1",
             "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2",
-            "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=" + str(root / "known_hosts"),
+            "-o", "StrictHostKeyChecking=accept-new", "-o", 'UserKnownHostsFile="' + (root / "known_hosts").as_posix() + '"',
             "-o", 'ProxyCommand="' + state["tailcat"].replace("\\", "/") + '" ' + state["address"] + " 22"]
 
 

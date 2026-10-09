@@ -1,7 +1,6 @@
 # Kaggle API proxy: route requests qua nhiều account token, fallback khi token hết quota
-# Cách dùng: python proxy.py [port]  (mặc định 80 = port CLI 2.x kỳ vọng)
-#   - CLI 2.x / MCP server: KAGGLE_API_ENVIRONMENT=LOCALHOST  (-> http://localhost/api/v1/...)
-#   - Khác: trỏ trực tiếp http://127.0.0.1:<port>/api/v1/...
+# Cách dùng: python proxy.py [port] (mặc định 8013 cho bản đóng gói).
+# SDK trỏ trực tiếp http://127.0.0.1:<port>/api/v1/... qua session.client().
 #
 # HIỆU NĂNG: giữ một pool kết nối HTTPS persistent tới upstream (kaggle.com) để TÁI SỬ
 # DỤNG TCP+TLS giữa các request (trước đây mỗi request mở 1 kết nối mới -> tốn ~0.3-1s

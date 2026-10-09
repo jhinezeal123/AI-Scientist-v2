@@ -83,5 +83,3 @@ def _client_for(account):
             entry = (mtime, _IClient(a['cookie_file']))
             _iclient_cache[a['account']] = entry
         return entry[1]
-
-

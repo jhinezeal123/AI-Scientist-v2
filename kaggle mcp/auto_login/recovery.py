@@ -1,4 +1,4 @@
-"""Cookie recovery orchestration shared by old and new interfaces."""
+"""Original cookie recovery orchestration adapted to the bundled account core."""
 import os, json, sys, subprocess, time
 import web_session
 
