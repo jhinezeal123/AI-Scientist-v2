@@ -19,6 +19,12 @@ from ai_scientist.workbench.working_store import WorkingStore
 from test_implementation import approved_run, setup
 
 
+@pytest.fixture(autouse=True)
+def workspace_cwd(tmp_path, monkeypatch):
+    # Upstream Node serializes experiment paths relative to the launch directory.
+    monkeypatch.chdir(tmp_path)
+
+
 class Terminal:
     """Instrumented terminal used to exercise the real agent HTTP gateway."""
     def __init__(self, output):
@@ -199,7 +205,9 @@ def test_working_success_pending_resume_outputs_stop_and_unlimited_new_runs(tmp_
         assert 'output/test.csv' in detail['artifacts'] and 'working-stop.json' in detail['artifacts']
         assert not any('terminal-access' in name for name in detail['artifacts'])
         assert not (runtime.calls[0].workdir / 'terminal-access.json').exists()
-        assert 'Kaggle dừng' in detail['report_preview']
+        # MVP2 leaves report unchecked; completion proof remains a technical artifact.
+        assert 'report_preview' not in detail
+        assert json.loads((service.view.root(project, run) / 'working-stop.json').read_text())['stopped'] is True
         assert 'fixture terminal output' in ''.join(item['text'] for item in service.records.logs(project, run)['entries'])
         for attempt in range(3):
             request_id = str(attempt).zfill(32)

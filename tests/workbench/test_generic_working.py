@@ -17,6 +17,11 @@ from test_planning import request_type
 from test_working import Donor, MCP, Runtime, Terminal, fixture
 
 
+@pytest.fixture(autouse=True)
+def workspace_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 def proposal(**extra):
     return {'needs_clarification': False, 'paraphrase': 'Create a CSV',
             'objective': 'Create a synthetic CSV', 'implementation_steps': ['Generate and save the CSV'], **extra}
