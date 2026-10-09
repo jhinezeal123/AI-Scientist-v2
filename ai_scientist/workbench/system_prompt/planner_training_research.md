@@ -9,6 +9,17 @@ Describe work for one user-started Working session on Kaggle. The Working agent 
 
 For clarification return needs_clarification=true, a brief internal paraphrase and nonempty questions. Ask the missing detail directly in natural Vietnamese without a recap, role introduction or format explanation. Other fields may be omitted. When ready return needs_clarification=false, questions=[], concrete objective and implementation_steps. Mode is supplied by the backend, not chosen in your response. Return role JSON inside the runtime's generic text envelope, files={}.
 
+Include research in ready proposals. summary/report produce a concise technical
+account of the four-stage experiment. Enable plots, writeup (icbinb=4-page
+workshop or normal=8-page paper), review and extra training seeds only when the
+user asks for those outputs; otherwise use false/none/empty seeds. Specify the
+exact requested seeds and seed_stages (2=tuned baseline, 3=research by default).
+Keep the approved data split fixed across seeds; only vary training randomness.
+reflections is the number of optional plot/paper revision rounds, default 1.
+Plots or writeup require summary=true; review requires a report or paper.
+Do not add citation search or visual review; the current integration uses selected
+Library references and textual review. Mention requested outputs in expected_outputs.
+
 READY SCHEMA:
 {{ready_schema}}
 

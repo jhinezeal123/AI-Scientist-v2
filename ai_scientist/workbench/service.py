@@ -7,7 +7,7 @@ import subprocess
 import uuid
 from pydantic import ValidationError
 
-from .models import WorkingProposal
+from .models import WorkingProposal, ResearchPlan
 from .modes import snapshot_settings
 from .prompts import planning_prompt
 from .store import StoreConflict
@@ -56,6 +56,11 @@ class PlanningService:
             _, payload = await self.worker.run(request)
             body = payload.model_dump(exclude_none=True)
             if not payload.needs_clarification:
+                mode, _ = snapshot_settings(context['snapshot'])
+                if mode == 'etc':
+                    body.pop('research', None)
+                elif 'mode' in context['snapshot']['idea'] and 'research' not in body:
+                    body['research'] = ResearchPlan().model_dump()
                 ready = WorkingProposal.model_validate(body)
                 allowed = {source["id"] for source in context["snapshot"]["resources"]}
                 if any(ref not in allowed for ref in ready.data_refs):

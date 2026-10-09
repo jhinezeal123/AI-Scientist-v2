@@ -761,6 +761,7 @@ Your research idea:\n\n
                         if main_stage_complete:
                             # After main stage completion, run multi-seed eval on the best node
                             if (current_substage.stage_number in [1, 2, 3, 4]
+                                    and current_substage.stage_number in self.cfg.agent.multi_seed_eval.get('stages', [1, 2, 3, 4])
                                     and self.cfg.agent.multi_seed_eval.num_seeds > 0):
                                 best_node = self._get_best_implementation(
                                     current_substage.name

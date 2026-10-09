@@ -426,6 +426,11 @@ class Journal:
         else:
             nodes = self.nodes
 
+        if cfg is not None and getattr(cfg.agent.search, 'exclude_seed_nodes', False):
+            nodes = [node for node in nodes if not node.is_seed_node]
+            if not nodes:
+                return None
+
         if use_val_metric_only:
             return max(nodes, key=lambda n: n.metric)
 

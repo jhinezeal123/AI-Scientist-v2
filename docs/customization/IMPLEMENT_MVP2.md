@@ -1,6 +1,6 @@
 # MVP2 — hai mode Training/Research và Etc
 
-Cập nhật: **2026-10-08**, Asia/Saigon. Nền bàn giao: `mvp1-2026-10-08`.
+Cập nhật: **2026-10-09**, Asia/Saigon. Nền bàn giao: `mvp1-2026-10-08`.
 Roadmap: [PRODUCT_ROADMAP.md, mục 6](PRODUCT_ROADMAP.md#6-mvp-2--general-implementation-agent-cho-workshop-và-paper).
 
 ## 1. Yêu cầu đã chốt
@@ -22,8 +22,8 @@ không đổi mode của run đang chạy hoặc lịch sử và không làm m�
 
 Task chia theo feature; **user tự QA/demo sau mỗi task**. Agent bàn giao code,
 hướng dẫn thao tác và checklist, chờ user duyệt trước khi làm task tiếp theo.
-M2-01 và M2-02 đã triển khai; M2-02 đã qua hai pipeline browser QA thật, chờ user
-nghiệm thu. M2-03/M2-04 vẫn là kế hoạch; luồng MVP2 trọn vẹn chưa nghiệm thu.
+M2-01/M2-02/M2-03 đã được user duyệt. M2-02 có hai pipeline browser QA thật.
+M2-04 đã triển khai và chờ user QA; luồng MVP2 trọn vẹn chưa nghiệm thu.
 
 ## 2. So sánh hành vi
 
@@ -159,8 +159,8 @@ bố đã tích hợp chỉ vì file/module còn trong fork.
 | --- | --- | --- | --- |
 | **M2-01** | Hai mode, proposal và prompt theo mode | Đổi mode cùng project, Library chung, Etc bắt buộc mô tả đầu ra, approval ghim đúng mode | Đã bàn giao (`28d7342`); user cho phép tiếp tục M2-02 |
 | **M2-02** | Working Etc và Output | Chạy trực tiếp không cây, run detail có Output, kết quả trong project/output | Đã triển khai (`f9b13d7`); browser QA hai pipeline đạt, user duyệt và cho tiếp tục M2-03 |
-| **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Đã triển khai; chờ user QA |
-| **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Chưa bắt đầu |
+| **M2-03** | Copy Output sang Library | Chọn kết quả, đặt tiêu đề, copy thành nguồn dùng ở cả hai mode | Đã triển khai (`dca41a4`); user duyệt và cho tiếp tục M2-04 |
+| **M2-04** | Training/Research dùng lại repo gốc | Đường research chuyên biệt dùng tối đa pipeline/feedback/journal/report gốc, tách prompt Etc | Đã triển khai; chờ user QA |
 
 Thứ tự M2-01 → M2-02 → M2-03 → M2-04. Mỗi task có code/hướng dẫn và commit
 riêng; user QA rồi duyệt task tiếp. Refactor cấu trúc cần thiết giữ hành vi,
@@ -421,6 +421,155 @@ khởi động. Chưa thực hiện thao tác copy thật trong lượt triển 
 nối lại thành phần cần thiết, giữ logic gốc tối đa. Chỉ tuning nguồn/budget,
 provider/SSH và đường dẫn project. Report/cây và thí nghiệm tiếp tục chuyên biệt
 cho Training/Research; không general hóa bốn stage để ép dùng cho Etc.
+
+**Spec triển khai (2026-10-09):** proposal Training/Research mới có phần
+`research` để ghim summary/report và các phần user yêu cầu: plots, writeup PDF,
+review, seeds/stages. Approval ghim phần này cùng body hiện có; form Working
+không bật thêm thành phần ngoài proposal. Etc không dùng phần này, proposal cũ
+thiếu nó giữ đường chạy trước M2-04. Không sửa snapshot/hash lịch sử.
+
+- Dùng AgentManager, branch selection, Node/Journal/save_run hiện có. Tuning và
+  ablation dùng ý tưởng/chính sách gốc với phạm vi dữ liệu/budget đã duyệt.
+- Mỗi node lưu lệnh/output/returncode SSH và parent; lỗi có log thật cho debug.
+- Summary và report dùng `log_summarization.get_stage_summary` và
+  `journal2report`; review dùng `perform_llm_review.perform_review` qua adapter
+  client Codex. Không khởi tạo provider API trả phí khác.
+- Multi-seed dùng điểm nối của evaluator ParallelAgent gốc, thực thi tuần tự
+  trên cùng SSH; seeds/split/method lấy từ proposal. Đánh giá seed không trở
+  thành ứng viên để chọn seed tốt nhất.
+- Plot dùng aggregator gốc, thay runner local bằng runner SSH. PDF dùng prompt,
+  template và compile sequence gốc của writeup; adapter lưu bản thảo và chạy
+  compiler ở Kaggle. Không tự tìm citations/VLM hoặc cài TeX ngoài yêu cầu;
+  thiếu compiler/bản PDF hợp lệ được báo lỗi và giữ bản thảo.
+- Lưu `research/pipeline.json` với trạng thái, lý do và artifact của từng phần;
+  report cuối giữ nội dung nghiên cứu cùng evidence Stop. Dữ liệu/thư mục node
+  không ghi đè. Restart đọc trạng thái, không replay phần còn thiếu.
+
+Nghiệm thu qua GUI: proposal hiển thị phần research trước approval; chạy đủ
+bốn stage bằng một SSH; mở log một node và thấy output/returncode thực; các
+thành phần ngoài approval có trạng thái không yêu cầu; report/cây/artifacts đọc
+được và thuộc project/experiment; đổi sang Etc vẫn không có research pipeline.
+QA live do user thực hiện, không tự mở Kaggle hoặc gọi agent trong triển khai.
+
+**Bàn giao M2-04 (2026-10-09):**
+
+Đối chiếu [launcher upstream](https://github.com/SakanaAI/AI-Scientist-v2/blob/main/launch_scientist_bfts.py)
+và các module đi kèm. Bảng dưới phân biệt hàm chạy thật trong tích hợp với
+những phần chỉ được tái sử dụng prompt/template:
+
+| Phần | Tái sử dụng | Điều chỉnh cho Workbench |
+| --- | --- | --- |
+| Điều phối bốn stage | `AgentManager`, search policy, `Node`/`Journal`, `save_run` | Agent factory gọi Codex, thực thi trên SSH; budget phiên và scope đã duyệt |
+| Tuning / ablation | `_generate_hyperparam_tuning_idea`, `_generate_ablation_idea` và parser gốc | Gắn ý tưởng vào request node; không mở rộng dữ liệu/method ngoài proposal |
+| Debug | `Node.absorb_exec_result(ExecutionResult)` và policy debug gốc | `execution.json` chứa lệnh, stdout, returncode; parent được cấp log thật |
+| Multi-seed | `_run_multi_seed_evaluation` gốc và vòng ghép kết quả vào Journal | Hook runner tuần tự trên SSH, exact seeds/stages; mean và sample std; không chọn seed tốt nhất |
+| Summary | `get_stage_summary`, `get_node_log` gốc | Client Codex; lưu JSON theo stage và schema interchange gốc |
+| Report | `journal2report`, `Journal.generate_summary` | Client query hiện có; report cuối bổ sung metadata và xác nhận Stop |
+| Figures | `aggregate_plots` gốc, prompt và reflection gốc | Inject client/runner SSH; chỉ dùng node evidence đã thu, kiểm tra script/file kết quả |
+| PDF | Prompt/template ICBINB hoặc ICML, `compile_latex` gốc | Adapter quản lý draft/reflection/compile qua SSH; không gọi toàn bộ `perform_writeup` |
+| Review | `perform_review` gốc | Một reviewer văn bản qua Codex; đọc report hoặc PDF đã tạo, lưu JSON |
+
+Các điểm nối upstream là kwargs/config tùy chọn; launcher gốc giữ đường local
+khi không truyền chúng. Workbench không gọi nguyên launcher: launcher tự tạo
+provider clients, giả định GPU/process pool và compiler local, đồng thời có
+cleanup tiến trình không phù hợp với backend đang quản lý phiên Kaggle.
+Adapter sử dụng chung deadline, worker, token usage thật và kết nối SSH.
+
+Proposal mới hiển thị **Phạm vi Research**. Summary/report bật mặc định; plots,
+PDF, review và extra seeds chỉ được planner bật khi user yêu cầu, và hiện rõ
+trước approval. Thay phạm vi bằng idea/trao đổi rồi lập proposal mới; form
+Working vẫn chỉ chọn phần cứng, thời hạn phiên và số bước tìm kiếm. Tất cả
+phần đã yêu cầu phải thành công để Working được COMPLETED; backend còn phải
+xác nhận Kaggle dừng. Lỗi một phần giữ bằng chứng/draft và hiển thị lý do.
+
+Run có **Pipeline Research**: trạng thái từng phần và link mở kết quả; danh sách
+đầy đủ vẫn ở trang Artifacts. Các file thêm nằm trong chính experiment:
+
+```text
+.workbench/projects/<tên project>/experiment/<lượt>/
+├── logs/0-run/
+│   ├── nodes/<id>/{execution.json,search-request.json,manifest.json,result.json,source/,output/}
+│   ├── *_summary.json
+│   └── selection-feedback.txt
+├── research/
+│   ├── pipeline.json
+│   ├── stage-<n>-summary.json
+│   ├── report.md
+│   ├── multi-seed.json           # nếu đã yêu cầu
+│   ├── paper.pdf                 # nếu compile thành công
+│   └── latex/{template.tex,compile.log,...}
+├── figures/                     # nếu đã yêu cầu
+├── auto_plot_aggregator.py       # nếu đã yêu cầu
+├── review_text.txt              # textual review, nếu đã yêu cầu
+└── report.md                    # nghiên cứu + evidence backend/Stop
+```
+
+Input cho aggregator được stage riêng tại `research-input/` trong cùng remote
+workspace; không tính các bản sao evidence này thành output mới. Mỗi node vẫn
+giữ bytes/hash riêng. Lệnh SSH ghi tối đa 600.000 ký tự stdout cho một lệnh,
+node giữ tối đa 2.000.000 ký tự và cờ truncated; log Working vẫn dùng cửa sổ
+đọc từng phần hiện có. Đây là giới hạn lưu log, không phải quota số lượt user.
+
+**Phạm vi chưa nối / giới hạn:**
+
+- Citation search, novelty check tự động và VLM review không nằm trong tích hợp
+  này. Bài chỉ dùng tài liệu Library đã chọn; không tự tìm mạng hoặc gọi provider
+  khác. Review là nhận xét bằng mô hình, không phải kết quả thực nghiệm mới.
+- PDF đặt mục tiêu 4 hoặc 8 trang theo template/prompt. Hiện chỉ xác nhận file
+  đã compile và có trang đọc được; chưa tự nghiệm thu số trang nội dung/chất lượng
+  xuất bản bằng toàn bộ vòng VLM/reflection của writeup gốc.
+- Phiên Kaggle cần sẵn `pdflatex`, `bibtex` và các package TeX cần thiết. Không
+  tự cài TeX; thiếu compiler thì phần PDF báo lỗi, giữ draft/compile.log. User
+  muốn chuẩn bị compiler trong phiên phải mô tả rõ trong idea/proposal.
+- Split/method giữ nguyên qua seed là yêu cầu của agent; backend đối chiếu seed
+  và metric với JSON đã thu, không tự chứng minh được mọi chi tiết protocol của
+  mã do agent viết. Chỉ chọn bằng validation; không dùng test để tìm seed.
+- Các phần thêm cần thời gian Codex trong deadline Working cấu hình hiện có
+  (`working_seconds` trong `.workbench/config.local.json`) và TTL phiên. Tăng
+  TTL riêng không tự tăng deadline Working. Không tạo thêm phiên để bù timeout.
+- Proposal cũ không có `research` giữ đường chạy cũ; retry cùng proposal không
+  tự được thêm các phần mới. Lập proposal mới để QA M2-04. Etc không gọi pipeline.
+
+**Cách user QA:**
+
+1. Refresh GUI, dùng project QA và chọn Training/Research. Tạo idea mới, ví dụ:
+
+   > So sánh mô hình trên make_moons: 2.000 mẫu, noise 0,25, seed dữ liệu/split
+   > 42; train/validation/test 60/20/20. Baseline LogisticRegression với
+   > StandardScaler; tuning C; research SVC RBF; ablation bỏ scaler. Chỉ chọn
+   > mô hình bằng validation accuracy. Mỗi fit tối đa 30 giây, output tối đa
+   > 5 MB. Lưu source, metric JSON, CSV dự đoán test và report kỹ thuật tiếng
+   > Việt. Chạy summary và review report bằng văn bản; không cần figures/PDF
+   > hay thêm seed training. Không mở thêm phiên.
+
+2. Lập proposal: **Phạm vi Research** phải có summary/report/review, không có
+   plots/PDF/seed. Đọc split/method/budget rồi tự duyệt. Working chọn CPU, TTL
+   đủ cho deadline đã cấu hình và một bước mỗi stage để thử nhỏ trước.
+3. Xem cây bốn stage. Ở Artifacts mở một node `execution.json`: phải có lệnh,
+   stdout thực, returncode; trong cây click node xem log/plan/parent. Xem tên
+   ý tưởng tuning/ablation đã lưu, không tự dùng thêm dataset ngoài proposal.
+4. **Pipeline Research** phải hiển thị tree/summary/report/review hoàn tất và
+   phần khác không yêu cầu. Mở report, JSON stage summary và `review_text.txt`.
+   Report phải đối chiếu kết quả đã thu và có evidence phiên Kaggle đã dừng.
+5. Muốn QA multi-seed, lập idea/proposal riêng yêu cầu repeat training với seeds
+   `[0,1]` tại stage 2 và 3, giữ split 42. GUI phải ghi đúng seeds/stages trước
+   duyệt. `research/multi-seed.json` phải có đủ bốn lần repeat, mean/sample std
+   khớp metric JSON từng seed có `training_seed`; seed node không được chọn
+   làm kết quả tối ưu chỉ vì metric tốt hơn.
+6. Muốn QA figures/PDF, yêu cầu riêng trong idea (ICBINB 4 trang hoặc ICML 8
+   trang), nêu output/budget và compiler cần dùng. Kiểm tra scope trước duyệt.
+   Nếu compiler chưa có, PDF phải failed, giữ draft/log và Run không COMPLETED;
+   không dùng file PDF cũ từ một lượt compile lỗi để báo thành công.
+7. Refresh/restart khi run đã kết thúc: đọc được scope/status/report/artifacts,
+   không chạy lại phần còn thiếu. Với run QA đang làm, Stop phải giữ phần chưa
+   xong là interrupted và chờ xác nhận Kaggle dừng. Đổi sang Etc trong cùng
+   project: giữ Library, không có bảng Research trên Run Etc, Output copy vẫn dùng.
+
+Build frontend và compile Python đã đạt; chưa chạy unit/browser QA hoặc mở
+phiên Kaggle M2-04 trong lượt triển khai này. Các checkbox là nghiệm thu của user.
+Backend đã khởi động lại tại port 8011, health OK và không có Working chưa xác
+nhận dừng. Body/snapshot/hash của 15 proposal trong 7 project giữ nguyên qua
+restart. Metadata/Library/Output lịch sử không được chuyển sang pipeline mới.
 
 **User QA:**
 

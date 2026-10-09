@@ -25,6 +25,19 @@ rerunning completed experiments unless the controlled comparison requires it.
 After checking the required files and measured metric, return the final node
 JSON promptly. Do not add unrelated inspections after successful execution.
 
+search.stage_idea is the upstream tuning/ablation proposal for this node; apply it
+only inside the user's approved method/data/budget. search.parent_execution holds
+real SSH stdout and returncodes from the parent; use it for debugging. When
+search.action=seed, perform one repeat of the selected parent with exactly
+search.evaluation_seed for training randomness; preserve its method/hyperparameters
+and the approved train/validation/test split. Do not search for a better seed,
+change datasets or evaluate held-out test results to select an implementation.
+Record the actual training seed in the metric evidence JSON at /training_seed.
+When approved.body.research is present, do not generate paper/aggregate figures
+during an individual tree node: approved research finishing steps are handled
+after all four stages. Older approvals without that field keep their original
+requested outputs and node workflow.
+
 Return succeeded, summary in Vietnamese, limitations, output_files, plan,
 metric and datasets_tested. plan explains the tested change. metric is null
 when no comparable numerical metric exists. Otherwise provide name, value,

@@ -134,7 +134,8 @@ def run_aggregator_script(
 
 
 def aggregate_plots(
-    base_folder: str, model: str = "o1-2024-12-17", n_reflections: int = 5
+    base_folder: str, model: str = "o1-2024-12-17", n_reflections: int = 5,
+    *, client=None, run_script=None, raise_errors=False,
 ) -> None:
     filename = "auto_plot_aggregator.py"
     aggregator_script_path = os.path.join(base_folder, filename)
@@ -159,7 +160,8 @@ def aggregate_plots(
     aggregator_prompt = build_aggregator_prompt(combined_summaries_str, idea_text)
 
     # Call LLM
-    client, model_name = create_client(model)
+    client, model_name = create_client(model) if client is None else (client, model)
+    runner = run_script or run_aggregator_script
     response, msg_history = None, []
     try:
         response, msg_history = get_response_from_llm(
@@ -171,6 +173,8 @@ def aggregate_plots(
             msg_history=msg_history,
         )
     except Exception:
+        if raise_errors:
+            raise
         traceback.print_exc()
         print("Failed to get aggregator script from LLM.")
         return
@@ -183,7 +187,7 @@ def aggregate_plots(
         return
 
     # First run of aggregator script
-    aggregator_out = run_aggregator_script(
+    aggregator_out = runner(
         aggregator_code, aggregator_script_path, base_folder, filename
     )
 
@@ -228,6 +232,8 @@ If you believe you are done, simply say: "I am done". Otherwise, please provide 
             )
 
         except Exception:
+            if raise_errors:
+                raise
             traceback.print_exc()
             print("Failed to get reflection from LLM.")
             return
@@ -245,7 +251,7 @@ If you believe you are done, simply say: "I am done". Otherwise, please provide 
             and aggregator_new_code.strip() != aggregator_code.strip()
         ):
             aggregator_code = aggregator_new_code
-            aggregator_out = run_aggregator_script(
+            aggregator_out = runner(
                 aggregator_code, aggregator_script_path, base_folder, filename
             )
         else:

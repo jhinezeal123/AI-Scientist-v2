@@ -170,7 +170,7 @@ class SshTerminal:
 
 class AgentTerminalBridge:
     """Give the agent terminal access without Kaggle MCP or account credentials."""
-    def __init__(self, terminal, workdir):
+    def __init__(self, terminal, workdir, *, on_command=None):
         self.terminal, self.workdir = terminal, Path(workdir)
         self.token = secrets.token_urlsafe(32)
         bridge = self
@@ -197,6 +197,8 @@ class AgentTerminalBridge:
                     if not set(body).issubset(allowed):
                         raise ValueError('Invalid terminal arguments')
                     result = bridge.terminal.request(action, **body)
+                    if action == 'exec' and on_command is not None:
+                        on_command({'command':body['command'], **result})
                     data = json.dumps(result).encode()
                     self.send_response(200)
                 except (ValueError, KeyError, TypeError, RuntimeError, OSError) as exc:

@@ -428,6 +428,21 @@ class WorkingService:
             for stage in search_state['stages']:
                 nodes = search_state['journals'].get(stage['name'], {}).get('nodes', [])
                 lines.append(f'- {stage["name"]}: {len(nodes)} node (có thể gồm baseline từ stage trước).')
+        if approved['body'].get('research'):
+            from .research import saved_pipeline
+            pipeline = saved_pipeline(root)
+            lines += ['', '## Các phần Research đã duyệt', '']
+            if pipeline:
+                for name, component in pipeline['components'].items():
+                    lines.append(f'- {name}: {component["status"]}' +
+                                 (f' — {component["reason"]}' if component['reason'] else ''))
+                research_report = root / 'research/report.md'
+                if (pipeline['components']['report']['status'] == 'completed'
+                        and research_report.is_file() and not research_report.is_symlink()):
+                    lines = ['# Research report', '', research_report.read_text(encoding='utf-8'), '',
+                             '---', '', *lines]
+            else:
+                lines.append('- Chưa có metadata Research; không xác nhận các phần này đã chạy.')
         (root / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.records.append_log(*key, 'Đã xác nhận Kaggle dừng. Kết quả Working đã lưu.\n', 'backend')
         self.records.finish(*key, receipt, outcome, 'report.md')
@@ -451,6 +466,8 @@ class WorkingService:
 
     async def _recover_stop(self, key):
         record = self.record(*key)
+        from .research import interrupt_saved_pipeline
+        interrupt_saved_pipeline(self.view.root(*key))
         self.records.append_log(*key, 'Khôi phục Run đã lưu: kiểm tra và dừng phiên Kaggle cũ; không chạy lại agent hoặc gửi notebook mới.\n', 'backend')
         summary = record['summary'] or {'succeeded': False, 'summary': 'Working bị gián đoạn; chưa xác minh kết quả thực thi.',
                                        'limitations': ['Agent không được tự chạy lại khi khôi phục Run.'], 'output_files': []}
@@ -473,6 +490,11 @@ class WorkingService:
         from .experiments import search_artifacts
         root = self.view.root(project_id, run_id)
         detail['artifacts'] = sorted(set(detail['artifacts']) | set(search_artifacts(root)))
+        if detail['mode'] != 'etc':
+            approved = self.store.approved_snapshot(project_id, run_id)
+            if approved['body'].get('research'):
+                from .research import saved_pipeline
+                detail['research'] = {'plan':approved['body']['research'], 'pipeline':saved_pipeline(root)}
         if (root / 'logs/0-run/search-state.json').is_file():
             saved = json.loads((root / 'logs/0-run/search-state.json').read_text(encoding='utf-8'))
             stages, previous_ids = [], set()

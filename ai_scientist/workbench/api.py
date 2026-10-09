@@ -393,6 +393,8 @@ def library_router(store, workspace_root):
             raise HTTPException(404, 'Artifact not found')
         if name == 'report.md':
             if path.stat().st_size > 100_000:
+                if 'research/pipeline.json' in detail['artifacts']:
+                    return FileResponse(path, media_type='text/markdown; charset=utf-8')
                 raise HTTPException(404, 'Artifact not found')
             return PlainTextResponse(path.read_text(encoding='utf-8'), media_type='text/markdown; charset=utf-8')
         if name.startswith('logs/0-run/') and path.suffix in {'.html', '.json'}:

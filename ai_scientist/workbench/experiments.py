@@ -95,6 +95,7 @@ def migrate_project_experiments(store, project_id):
 def search_artifacts(root):
     """List saved tree evidence, excluding gateways, credentials and agent workspaces."""
     names = ['idea.md', 'idea.json', 'token_tracker.json', 'review_text.txt',
+             'auto_plot_aggregator.py',
              'logs/0-run/search-state.json', 'logs/0-run/unified_tree_viz.html']
     logs = root / 'logs/0-run'
     if logs.is_dir() and not logs.is_symlink() and not logs.is_junction():
@@ -106,6 +107,15 @@ def search_artifacts(root):
                     or any(p.is_symlink() or p.is_junction() for p in path.parents if p != root and p.is_relative_to(root))):
                 continue
             names.append(relative)
+    for directory in ('research','figures'):
+        folder = root / directory
+        if not folder.is_dir() or folder.is_symlink() or folder.is_junction():
+            continue
+        for path in folder.rglob('*'):
+            if (path.is_file() and not path.is_symlink() and not path.is_junction()
+                    and 'remote' not in path.relative_to(folder).parts
+                    and not any(p.is_symlink() or p.is_junction() for p in path.parents if p.is_relative_to(root))):
+                names.append(path.relative_to(root).as_posix())
     names.extend(path.name for path in root.glob('*.pdf'))
     return sorted({name for name in names if (root / name).is_file()
                    and not (root / name).is_symlink() and not (root / name).is_junction()})

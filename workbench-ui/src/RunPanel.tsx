@@ -1,12 +1,14 @@
 import {useCallback, useEffect, useState} from 'react';
-import {api, History, Idea, Variant, Working, RunMode, RunOutput, Resource, modeLabel} from './api';
+import {api, History, Idea, Variant, Working, RunMode, RunOutput, Resource, ResearchPlan, ResearchPipeline, modeLabel} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 import ModeFields from './ModeFields';
 import OutputToLibrary from './OutputToLibrary';
+import ResearchScope from './ResearchScope';
 
 type RunDetail = {id:string;proposal_id:string;proposal_version:number;state:string;ready:boolean;error:string|null;coder_calls:number;deleted_at:string|null;can_delete:boolean;
   mode:RunMode;mode_legacy:boolean;desired_output:string;
   output?:RunOutput;
+  research?:{plan:ResearchPlan;pipeline:ResearchPipeline|null};
   execution_mode:'ssh'|'legacy';working?:Working;
   search?:{experiment:string;directory?:string;stages:{name:string;nodes:number}[];tree_path:string|null};
   can_retry:boolean;parent_run_id:string|null;
@@ -145,6 +147,10 @@ export default function RunPanel({projectId, selectedRunId, onSelect, runs, busy
         <p>{run.search.stages.map(stage=>`${stageLabels[Number(stage.name[0])-1] || stage.name}: ${stage.nodes} node`).join(' · ')}</p>
         {run.search.tree_path && <a href={`/api/projects/${projectId}/runs/${run.id}/artifacts/${run.search.tree_path}`}
           target="_blank" rel="noreferrer">Mở cây thí nghiệm ↗</a>}
+      </div>}
+      {run.mode!=='etc' && run.research && <div className="context"><h3>Pipeline Research</h3>
+        <ResearchScope plan={run.research.plan} pipeline={run.research.pipeline} projectId={projectId} runId={run.id}/>
+        {!run.research.pipeline && <p className="muted">Chưa có trạng thái pipeline đã lưu. Phạm vi trên thuộc proposal đã duyệt.</p>}
       </div>}
       {run.parent_run_id && <p className="muted">Tạo từ Run {run.parent_run_id.slice(0,8)} · dùng cùng proposal đã duyệt.</p>}
       {run.variant && <div className="context">

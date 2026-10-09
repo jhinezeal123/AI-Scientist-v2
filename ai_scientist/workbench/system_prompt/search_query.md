@@ -18,5 +18,8 @@ an experiment completed quickly. The backend enforces the session's budget.
 
 Return one JSON object with response:string. When function is present, response
 must contain a serialized JSON object satisfying function.json_schema, with the
-exact candidate ID for selections. When function is absent, response is concise
-plain text. Do not wrap the outer object in Markdown or a text/files envelope.
+exact candidate ID for selections. When function is absent, response follows the
+upstream request's format, including JSON/code/LaTeX fences when requested there.
+Keep it concise without dropping required fields. Never wrap the outer object in
+Markdown or a text/files envelope. Seed evaluation nodes are repetitions for
+uncertainty estimation, not candidates for choosing the best random seed.

@@ -42,6 +42,32 @@ class WorkbenchConfig(BaseModel):
         return config
 
 
+class ResearchPlan(StrictModel):
+    """Research outputs explicitly visible in the proposal before approval."""
+    summary: bool = True
+    report: bool = True
+    plots: bool = False
+    writeup: Literal['none', 'icbinb', 'normal'] = 'none'
+    review: bool = False
+    seeds: list[int] = Field(default_factory=list)
+    seed_stages: list[int] = Field(default_factory=lambda: [2, 3])
+    reflections: int = Field(default=1, ge=0)
+
+    @model_validator(mode='after')
+    def valid_protocol(self):
+        if len(self.seeds) != len(set(self.seeds)) or any(type(seed) is not int or not 0 <= seed <= 2_147_483_647 for seed in self.seeds):
+            raise ValueError('Research seeds must be distinct nonnegative integers')
+        if len(self.seed_stages) != len(set(self.seed_stages)) or any(stage not in {1, 2, 3, 4} for stage in self.seed_stages):
+            raise ValueError('Seed evaluation stages must be distinct stage numbers 1–4')
+        if self.seeds and not self.seed_stages:
+            raise ValueError('Choose the stages for approved seed evaluation')
+        if self.review and not self.report and self.writeup == 'none':
+            raise ValueError('Review requires an approved report or paper')
+        if (self.plots or self.writeup != 'none') and not self.summary:
+            raise ValueError('Plots and paper require approved experiment summaries')
+        return self
+
+
 class PlanPayload(StrictModel):
     needs_clarification: bool
     questions: list[str] = Field(default_factory=list)
@@ -53,6 +79,7 @@ class PlanPayload(StrictModel):
     implementation_steps: list[str] | None = None
     budget: dict[str, JsonValue] | None = None
     expected_outputs: list[str] | None = None
+    research: ResearchPlan | None = None
 
     @model_validator(mode="after")
     def check_clarification(self):
@@ -76,6 +103,7 @@ class WorkingProposal(StrictModel):
     split: str | dict[str, JsonValue] | None = None
     metric: str | dict[str, JsonValue] | None = None
     budget: dict[str, JsonValue] = Field(default_factory=dict)
+    research: ResearchPlan | None = None
 
     @model_validator(mode="after")
     def user_constraints(self):

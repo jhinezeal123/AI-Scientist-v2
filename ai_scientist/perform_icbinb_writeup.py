@@ -42,7 +42,7 @@ def remove_accents_and_clean(s):
     return ascii_str
 
 
-def compile_latex(cwd, pdf_file, timeout=30):
+def compile_latex(cwd, pdf_file, timeout=30, *, run_command=None):
     print("GENERATING LATEX")
 
     commands = [
@@ -54,7 +54,7 @@ def compile_latex(cwd, pdf_file, timeout=30):
 
     for command in commands:
         try:
-            result = subprocess.run(
+            result = (run_command or subprocess.run)(
                 command,
                 cwd=cwd,
                 stdout=subprocess.PIPE,
@@ -652,12 +652,12 @@ def load_idea_text(base_folder):
     idea_text = ""
     research_idea_path = osp.join(base_folder, "research_idea.md")
     if osp.exists(research_idea_path):
-        with open(research_idea_path, "r") as f_idea:
+        with open(research_idea_path, "r", encoding="utf-8") as f_idea:
             idea_text = f_idea.read()
     else:
         idea_md_path = osp.join(base_folder, "idea.md")
         if osp.exists(idea_md_path):
-            with open(idea_md_path, "r") as f_idea:
+            with open(idea_md_path, "r", encoding="utf-8") as f_idea:
                 idea_text = f_idea.read()
     return idea_text
 
@@ -676,7 +676,7 @@ def load_exp_summaries(base_folder):
         path = osp.join(base_folder, fname)
         if osp.exists(path):
             try:
-                with open(path, "r") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     loaded_summaries[key] = json.load(f)
             except json.JSONDecodeError:
                 print(

@@ -1259,7 +1259,7 @@ class ParallelAgent:
             is_seed_agg_node=True,
         )
 
-    def _run_multi_seed_evaluation(self, node: Node) -> List[Node]:
+    def _run_multi_seed_evaluation(self, node: Node, *, seed_runner=None) -> List[Node]:
         """Run multiple seeds of the same node to get statistical metrics.
         Returns a list of nodes with different random seeds."""
 
@@ -1270,7 +1270,19 @@ class ParallelAgent:
         # Submit parallel jobs for different seeds
         seed_nodes = []
         futures = []
-        for seed in range(self.cfg.agent.multi_seed_eval.num_seeds):
+        seeds = self.cfg.agent.multi_seed_eval.get('seeds', range(self.cfg.agent.multi_seed_eval.num_seeds))
+        for seed in seeds:
+            if seed_runner is not None:
+                # Remote runtimes share one terminal; result collection below
+                # also accepts a node already persisted by its remote runner.
+                from concurrent.futures import Future
+                future = Future()
+                try:
+                    future.set_result(seed_runner(node, seed))
+                except Exception as exc:
+                    future.set_exception(exc)
+                futures.append(future)
+                continue
             gpu_id = None
             if self.gpu_manager is not None:
                 try:
@@ -1318,11 +1330,13 @@ class ParallelAgent:
         for future in futures:
             try:
                 result_data = future.result(timeout=self.timeout)
-                result_node = Node.from_dict(result_data, self.journal)
+                existing = self.journal.get_node_by_id(result_data['id']) if seed_runner is not None else None
+                result_node = existing or Node.from_dict(result_data, self.journal)
                 print(f"Parent node id: {result_node.parent.id}")
                 print(f"Sanity check: actual parent node id: {node.id}")
                 # Add node to journal's list and assign its step number
-                self.journal.append(result_node)
+                if existing is None:
+                    self.journal.append(result_node)
                 seed_nodes.append(self.journal.get_node_by_id(result_node.id))
                 print("Added result node to journal")
             except Exception as e:
