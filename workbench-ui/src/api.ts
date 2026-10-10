@@ -52,7 +52,8 @@ export type History = {proposals: {id: string; version: number; state: string; c
     protocol?:{split:string|Record<string,unknown>|null;metric:string|Record<string,unknown>|null;context_sha256:string};
     result_metric?: {name:string;direction:string;final_value:number;best_value:number};report_available?:boolean}[]};
 export type Proposal = {id:string;idea_id:string;version:number;state:string;body:PlanBody;
-  context_sha256:string;context_snapshot:Context['snapshot'];approved_at:string|null};
+  context_sha256:string;context_snapshot:Context['snapshot'];approved_at:string|null;
+  approval_provenance?:{actor:'human'|'agent';seat:string;grant_id:string;version:number;context_sha256:string}};
 
 export async function api<T>(path: string, method='GET', body?: unknown): Promise<T> {
   const controller=new AbortController();

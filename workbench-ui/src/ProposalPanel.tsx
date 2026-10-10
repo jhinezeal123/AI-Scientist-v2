@@ -73,13 +73,15 @@ export default function ProposalPanel({idea,proposals,resources,busy,onOpenParen
         {latest.body.metric && <><h3>Cách đánh giá</h3><Details value={latest.body.metric}/></>}
         <h3>Cách triển khai</h3><ol>{latest.body.implementation_steps?.map((step,i) => <li key={i}>{step}</li>)}</ol>
         {latest.body.budget && Object.keys(latest.body.budget).some(key=>!['coder_calls','training_attempts'].includes(key)) && <><h3>Giới hạn bạn yêu cầu</h3><Details value={latest.body.budget}/></>}
-        <p className="muted">Bạn quyết định từng lượt Working, không giới hạn tổng số lượt.</p>
+        <p className="muted">{latest.approval_provenance?'Workflow chỉ chạy trong phạm vi và hạn mức bạn đã ủy quyền.':'Bạn quyết định từng lượt Working, không giới hạn tổng số lượt.'}</p>
         {pinnedIdea?.mode!=='etc' && latest.body.research && <><h3>Phạm vi Research</h3>
           <ResearchScope plan={latest.body.research}/><p className="muted">Các phần này được ghim khi duyệt. Đổi yêu cầu trong idea và lập proposal mới nếu muốn thêm hoặc bỏ đầu ra.</p></>}
         {!!latest.body.expected_outputs?.length && <><h3>Đầu ra dự kiến</h3><ul>{latest.body.expected_outputs.map((output,i) => <li key={i}>{output}</li>)}</ul></>}
         <code className="source-id">Context SHA256 {latest.context_sha256}</code>
         {latest.state === 'AWAITING_APPROVAL' && <div className="stack"><p className="muted">Duyệt sẽ lưu phạm vi công việc và tạo run đầu tiên. Agent kiểm tra môi trường và thực hiện trong phiên Working.</p><button className="primary" disabled={busy || idea?.state === 'PLANNING'} onClick={() => void onApprove(latest).catch(() => {})}>Duyệt proposal v{latest.version}</button></div>}
-        {latest.state === 'APPROVED' && <p className="alert">{pinnedIdea?.mode==='etc'
+        {latest.state === 'APPROVED' && <p className="alert">{latest.approval_provenance
+          ? `Đã được ${latest.approval_provenance.actor==='agent'?'agent '+latest.approval_provenance.seat:'bạn'} duyệt trong workflow. Mở tab Run để theo dõi. Grant: ${latest.approval_provenance.grant_id.slice(0,8)}.`
+          : pinnedIdea?.mode==='etc'
           ? 'Đã duyệt proposal Etc. Mở tab Run và bấm Bắt đầu Working; kết quả sẽ nằm trong Output.'
           : 'Đã duyệt. Mở tab Run và bấm Bắt đầu Working để thực hiện công việc trên Kaggle.'}</p>}
       </>}

@@ -1,5 +1,10 @@
 # MVP5 subsystem acceptance matrix
 
+> Phạm vi lịch sử của PR #3 đã merge. User đã sửa mục tiêu MVP5 thành mỗi stage
+> một actor Human/Agent, gồm cả ideation và approval. Trạng thái của hướng sửa:
+> [MVP5_STAGE_AUTONOMY.md](MVP5_STAGE_AUTONOMY.md). Bằng chứng dưới đây không
+> thay thế nghiệm thu pipeline mới.
+
 Complete issue #2 scope mapped to shipped interfaces and evidence. Fixtures prove
 protocol/error handling; actual providers/Kaggle are documented separately in
 [release evidence](IMPLEMENT_MVP5.md).

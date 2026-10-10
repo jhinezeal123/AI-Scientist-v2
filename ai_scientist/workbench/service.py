@@ -46,7 +46,7 @@ class PlanningService:
         return await asyncio.to_thread(self.store.create_variant_idea, project_id, parent_run_id, request_id,
                                        title, purpose, change_summary, baseline, texts, mode, desired_output, research, tags, benchmark_id)
 
-    async def _plan(self, project_id, idea_id, context):
+    async def _plan(self, project_id, idea_id, context, *, worker=None):
         try:
             request_id = uuid.uuid4().hex
             workdir = self.store.directory(project_id) / "planning" / request_id
@@ -58,7 +58,7 @@ class PlanningService:
                                                  timeout_seconds=300, max_output_bytes=300_000)
             if os.name == 'nt' and len(subprocess.list2cmdline([request.prompt]).encode('utf-16-le')) // 2 > 29_000:
                 raise ValueError("Selected context is too large for the Windows CLI argument limit")
-            _, payload = await self.worker.run(request)
+            _, payload = await (worker or self.worker).run(request)
             body = payload.model_dump(exclude_none=True)
             # Keep the validated proposal candidate for diagnosing a rejected
             # citation without exposing raw CLI events or stderr in the UI.

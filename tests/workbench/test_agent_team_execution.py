@@ -38,6 +38,29 @@ def test_bounded_writer_deadline_and_process_tree(tmp_path):
     assert time.monotonic() - start < 8
     assert result.value.receipt["process_exited"] and result.value.receipt["tree_stopped"]
 
+def test_native_action_contract_keeps_local_tools_disabled(tmp_path,monkeypatch):
+    captured={}
+    def wire(argv,cwd,body,**kwargs):
+        captured.update(argv=argv,prompt=body.decode())
+        result={'summary':json.dumps({'action':'exec','command':'python source/workload.py'}),
+                'files':[],'checks':[],'handoff':''}
+        events=[{'type':'item.completed','item':{'type':'agent_message','text':json.dumps(result)}},
+                {'type':'turn.completed','usage':{}}]
+        return '\n'.join(json.dumps(e) for e in events).encode(),{'tree_stopped':True}
+    monkeypatch.setattr(harnesses,'run_process',wire)
+    adapter=harnesses.NativeHarness(models.HarnessSpec(id='codex',kind='native_codex',executable=sys.executable))
+    handle=adapter.start(models.AgentSpec(id='draft'),tmp_path)
+    result=adapter.send(handle,'Return an exec action for the authorized session',request_id='node',timeout=5,
+                        emit=lambda _:None,started=lambda _:None)
+    assert json.loads(result.result.summary)['action']=='exec'
+    assert 'structured remote actions as JSON' in captured['prompt']
+    assert 'Do not call local tools' in captured['prompt']
+    assert 'independently create research sessions' in captured['prompt']
+    for tool in ('shell_tool','unified_exec','apps','computer_use','browser_use'):
+        index=captured['argv'].index(tool)
+        assert captured['argv'][index-1]=='--disable'
+    assert 'sandbox_mode="read-only"' in captured['argv']
+
 
 @pytest.mark.parametrize("version", [1, 2])
 def test_acp_prompt_lifecycle_and_capabilities(tmp_path, version):
@@ -112,6 +135,30 @@ def wait_finished(platform, rig_id, count):
             return snapshot
         time.sleep(.05)
     pytest.fail("Team did not finish: " + json.dumps(snapshot))
+
+
+def test_structured_stage_excludes_workspace_and_other_workflow_chat(repository):
+    fixture = repository / "structured.py"
+    fixture.write_text('''import json,sys
+request=json.load(sys.stdin)
+message=json.loads(request['prompt'].split('\\n',1)[1])
+assert message['files']==[], message['files']
+assert message['messages']==[], message['messages']
+assert 'current-workflow' in message['task']
+print(json.dumps({'result':{'summary':'isolated stage inputs','files':[],'checks':[],'handoff':''}}))
+''')
+    queue = AgentStore(repository / ".workbench/control.sqlite")
+    platform = Platform(queue, repository, registry=FixtureRegistry(fixture))
+    try:
+        platform.create('stages', models.RigSpec.model_validate(models.templates()[-1]))
+        queue.send('stages', 'proposal', '*', 'Old workflow requires human approval')
+        platform.enqueue('stages', 'ideation', 'stage-1', models.TaskRequest(instruction='current-workflow', structured_only=True))
+        platform.start('stages')
+        snapshot = wait_finished(platform, 'stages', 1)
+        assert snapshot['tasks'][0]['state']=='DONE', snapshot
+        assert snapshot['sessions'][0]['stop_receipt']['tree_stopped']
+    finally:
+        platform.close()
 
 
 def test_four_seat_pipeline_checkpoint_restart_and_no_replay(repository):

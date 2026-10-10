@@ -1,5 +1,10 @@
 # MVP5 — Unified Multi-Agent Coding Platform
 
+> Phạm vi lịch sử của PR #3 đã merge. User đã sửa mục tiêu MVP5 thành mỗi stage
+> một actor Human/Agent, gồm cả ideation và approval. Trạng thái của hướng sửa:
+> [MVP5_STAGE_AUTONOMY.md](MVP5_STAGE_AUTONOMY.md). Bằng chứng dưới đây không
+> thay thế nghiệm thu pipeline mới.
+
 Full scope: [issue #2](https://github.com/jhinezeal123/AI-Scientist-v2/issues/2).
 Delivery: [PR #3](https://github.com/jhinezeal123/AI-Scientist-v2/pull/3), target
 `codex/personal-implementation-agent`. User expanded the foundation draft to

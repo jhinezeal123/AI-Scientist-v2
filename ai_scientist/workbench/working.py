@@ -55,6 +55,7 @@ class WorkingService:
                          if getattr(config, 'donor_root', None) else None)
         self.tasks, self.terminals, self.stop_requests = {}, {}, set()
         self.workers = {}
+        self.runtime_for_run = None
         self.queue_task = None
         self.closed = False
         self.cookie_lock = asyncio.Lock()
@@ -69,7 +70,8 @@ class WorkingService:
         """Each run owns its process, persisted state and cancellation signal."""
         if key not in self.workers:
             template = self.planner.worker
-            self.workers[key] = RuntimeWorker(template.runtime,
+            runtime = self.runtime_for_run(key) if self.runtime_for_run else template.runtime
+            self.workers[key] = RuntimeWorker(runtime,
                 self.view.root(*key) / 'working-agent' / 'runtime-state.json',
                 uncertain_error=template.uncertain_error)
         return self.workers[key]
@@ -567,50 +569,62 @@ class WorkingService:
                 from .run_graph import write_run_json
                 commands.append(command)
                 write_run_json(root / 'execution.json', {'run_id': run_id, 'commands': commands})
-            gateway = await asyncio.to_thread(AgentTerminalBridge, terminal, workdir,
-                                              on_command=save_command, fetch_artifact=fetch_artifact)
-            request = self._request(key, approved, descriptor, workdir)
-            deadline = time.monotonic() + request.timeout_seconds
-            result, payload = await self.run_worker(key).run(request)
-            await asyncio.to_thread(gateway.close)
-            gateway = None
-            if key in self.stop_requests:
-                outcome = 'CANCELLED'
-                return
-            self.records.update(*key, phase='collecting', summary=payload.model_dump())
-            collection_attempted = True
-            manifest = await asyncio.to_thread(self._collect_etc, key, terminal, root, approved)
-            names = {item['path'] for item in manifest['files']}
-            if not set(payload.output_files).issubset(names) or (payload.succeeded and manifest['command_count'] < 1):
-                raise ValueError('Agent result does not match verified SSH commands/files')
-            (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-            self.records.update(*key, manifest=manifest)
-            if payload.succeeded and snapshot_settings(approved['snapshot'])[0] == 'benchmark':
-                from .benchmarks import BenchmarkCatalog, validate_benchmark_output
-                package, package_hash = await asyncio.to_thread(validate_benchmark_output, root,
-                    approved['snapshot']['idea']['benchmark_definition'], manifest)
-                self.records.append_log(*key, 'Đang tạo và xác minh Kaggle dataset public…\n', 'backend')
-                publication = {'directory': str(package), 'run_id': run_id,
-                    'title': approved['body']['objective'], 'manifest_sha256': package_hash,
-                    'files': [item for item in manifest['files'] if item['path'].startswith('output/benchmark/')]}
-                # Persist intent before the one irreversible upload. Unknown outcomes
-                # are reconciled explicitly; never create versions automatically.
-                intent = root / 'benchmark-publication-intent.json'
-                if intent.exists():
-                    raise StoreConflict('Benchmark publication đã được yêu cầu; đối soát dataset trước khi thử lại.')
-                intent.write_text(json.dumps(publication, indent=2), encoding='utf-8')
-                receipt = await asyncio.to_thread(self._run_donor(key).publish_benchmark, publication)
-                (root / 'benchmark-dataset.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
-                BenchmarkCatalog(self.store).save(project_id, run_id, approved['body']['objective'],
-                    approved['snapshot']['idea']['benchmark_definition'], receipt)
-            from .single_run import save_node, finish_research
-            node, journal = await asyncio.to_thread(save_node, root, approved, payload, commands, run_id)
-            if not is_etc:
-                payload, manifest = await finish_research(self, key, approved, descriptor, terminal, payload, manifest, node, journal, deadline)
-                if (approved['body'].get('research') or {}).get('plots') or (approved['body'].get('research') or {}).get('writeup', 'none') != 'none':
-                    manifest = await asyncio.to_thread(self._collect_etc, key, terminal, root, approved)
+            stage_runtime = self.run_worker(key).runtime
+            search_options = getattr(stage_runtime, 'search_options', None)
+            if search_options and search_options.enabled and not is_etc:
+                from .tree_search import TreeSearchRun
+                runner = TreeSearchRun(self, key, approved, descriptor, terminal, search_options)
+                approved_seconds = approved['body']['budget'].get('execution_seconds',approved['body']['budget'].get('training_seconds'))
+                runner.deadline = time.monotonic() + min(stage_runtime.spec.execution_seconds, approved_seconds, descriptor['ttl_seconds'] - 120)
+                payload, manifest, node = await runner.execute()
+                collection_attempted = True
                 self.records.update(*key, manifest=manifest, summary=payload.model_dump())
                 (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+            else:
+                gateway = await asyncio.to_thread(AgentTerminalBridge, terminal, workdir,
+                                                  on_command=save_command, fetch_artifact=fetch_artifact)
+                request = self._request(key, approved, descriptor, workdir)
+                deadline = time.monotonic() + request.timeout_seconds
+                result, payload = await self.run_worker(key).run(request)
+                await asyncio.to_thread(gateway.close)
+                gateway = None
+                if key in self.stop_requests:
+                    outcome = 'CANCELLED'
+                    return
+                self.records.update(*key, phase='collecting', summary=payload.model_dump())
+                collection_attempted = True
+                manifest = await asyncio.to_thread(self._collect_etc, key, terminal, root, approved)
+                names = {item['path'] for item in manifest['files']}
+                if not set(payload.output_files).issubset(names) or (payload.succeeded and manifest['command_count'] < 1):
+                    raise ValueError('Agent result does not match verified SSH commands/files')
+                (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                self.records.update(*key, manifest=manifest)
+                if payload.succeeded and snapshot_settings(approved['snapshot'])[0] == 'benchmark':
+                    from .benchmarks import BenchmarkCatalog, validate_benchmark_output
+                    package, package_hash = await asyncio.to_thread(validate_benchmark_output, root,
+                        approved['snapshot']['idea']['benchmark_definition'], manifest)
+                    self.records.append_log(*key, 'Đang tạo và xác minh Kaggle dataset public…\n', 'backend')
+                    publication = {'directory': str(package), 'run_id': run_id,
+                        'title': approved['body']['objective'], 'manifest_sha256': package_hash,
+                        'files': [item for item in manifest['files'] if item['path'].startswith('output/benchmark/')]}
+                    # Persist intent before the one irreversible upload. Unknown outcomes
+                    # are reconciled explicitly; never create versions automatically.
+                    intent = root / 'benchmark-publication-intent.json'
+                    if intent.exists():
+                        raise StoreConflict('Benchmark publication đã được yêu cầu; đối soát dataset trước khi thử lại.')
+                    intent.write_text(json.dumps(publication, indent=2), encoding='utf-8')
+                    receipt = await asyncio.to_thread(self._run_donor(key).publish_benchmark, publication)
+                    (root / 'benchmark-dataset.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+                    BenchmarkCatalog(self.store).save(project_id, run_id, approved['body']['objective'],
+                        approved['snapshot']['idea']['benchmark_definition'], receipt)
+                from .single_run import save_node, finish_research
+                node, journal = await asyncio.to_thread(save_node, root, approved, payload, commands, run_id)
+                if not is_etc:
+                    payload, manifest = await finish_research(self, key, approved, descriptor, terminal, payload, manifest, node, journal, deadline)
+                    if (approved['body'].get('research') or {}).get('plots') or (approved['body'].get('research') or {}).get('writeup', 'none') != 'none':
+                        manifest = await asyncio.to_thread(self._collect_etc, key, terminal, root, approved)
+                    self.records.update(*key, manifest=manifest, summary=payload.model_dump())
+                    (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
             if not is_etc:
                 code = (root / 'source/workload.py').read_text(encoding='utf-8') if (root / 'source/workload.py').is_file() else ''
                 with self.store.connection(project_id) as connection:
@@ -890,7 +904,7 @@ class WorkingService:
             detail['can_retry'] = record['stop_confirmed'] and not detail['deleted_at']
             detail['coder_calls'] = record['agent_called']
             root = self.view.root(project_id, run_id)
-            for name in ('working-manifest.json', 'working-stop.json', 'report.md', 'output.json', 'working.log', 'benchmark-dataset.json', 'mlflow-status.json', 'team-provenance.json'):
+            for name in ('working-manifest.json', 'working-stop.json', 'report.md', 'output.json', 'working.log', 'benchmark-dataset.json', 'mlflow-status.json', 'team-provenance.json', 'workflow-provenance.json'):
                 if (root / name).is_file() and not (root / name).is_symlink():
                     detail['artifacts'].append(name)
             for item in (record['manifest'] or {}).get('files', []):

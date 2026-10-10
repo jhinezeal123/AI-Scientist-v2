@@ -864,12 +864,17 @@ class ProjectStore:
 
     def proposals(self, project_id, idea_id=None):
         with self.connection(project_id) as connection:
+            actor_table = connection.execute("SELECT 1 FROM sqlite_master WHERE name='workflow_approval_actors'").fetchone()
             rows = connection.execute("SELECT * FROM proposals" + (" WHERE idea_id=?" if idea_id else "") + " ORDER BY rowid DESC", (idea_id,) if idea_id else ())
             result = []
             for row in rows:
                 item = dict(row)
                 item["body"] = json.loads(item.pop("body_json"))
                 item["context_snapshot"] = json.loads(item.pop("context_snapshot_json"))
+                if actor_table:
+                    actor = connection.execute('SELECT receipt_json FROM workflow_approval_actors WHERE proposal_id=?', (item['id'],)).fetchone()
+                    if actor:
+                        item['approval_provenance'] = json.loads(actor['receipt_json'])
                 result.append(item)
             return result
 

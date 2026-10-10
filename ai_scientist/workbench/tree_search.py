@@ -1,6 +1,6 @@
 """Run the upstream AgentManager with Codex and one persistent Kaggle terminal."""
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass, replace
 import hashlib
 import json
 import math
@@ -36,7 +36,17 @@ def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + '.tmp')
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    temporary.replace(path)
+    # Windows readers (GUI polling/virus scanners) may temporarily open the
+    # destination without FILE_SHARE_DELETE. Keep publication atomic and bound
+    # the wait; persistent permission failures must still reach the run owner.
+    for attempt in range(10):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError as exc:
+            if getattr(exc, 'winerror', None) not in {5, 32, 33} or attempt == 9:
+                raise
+            time.sleep(.02)
 
 
 class RemoteSearchAgent:
@@ -76,7 +86,7 @@ class RemoteSearchAgent:
         elif self.owner.pipeline and action == 'improve' and self.stage_name.startswith('4_'):
             idea = ParallelAgent._generate_ablation_idea(self)
         node = self.owner.execute_node(self.stage_name, self.task_desc, parent, action,
-                                       stage_idea=asdict(idea) if idea else None)
+                                       stage_idea={'name': idea.name, 'description': idea.description} if idea else None)
         if idea:
             if self.stage_name.startswith('2_'):
                 node.hyperparam_name = idea.name
@@ -144,6 +154,8 @@ class TreeSearchRun:
         self.check_running()
         request = self.service.planner.bindings.request_type(self.key[1], role, prompt, workdir,
             timeout_seconds=max(1, int(self.deadline - time.monotonic())), max_output_bytes=3_000_000)
+        if is_dataclass(request) and 'stage' in request.__dataclass_fields__:
+            request = replace(request, stage=getattr(self, 'agent_stage', None))
         result, payload = asyncio.run_coroutine_threadsafe(self.service.run_worker(self.key).run(request), self.loop).result()
         usage = getattr(result, 'usage', {}) or {}
         measured = all(type(usage.get(key)) is int and usage[key] >= 0 for key in ('input_tokens', 'output_tokens'))
@@ -232,9 +244,12 @@ class TreeSearchRun:
                              'truncated':bool(result.get('output_truncated')) or len(text)>remaining})
             write_json(node_root / 'execution.json',commands)
         with_gateway = AgentTerminalBridge(self.terminal, self.workdir,on_command=on_command)
+        previous_stage = getattr(self, 'agent_stage', None)
+        self.agent_stage = {'1': 'draft', '2': 'tuning', '3': 'research', '4': 'ablation'}.get(stage_name.split('_')[0], 'execution')
         try:
             payload = self.call_agent('mvp1_search_node', load_prompt('search.node', workdir=self.workdir), self.workdir)
         finally:
+            self.agent_stage = previous_stage
             with_gateway.close()
         self.check_running()
         manifest = collect_files(self.terminal, node_root, self.approved['body'].get('budget', {}).get('output_bytes'))
@@ -392,7 +407,12 @@ class TreeSearchRun:
                                  if any(item['succeeded'] and item['id'] in self.nodes
                                         and self.node_stages[item['id']] == name for item in results)}
             success = completed == successful_stages == {1, 2, 3, 4}
-            limitations = payload.limitations + ([] if success else ['Chưa có bản thử thành công ở đủ bốn giai đoạn.'])
+            # A selected baseline can originate in Draft even after all stages
+            # complete. Its limitations describe that node's execution time,
+            # not the final aggregate experiment outcome.
+            limitations = ['Giới hạn node được chọn lúc thực thi: ' + item for item in payload.limitations]
+            if not success:
+                limitations.append('Chưa có bản thử thành công ở đủ bốn giai đoạn.')
             if self.pipeline:
                 # Restore the selected implementation before optional SSH finishing
                 # steps; the last ablation/seed can differ from the selected node.

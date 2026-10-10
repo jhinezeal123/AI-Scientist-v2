@@ -20,6 +20,24 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+def result_directory(value):
+    """Serialize long Windows paths using the same namespace as the process cwd."""
+    if not value:
+        return None
+    resolved = str(Path(value).resolve())
+    if os.name == 'nt':
+        if resolved.startswith('\\\\?\\UNC\\'):
+            resolved = '\\\\' + resolved[8:]
+        elif resolved.startswith('\\\\?\\'):
+            resolved = resolved[4:]
+    path = Path(resolved)
+    try:
+        return str(path.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        # A configured workspace can also be outside the backend's cwd.
+        return str(path)
+
 node_selection_spec = FunctionSpec(
     name="select_best_implementation",
     description="Select the best implementation based on comprehensive analysis",
@@ -236,11 +254,7 @@ class Node(DataClassJsonMixin):
             "exc_info": self.exc_info,
             "exc_stack": self.exc_stack,
             "analysis": self.analysis,
-            "exp_results_dir": (
-                str(Path(self.exp_results_dir).resolve().relative_to(os.getcwd()))
-                if self.exp_results_dir
-                else None
-            ),
+            "exp_results_dir": result_directory(self.exp_results_dir),
             "metric": {
                 "value": self.metric.value if self.metric else None,
                 "maximize": self.metric.maximize if self.metric else None,
@@ -603,5 +617,5 @@ class Journal:
             temperature=cfg.agent.summary.temp if cfg.agent.get("summary", None) else 0.3
         )
 
-        with open(os.path.join(notes_dir, f"{stage_name}_summary.txt"), "w") as f:
+        with open(os.path.join(notes_dir, f"{stage_name}_summary.txt"), "w", encoding="utf-8") as f:
             f.write(stage_summary)

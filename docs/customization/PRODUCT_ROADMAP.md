@@ -46,7 +46,7 @@ Một MVP được bàn giao khi user làm được hành trình của nó, khô
 | N09 | Không mất kết quả, tiếp tục qua nhiều phiên, tái lập được thí nghiệm |
 | N10 | Cá nhân trước, sau đó workspace team 3–4 người |
 
-Ngân sách mới bằng 0, code đơn giản/dễ bảo trì và human approval trước code là ràng buộc xuyên suốt.
+Ngân sách dịch vụ mới mặc định bằng 0. Theo hướng sửa MVP5 mới nhất của user, approval có thể do Human hoặc agent được ủy quyền; mỗi stage có một actor và hạn mức rõ ràng.
 Các mục “bài toán được giải quyết” dưới đây ghi rõ mức hoàn thành trong từng chặng.
 
 ## 2. Thứ tự, phụ thuộc và thời gian
@@ -57,7 +57,7 @@ flowchart LR
     M1 --> M2["MVP 2: Implement tổng quát"]
     M2 --> M3["MVP 3: Quản lý thí nghiệm"]
     M3 --> M4["MVP 4: Retrieval có nguồn"]
-    M4 --> M5["MVP 5: Unified Multi-Agent Coding Platform"]
+    M4 --> M5["MVP 5: Configurable Research Stage Pipeline"]
     M5 --> M6["MVP 6: Ideathon + bản cá nhân hoàn chỉnh"]
     M6 --> M7["MVP 7: Team 3–4 người"]
 ```
@@ -73,7 +73,7 @@ Library PDF của MVP 1 phục vụ MVP 2; semantic retrieval của MVP 4 cải 
 | MVP 2 | Implement workshop/paper mới, tự sửa lỗi đúng scope | 12–24 giờ chủ động |
 | MVP 3 | Điều phối/theo dõi/so sánh nhiều thí nghiệm | 12–24 giờ chủ động |
 | MVP 4 | Tìm paper/context/run bằng ngôn ngữ tự nhiên có evidence | 12–24 giờ chủ động |
-| MVP 5 | Workspace và orchestration cho nhiều AI agent, tích hợp research đã duyệt | Theo gates M5-0…M5-9 trong issue #2 |
+| MVP 5 | Cấu hình Human/Agent từng stage và nối vào autoresearch gốc | Theo gates M5-0…M5-9 trong issue #2 |
 | MVP 6 | Ideathon tùy chọn, bàn giao bản cá nhân hoàn chỉnh | 6–12 giờ chủ động |
 | MVP 7 | Shared workspace 3–4 người | 16–32 giờ chủ động, chỉ lập lịch sau CP-PERSONAL |
 
@@ -87,8 +87,7 @@ Không đặt deadline toàn bộ sản phẩm <8 giờ: yêu cầu đó áp d�
 
 - Một nguồn trạng thái project/run: storage của app; upstream journal và artifacts liên kết bằng ID.
   Không dựng hai workspace/scheduler độc lập rồi đồng bộ thủ công.
-- Human approval gắn proposal/context version, scope và budget. Đổi hypothesis, data/split,
-  evaluation hoặc vượt budget quay về approval; bugfix trong scope được tự động.
+- Approval gắn proposal/context version, scope và budget. Human là mặc định; agent được phép duyệt khi operator bật ủy quyền cho workflow cụ thể. Vượt grant phải tạo cấu hình mới. Bugfix trong scope được tự động.
 - Kết quả, metric và trạng thái lấy từ run thật. Summary có nguồn; thiếu bằng chứng ghi thiếu.
 - Refactor cần thiết giữ hành vi và kiểm chứng trước; thay behavior ở phần riêng.
   Không bắt rewrite whole upstream để giao một MVP.
@@ -335,39 +334,28 @@ Chọn thuật toán đơn giản đạt bộ truy vấn; thêm local embedding/
 Không mặc định thêm vector DB server hay API trả phí. Chưa đủ tài nguyên model thì báo dependency,
 không đổi truy vấn kiểm thử cho dễ đạt.
 
-## 9. MVP 5 — Unified Multi-Agent Coding Platform
+## 9. MVP 5 — Configurable Research Stage Pipeline
 
-Phạm vi đầy đủ thay thế MVP5 chỉ có AgentPort, theo
-[issue #2](https://github.com/jhinezeal123/AI-Scientist-v2/issues/2).
-GUI nằm trong **Settings → Multi-agent**, cùng cấp Kaggle proxy.
+Hướng sửa theo yêu cầu mới nhất của user: mỗi stage có **một actor**, tùy chọn Human
+hoặc Agent. Có thể để người nghĩ idea/duyệt proposal, yêu cầu duyệt kết quả ở bất kỳ
+stage nào, hoặc ủy quyền chạy end2end trong grant hữu hạn. Harness/model/instructions
+được chọn theo agent của stage. GUI ở **Settings → Multi-agent**, cùng cấp Kaggle proxy.
 
-**User làm được:** quản lý team nhiều AI agent/harness, giao task có dependency,
-theo dõi topology/threads/code/terminal/Git diff, checkpoint/resume/fork theo
-capability, và đưa code đã review vào research run được human duyệt.
+Tận dụng team queue/supervisor/context/remote của PR #3 và nối vào Working cùng
+experiment manager, analysis/summary/report/plots/writeup/review của AI Scientist.
+OpenRig là tham chiếu quản lý/activity; T3 Code là tham chiếu harness/remote.
 
-**Bàn giao:**
-- RigSpec/AgentSpec, pods/seats/templates; durable queue/leases/messages/handoffs.
-- Native Codex/Claude, generic ACP v1/v2, DSH ACP, raw CLI/JSON, model/policy theo seat.
-- Worktree isolation, supervisor/stop receipts, snapshot/restore/discover/adopt/grow/shrink.
-- Settings workspace GUI; private HTTPS/pairing/scopes/revoke/cursor/idempotency.
-- MCP/CLI/TUI, context/skills/rosters/Library, bundles, telemetry/resource pools,
-  SDLC workflow và Slack opt-in.
-- Research bridge gắn đúng proposal/version/context/scope/budget/checkpoint,
-  dùng Working/Kaggle/project DB hiện có, provenance và report.
+Tasks, cách dùng, bằng chứng và phần chưa nghiệm thu nằm tại
+[MVP5_STAGE_AUTONOMY.md](MVP5_STAGE_AUTONOMY.md).
+QA live mới có phạm vi riêng ở [MVP5_STAGE_QA_SCOPE.md](MVP5_STAGE_QA_SCOPE.md).
 
-**Gates nghiệm thu:** M5-0…M5-9 tại [IMPLEMENT_MVP5.md](IMPLEMENT_MVP5.md),
-đối chiếu từng subsystem tại [MVP5_FEATURE_MATRIX.md](MVP5_FEATURE_MATRIX.md).
-Phải có hai harness thật, team bốn seat, restart/retry/remote và bằng chứng không
-chạy research trùng; fixtures không thay thế demo thật. Capability thiếu hiển thị
-unsupported, không fallback. Coding pool và quota/account Kaggle quản lý riêng.
+Các gates M5-0…M5-9 trong [IMPLEMENT_MVP5.md](IMPLEMENT_MVP5.md) mô tả bản PR #3
+đã merge trước khi user sửa cách hiểu. Bằng chứng đó vẫn chứng minh foundation;
+không dùng demo coding bốn seat để tuyên bố pipeline mới đã nghiệm thu.
 
-**Giới hạn vận hành:** Windows ACP/CLI/terminal dùng chung một OS sandbox slot;
-native tool-free agents vẫn chạy đồng thời. Claude native cần auth riêng;
-DSH ACP là harness thứ hai đã nghiệm thu. Remote dành cho thiết bị của một người;
-MVP7 vẫn là lớp multi-human RBAC, không phải các tính năng team AI bị hoãn.
-Không yêu cầu mua subscription mới. Nếu chưa có quyền gọi harness thứ hai thì checkpoint bị chặn,
-không tuyên bố “đa harness đã hoàn tất” chỉ vì interface có sẵn.
-Adapter thứ ba được thêm theo cùng contract khi có harness và quyền gọi hợp lệ.
+Remote vẫn dành cho thiết bị của một người; MVP7 là multi-human RBAC.
+Windows ACP/CLI/terminal giữ OS sandbox slot hiện có. Không fallback khi harness
+thiếu khả năng, không tự replay task/run có kết quả UNKNOWN.
 
 ## 10. MVP 6 — Ideathon tùy chọn và bản cá nhân hoàn chỉnh
 
@@ -375,7 +363,7 @@ Adapter thứ ba được thêm theo cùng contract khi có harness và quyền 
 - N07: mở rộng không gian giải pháp bằng agent nghĩ song song, user vẫn quyết định bật/tắt và chọn idea.
 - N09: có backup/restore/rerun và cách vận hành lâu dài, không phụ thuộc chat triển khai ban đầu.
 - N01–N09: CP-PERSONAL tổng hợp nghiệm thu toàn bộ yêu cầu cá nhân, gồm bảo trì đơn giản/ngân sách hiện có.
-Human approval vẫn là quyền quyết định; Ideathon không tự cấp quyền code/run.
+Operator quyết định cách ủy quyền. Ideathon không tự mở rộng quyền ngoài workflow grant; Human hoặc approval agent xử lý proposal theo cấu hình MVP5.
 
 **User làm được:** vừa tự nghĩ idea vừa bật agent gợi ý hướng khác; chọn idea để đi vào proposal,
 giữ quyền quyết định và có thể tắt ideation bất cứ lúc nào. App đã đủ để duy trì nghiên cứu cá nhân.
@@ -396,7 +384,7 @@ giữ quyền quyết định và có thể tắt ideation bất cứ lúc nào.
 **Tiêu chí nghiệm thu:**
 - P6-01: toggle off không phát job/call ideation; bật tạo gợi ý có source/author và không chặn user nhập idea.
 - P6-02: HumanAdapter/AgentAdapter đưa idea về cùng representation; gợi ý không tự được duyệt.
-- P6-03: chọn idea tạo proposal mới; coder/submit vẫn chờ human approval; stop/budget chặn sinh thêm idea.
+- P6-03: chọn idea tạo proposal mới; coder/submit vẫn tuân thủ actor approval và grant của workflow; stop/budget chặn sinh thêm idea.
 - P6-04: backup/restore giữ Library, provenance, proposal, bundle, metric/report và artifact đã chọn;
   dataset/weights lớn không được backup phải ghi rõ là external reference.
 - P6-05: rerun từ saved config/code/data reference trong scope đã hỗ trợ;
@@ -457,14 +445,14 @@ Không xây SSO enterprise, billing, multi-region hoặc fleet orchestration cho
 | Yêu cầu user | Xuất hiện tối thiểu | Hoàn tất theo scope đã chốt |
 | --- | --- | --- |
 | Human idea → general implementation, làm rõ khi mơ hồ | MVP 0 | MVP 2 |
-| Human approval trước code, tự implement/debug sau duyệt | MVP 0 | MVP 2 và giữ ở mọi MVP |
+| Approval trước code, Human hoặc agent được ủy quyền | MVP 0 | Cấu hình actor từ MVP5; scope/version/budget vẫn được kiểm tra |
 | GUI là cách dùng hằng ngày | MVP 0 | MVP 6 |
 | Library chung cho từng workshop/paper/project | MVP 0 | MVP 1; retrieval đầy đủ ở MVP 4 |
 | Paper/problem/data source và context nhất quán | MVP 1 | MVP 2–4 |
 | Theo dõi run, purpose, curves, ETA, history/compare | MVP 0 | MVP 3 |
 | Tìm run/tài liệu theo ngôn ngữ tự nhiên, có nguồn | MVP 1 keyword | MVP 4 |
 | AgentPort, không khóa Codex/Claude/DeepSeek | MVP 0 boundary/Codex | MVP 5 với hai harness thật; adapter thứ ba theo readiness |
-| IdeathonPort/HumanAdapter/AgentAdapter, toggle | Chưa ở prototype | MVP 6 |
+| Human/Agent ideation tùy chọn | Chưa ở prototype | Stage ideation từ MVP5; ideathon song song nâng cao ở MVP6 |
 | Tối ưu Kaggle MCP, log delta và truy cập upstream | MVP 0 cursor/cache | MVP 3 có measurements và giới hạn provider rõ |
 | Không mất kết quả, tái lập và bảo trì đơn giản | MVP 0–1 | MVP 6 |
 | Cá nhân trước, team 3–4 người sau | MVP 0–6 | MVP 7 |
