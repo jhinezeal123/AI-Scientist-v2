@@ -31,3 +31,6 @@ genson>=1,<2
 Pillow
 PyMuPDF
 pymupdf4llm
+
+# Mandatory benchmark comparison backend.
+mlflow>=3.7,<4

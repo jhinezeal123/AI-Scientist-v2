@@ -35,13 +35,14 @@ ACCELERATORS = ('cpu', 'NvidiaTeslaT4', 'TpuV5E8', 'TpuV6E8')
 
 
 @contextmanager
-def request_lock(session_id):
+def request_lock(session_id, *, namespace='session'):
     """Serialize bootstrap admission and cancellation across CLI processes."""
-    if not re.fullmatch('[0-9a-f]{32}', session_id):
+    if not re.fullmatch('[0-9a-f]{32}', session_id) or namespace not in {'session', 'assets'}:
         raise ValueError('Expected a UUID request ID')
     locks = DEFAULT_STATE / 'locks'
     locks.mkdir(parents=True, exist_ok=True)
-    with (locks / (session_id + '.lock')).open('a+b') as handle:
+    name = session_id if namespace == 'session' else namespace + '-' + session_id
+    with (locks / (name + '.lock')).open('a+b') as handle:
         handle.write(b'0')
         handle.flush()
         handle.seek(0)
@@ -109,7 +110,12 @@ def accelerator_name(value):
 
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def load(path):
@@ -152,7 +158,10 @@ def prepare(args):
         raise ValueError('Expected a UUID request ID')
     root = args.state_root / run_id
     root.mkdir(parents=True)
-    binary = tailcat(args.state_root)
+    # Two first runs may need the same bundled binary. Serialize installation
+    # across CLI processes without serializing their sessions or agent work.
+    with request_lock(hashlib.sha256(str(args.state_root.resolve()).encode()).hexdigest()[:32], namespace='assets'):
+        binary = tailcat(args.state_root)
     server_key = root / "server.private.json"
     generated = subprocess.run(
         [str(binary), "genkey", "--key", str(server_key), "--region=tok", "--embed-derp-map"],
@@ -470,7 +479,7 @@ def state_for(session_id, state_root=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Kaggle SDK bootstrap and Tailcat SSH')
-    parser.add_argument('action', choices=('start', 'idle', 'readiness', 'prepare', 'push', 'connect', 'ssh', 'shell', 'bridge', 'status', 'inspect', 'stop', 'network'))
+    parser.add_argument('action', choices=('start', 'idle', 'readiness', 'account-overview', 'cookie-check', 'account-add', 'account-remove', 'benchmark-name', 'benchmark-publish', 'prepare', 'push', 'connect', 'ssh', 'shell', 'bridge', 'status', 'inspect', 'stop', 'network'))
     parser.add_argument('--account')
     parser.add_argument('--config', type=Path)
     parser.add_argument('--state-root', type=Path, default=DEFAULT_STATE)
@@ -490,6 +499,16 @@ def main():
         parser.error('Choose a bootstrap TTL of at least 60 seconds')
     if args.wait_seconds < 1:
         parser.error('SSH wait must be a positive number of seconds')
+    if args.action in {'account-overview', 'cookie-check', 'account-add', 'account-remove'}:
+        from account_admin import dispatch
+        arguments = json.load(sys.stdin) if args.action == 'account-add' else None
+        print(json.dumps(dispatch(args.action, args.account, arguments), ensure_ascii=False))
+        return
+    if args.action in {'benchmark-name', 'benchmark-publish'}:
+        from benchmark_publish import check_name, publish
+        operation = check_name if args.action == 'benchmark-name' else publish
+        print(json.dumps(operation(args.account, json.load(sys.stdin)), ensure_ascii=False))
+        return
     if args.action == 'start':
         from .bootstrap_service import start
         arguments = json.load(sys.stdin)

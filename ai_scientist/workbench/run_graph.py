@@ -21,8 +21,8 @@ def run_settings(mode, research=None, tags=None):
     tags = tags or []
     if len(tags) != len(set(tags)) or any(tag not in RUN_TAGS for tag in tags):
         raise ValueError('Run tags must be distinct research, tuning or ablation labels')
-    return (ResearchPlan.model_validate(research or {}).model_dump() if mode != 'etc' else None,
-            list(tags) if mode != 'etc' else [])
+    return (ResearchPlan.model_validate(research or {}).model_dump() if mode == 'training_research' else None,
+            list(tags) if mode == 'training_research' else [])
 
 
 def parent_id(run, snapshot):

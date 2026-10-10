@@ -18,6 +18,7 @@
   },
   "extracted_from": [
     "interface_old/kaggle_pool.py: _IClient and _client_for",
+    "interface_old/kaggle_pool.py: selected quota parser, ListKernelSessions and GetKernel reference resolution adapted as account_admin",
     "interface_old/workbench.py: workbench_account_idle validation",
     "interface_old/sdk_client.py: pinned SDK version guard",
     "interface_ai_scientist/mcp_tools.py: orchestration as bootstrap_service.start, registration removed"
@@ -30,6 +31,12 @@
     "Quote OpenSSH known-hosts path for bundle folders containing spaces",
     "MVP3 copies all seven registered token/cookie profiles into ignored local bundle profiles",
     "Noninteractive readiness action reports expired cookies without launching login",
-    "SDK proxy, cookie API and native status reads record per-account aggregate payload bytes/attempt latency into ignored .runtime SQLite"
+    "Readiness preserves active provider session identities for the two-session Workbench capacity gate; missing references remain counted",
+    "Parallel bootstrap processes atomically persist JSON and serialize shared Tailcat installation; session and request IDs remain independent",
+    "Workbench Settings owns account CRUD and explicit cookie check jobs; removal permanently deletes the bundled profile and its credential/registry entries",
+    "Proxy refreshes local token files after account additions, removals or rotations without a restart",
+    "SDK proxy, cookie API and native status reads record per-account aggregate payload bytes/attempt latency into ignored .runtime SQLite",
+    "Benchmark publication reuses selected profile tokens with KaggleHub GCS upload and pinned SDK public create, validates name availability before sessions/upload, and returns immutable public dataset receipts",
+    "Persistent Bash resets inherited errexit before each command so a nonzero exit can be reported without losing cwd/exports or replaying commands"
   ]
 }

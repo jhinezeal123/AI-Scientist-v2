@@ -108,7 +108,7 @@ export default function ProjectRunTree({runs,selectedId,onSelect,large=false}:{r
           <title>{run.title || run.purpose || run.id}{'\n'}{run.id}</title>
           <rect width={W} height={H} rx={12}/><rect className="node-mode-stripe" width={5} height={H-20} x={0} y={10} rx={2}/>
           <text className="node-title" x={16} y={27}>{(run.title || 'Run '+run.id.slice(0,8)).slice(0,28)}{(run.title?.length || 0)>28 ? '…' : ''}</text>
-          <text className="node-kind" x={16} y={49}>{run.mode==='etc' ? 'Etc' : run.parent_run_id ? 'Improve' : 'Draft'}
+          <text className="node-kind" x={16} y={49}>{run.mode==='benchmark' ? 'Benchmark' : run.mode==='etc' ? 'Etc' : run.parent_run_id ? 'Improve' : 'Draft'}
             {run.tags?.length ? ' · '+run.tags.join(' / ') : ''}</text>
           <circle className="node-state-dot" data-state={run.state} cx={20} cy={72} r={4}/>
           <text className="node-status" x={32} y={77}>{run.deleted_at ? 'Đã xóa trước đây' : stateLabels[run.state] || run.state}</text>

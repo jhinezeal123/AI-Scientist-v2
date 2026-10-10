@@ -11,7 +11,7 @@ export function readProjectSession(projectId:string):ProjectSession {
     const saved=JSON.parse(localStorage.getItem(key(projectId)) || '{}');
     return {
       tab:['Library','Idea','Run'].includes(saved.tab) ? saved.tab : 'Library',
-      mode:saved.mode==='etc' ? 'etc' : 'training_research',
+      mode:saved.mode==='benchmark' ? 'benchmark' : saved.mode==='etc' ? 'etc' : 'training_research',
       ideaId:validId(saved.ideaId) ? saved.ideaId : '',
       runId:validId(saved.runId) ? saved.runId : '',
       sourceIds:Array.isArray(saved.sourceIds) ? [...new Set<string>(saved.sourceIds.filter(validId))].slice(0,30) : [],

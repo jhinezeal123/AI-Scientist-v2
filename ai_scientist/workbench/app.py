@@ -1,4 +1,4 @@
-"""Compose the local GUI, project store, shared Codex worker and Kaggle backend."""
+"""Compose the GUI, planning worker, independent run workers and Kaggle backend."""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,6 +13,8 @@ from .service import PlanningService
 from .run_view import RunView
 from .monitor_store import MonitorStore
 from .working import WorkingService
+from .kaggle_settings import KaggleProxySettings
+from .settings_api import settings_router
 
 
 def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
@@ -35,12 +37,14 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
             async with kaggle_connection(config) as session:
                 app.state.kaggle_backend = 'cli'
                 app.state.working = WorkingService(service, config, app.state.view, donor=session)
+                app.state.kaggle_settings = KaggleProxySettings(app.state.working)
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.working.check_idle
                 await app.state.working.recover()
                 try:
                     yield
                 finally:
+                    await app.state.kaggle_settings.close()
                     await app.state.working.close(config.shutdown_seconds)
                     await service.close()
                     await worker.close(config.shutdown_seconds)
@@ -53,9 +57,8 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
     store = ProjectStore(config.workspace_root / ".workbench/projects", config.workspace_root)
     app.state.store = store
     app.include_router(library_router(store, config.workspace_root))
-    # The agent gateway owns its control routes; existing domain services do not
-    # import the orchestration package or change their single-agent call sites.
-    _agent_gateway_class()  # Load root-level package, without sys.path changes.
+    app.include_router(settings_router())
+    _agent_gateway_class()
     from _ai_scientist_agent_management.http_api import create_router
     app.include_router(create_router())
 

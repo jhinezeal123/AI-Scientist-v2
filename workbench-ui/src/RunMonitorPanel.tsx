@@ -76,7 +76,7 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
     <span className="state-tag">{data?.terminal ? 'Đã kết thúc' : working ? 'Đang theo dõi' : data?.observation ? 'Theo dõi nền' : 'Đang chờ quan sát'}</span></div>
     {data?.observation && <p className="muted">{data.observation.identity.status} · Quan sát lúc {new Date(data.observation.observed_at).toLocaleTimeString('vi-VN')}</p>}
     {working && stats && <p className="muted">Collector: {stats.upstream_frames} frame SSH / {stats.upstream_log_bytes.toLocaleString()} byte log; GUI {stats.client_reads} lần đọc / {stats.client_bytes.toLocaleString()} byte · trung bình {stats.client_mean_latency_ms?.toFixed(1)??'—'} ms.</p>}
-    {working && stats?.provider && <p className="muted">API Kaggle: {stats.provider.requests} request · {stats.provider.request_bytes.toLocaleString()} byte gửi / {stats.provider.response_bytes.toLocaleString()} byte nhận · {stats.provider.mean_latency_ms?.toFixed(1)??'—'} ms/request (payload API).</p>}
+    {working && stats?.provider && <p className="muted">API Kaggle: {stats.provider.requests} request · {stats.provider.request_bytes.toLocaleString()} byte gửi / {stats.provider.response_bytes.toLocaleString()} byte nhận · {stats.provider.mean_latency_ms?.toFixed(1)??'—'} ms/request (tổng account trong thời gian run, có thể gồm run chạy cùng lúc).</p>}
     {(error || data?.error) && <p className="alert error" role="alert">{error || data?.error}</p>}
     {data?.gap && <p className="alert error">Nguồn log bị cắt hoặc đổi. Đã lưu generation mới; đang chờ đối soát log terminal.</p>}
     {data?.telemetry_error && <p className="alert error" role="alert">{data.telemetry_error}</p>}

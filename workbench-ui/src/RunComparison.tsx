@@ -1,11 +1,11 @@
 import {useEffect,useState} from 'react';
-import {api} from './api';
+import {api,Benchmark} from './api';
 
 type ComparedRun={run_id:string;title:string;purpose:string;state:string;account:string|null;
   points:{step:number;elapsed_seconds:number;total_steps:number;metrics:Record<string,number>}[];
   parent_run_id:string|null;metric:{name:string;direction:string;final_value:number;best_value:number}|null;
-  protocol:{mode:string;data:[string,number,string][];split:unknown;metric:unknown}};
-type Comparison={runs:ComparedRun[];same_protocol:boolean;warnings:string[];ranked_run_ids:string[]};
+  protocol:{mode:string;benchmark_id:string|null;metric:unknown}};
+type Comparison={runs:ComparedRun[];same_protocol:boolean;warnings:string[];ranked_run_ids:string[];benchmark?:Benchmark|null;tracking_backend:'mlflow';experiment_id?:string|null};
 
 const colors=['#68a9ef','#dc8b47','#64c59b','#cc82da','#d8c569','#e58189','#9c9df4','#70c5d1'];
 function ComparisonCurve({runs,metric}:{runs:ComparedRun[];metric:string}) {
@@ -21,37 +21,39 @@ function ComparisonCurve({runs,metric}:{runs:ComparedRun[];metric:string}) {
     <svg className="metric-curve" viewBox="0 0 420 220" role="img" aria-label={`So sánh ${metric} theo step`}>
       {[low,high].map((value,index)=><g key={index}><line className="metric-grid" x1="72" x2="396" y1={y(value)} y2={y(value)}/>
         <text x="62" y={y(value)+4} textAnchor="end">{value.toPrecision(4)}</text></g>)}
-      {series.map((run,index)=><g key={run.run_id}><polyline fill="none" stroke={colors[index]} strokeWidth="2"
+      {series.map((run,index)=><g key={run.run_id}><polyline fill="none" stroke={colors[index%colors.length]} strokeWidth="2"
         points={run.points.map(point=>`${x(point.step)},${y(point.metrics[metric])}`).join(' ')}/>
-        {run.points.map(point=><circle key={point.step} cx={x(point.step)} cy={y(point.metrics[metric])} r="3" fill={colors[index]}>
+        {run.points.map(point=><circle key={point.step} cx={x(point.step)} cy={y(point.metrics[metric])} r="3" fill={colors[index%colors.length]}>
           <title>{run.title}: step {point.step} · {point.metrics[metric]}</title></circle>)}</g>)}
       <text x="72" y="195">{minStep}</text><text x="396" y="195" textAnchor="end">{maxStep}</text>
       <text x="234" y="216" textAnchor="middle">Step</text></svg>
-    <ul>{series.map((run,index)=><li key={run.run_id}><span style={{color:colors[index]}}>●</span> {run.title} · {run.points.length} mẫu · cuối {run.points[run.points.length-1]?.metrics[metric]?.toPrecision(4)||'—'}</li>)}</ul></section>;
+    <ul>{series.map((run,index)=><li key={run.run_id}><span style={{color:colors[index%colors.length]}}>●</span> {run.title} · {run.points.length} mẫu · cuối {run.points[run.points.length-1]?.metrics[metric]?.toPrecision(4)||'—'}</li>)}</ul></section>;
 }
 
-export default function RunComparison({projectId,runIds,onClose,onOpen}:{projectId:string;runIds:string[];
+export default function RunComparison({projectId,runIds,onClose,onOpen,benchmarkId}:{projectId:string;runIds:string[];benchmarkId?:string;
   onClose:()=>void;onOpen:(id:string)=>void}) {
+  const [revision,setRevision]=useState(0);
   const [data,setData]=useState<Comparison|null>(null),[error,setError]=useState('');
   useEffect(()=>{let cancelled=false;let timer:number;setData(null);setError('');
     async function refresh() {
       try {
-        const value=await api<Comparison>(`/projects/${projectId}/runs/compare`,'POST',{run_ids:runIds});
+        const value=await (benchmarkId ? api<Comparison>(`/projects/${projectId}/benchmarks/${benchmarkId}/comparison`)
+          : api<Comparison>(`/projects/${projectId}/runs/compare`,'POST',{run_ids:runIds}));
         if(cancelled)return;
         setData(value);setError('');
-        if(value.runs.some(run=>!['COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED'].includes(run.state)))
+        if(benchmarkId || value.runs.some(run=>!['COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED'].includes(run.state)))
           timer=window.setTimeout(refresh,2000);
-      } catch(e) {if(!cancelled)setError(e instanceof Error?e.message:String(e));}
+      } catch(e) {if(!cancelled){setData(null);setError(e instanceof Error?e.message:String(e));}}
     }
     void refresh();
     return ()=>{cancelled=true;window.clearTimeout(timer);};
-  },[projectId,runIds.join(',')]);
+  },[projectId,runIds.join(','),benchmarkId,revision]);
   return <section className="run-comparison" aria-label="So sánh run"><div className="panel-head"><h3>So sánh run</h3>
     <button type="button" onClick={onClose}>Đóng</button></div>
-    {error && <p role="alert" className="alert error">{error}</p>}
+    {error && <div role="alert" className="alert error"><p>{error}</p><button type="button" onClick={()=>setRevision(n=>n+1)}>Đồng bộ và đọc lại MLflow</button></div>}
     {!data && !error && <p role="status">Đang đối chiếu protocol và kết quả đã lưu…</p>}
-    {data && <>{data.warnings.map(warning=><p key={warning} role="status" className="alert error">{warning}</p>)}
-      {data.same_protocol && <p className="muted">Cùng nguồn dữ liệu, split và metric đã duyệt.</p>}
+    {data && <>{data.benchmark && <p><a href={data.benchmark.dataset.url} target="_blank" rel="noreferrer">{data.benchmark.title} · dataset v{data.benchmark.dataset.version}</a></p>}{!data.runs.length && <p className="empty">Chưa có Training/Research dùng benchmark này.</p>}{data.warnings.map(warning=><p key={warning} role="status" className="alert error">{warning}</p>)}
+      {data.same_protocol && <p className="muted">Cùng benchmark · nguồn biểu đồ: MLflow. Số steps và ngân sách có thể khác nhau.</p>}
       <div className="run-board-scroll"><table className="run-board-table"><thead><tr><th>Run</th><th>Account / trạng thái</th>
         <th>Run cha</th><th>Metric cuối</th><th>Hạng</th></tr></thead><tbody>
         {data.runs.map(run=><tr key={run.run_id}><td><button type="button" className="run-board-open" onClick={()=>onOpen(run.run_id)}>

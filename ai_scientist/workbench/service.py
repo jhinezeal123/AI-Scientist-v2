@@ -28,18 +28,23 @@ class PlanningService:
             if self.closed or (self.task is not None and not self.task.done()):
                 raise StoreConflict("An agent job is active; wait before requesting another proposal")
             context = await asyncio.to_thread(self.store.context_snapshot, project_id, idea_id, resource_ids)
-            snapshot_settings(context['snapshot'], require_output=True)
+            mode, _ = snapshot_settings(context['snapshot'], require_output=True)
+            if mode == 'training_research' and not context['snapshot']['idea'].get('benchmark'):
+                raise StoreConflict('Training/Research bắt buộc chọn một benchmark đã hoàn tất trước khi lập proposal.')
             await asyncio.to_thread(self.store.reserve_plan, project_id, idea_id)
             self.task = asyncio.create_task(self._plan(project_id, idea_id, context))
             return {"idea_id": idea_id, "state": "PLANNING"}
 
     async def create_variant(self, project_id, parent_run_id, request_id, title, purpose, change_summary,
-                             mode=None, desired_output=None, research=None, tags=None):
+                             mode=None, desired_output=None, research=None, tags=None, benchmark_id=None):
+        if benchmark_id:
+            from .benchmarks import BenchmarkCatalog
+            await asyncio.to_thread(BenchmarkCatalog(self.store).require, project_id, benchmark_id)
         if self.view is None:
             raise RuntimeError('Run view is required to capture a safe variant baseline')
         baseline, texts = await asyncio.to_thread(self.view.variant_baseline, project_id, parent_run_id)
         return await asyncio.to_thread(self.store.create_variant_idea, project_id, parent_run_id, request_id,
-                                       title, purpose, change_summary, baseline, texts, mode, desired_output, research, tags)
+                                       title, purpose, change_summary, baseline, texts, mode, desired_output, research, tags, benchmark_id)
 
     async def _plan(self, project_id, idea_id, context):
         try:
@@ -61,13 +66,19 @@ class PlanningService:
                 json.dumps(body, ensure_ascii=False, indent=2), encoding='utf-8')
             if not payload.needs_clarification:
                 mode, _ = snapshot_settings(context['snapshot'])
-                if mode == 'etc':
+                if mode in {'etc', 'benchmark'}:
                     body.pop('research', None)
                 elif context['snapshot']['idea'].get('run_model') == 'single':
                     # User checkboxes, rather than model suggestions, own output scope.
                     body['research'] = ResearchPlan.model_validate(context['snapshot']['idea'].get('research') or {}).model_dump()
                 elif 'mode' in context['snapshot']['idea'] and 'research' not in body:
                     body['research'] = ResearchPlan().model_dump()
+                benchmark = context['snapshot']['idea'].get('benchmark')
+                definition = context['snapshot']['idea'].get('benchmark_definition')
+                if benchmark or definition:
+                    definition = benchmark['definition'] if benchmark else definition
+                    body['metric'] = definition['metric']
+                    body['split'] = {'test': definition['test_split'], 'train': definition['train_split']}
                 ready = WorkingProposal.model_validate(body)
                 allowed = {source["id"] for source in context["snapshot"]["resources"]}
                 if any(ref not in allowed for ref in ready.data_refs):
