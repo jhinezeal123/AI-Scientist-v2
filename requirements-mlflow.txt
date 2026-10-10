@@ -1,0 +1,2 @@
+# Required benchmark tracking dependency; also included in requirements-mvp0.txt.
+mlflow>=3.7,<4
