@@ -5,7 +5,8 @@ type ComparedRun={run_id:string;title:string;purpose:string;state:string;account
   points:{step:number;elapsed_seconds:number;total_steps:number;metrics:Record<string,number>}[];
   parent_run_id:string|null;metric:{name:string;direction:string;final_value:number;best_value:number}|null;
   protocol:{mode:string;data:[string,number,string][];split:unknown;metric:unknown}};
-type Comparison={runs:ComparedRun[];same_protocol:boolean;warnings:string[];ranked_run_ids:string[]};
+type Comparison={runs:ComparedRun[];same_protocol:boolean;warnings:string[];fairness_warnings:string[];
+  tracking_backend:'mlflow'|'workbench';tracking_warning:string|null;ranked_run_ids:string[]};
 
 const colors=['#68a9ef','#dc8b47','#64c59b','#cc82da','#d8c569','#e58189','#9c9df4','#70c5d1'];
 function ComparisonCurve({runs,metric}:{runs:ComparedRun[];metric:string}) {
@@ -51,6 +52,9 @@ export default function RunComparison({projectId,runIds,onClose,onOpen}:{project
     {error && <p role="alert" className="alert error">{error}</p>}
     {!data && !error && <p role="status">Đang đối chiếu protocol và kết quả đã lưu…</p>}
     {data && <>{data.warnings.map(warning=><p key={warning} role="status" className="alert error">{warning}</p>)}
+      {data.tracking_warning && <p role="status" className="muted">{data.tracking_warning}</p>}
+      {data.fairness_warnings?.map(warning=><p key={warning} role="status" className="muted">{warning}</p>)}
+      <p className="muted">Nguồn metrics: {data.tracking_backend==='mlflow'?'MLflow Tracking':'Workbench (local)'}</p>
       {data.same_protocol && <p className="muted">Cùng nguồn dữ liệu, split và metric đã duyệt.</p>}
       <div className="run-board-scroll"><table className="run-board-table"><thead><tr><th>Run</th><th>Account / trạng thái</th>
         <th>Run cha</th><th>Metric cuối</th><th>Hạng</th></tr></thead><tbody>

@@ -39,3 +39,23 @@ def test_missing_protocol_or_wrong_result_metric_never_ranks():
     working.detail = lambda project, run: {**detail(project, run),
         'result_metric': {'name': 'unapproved', 'direction': 'maximize', 'final_value': 1}}
     assert not compare_runs(working, 'project', ['a', 'b'])['ranked_run_ids']
+
+
+
+def test_budget_difference_is_advisory(monkeypatch):
+    from ai_scientist.workbench import compare
+    monkeypatch.delenv("AI_SCIENTIST_MLFLOW_TRACKING_URI", raising=False)
+    working = _working()
+    original = working.store.approved_snapshot
+
+    def differing_budget(project, run):
+        result = original(project, run)
+        result["body"]["budget"] = {"training_seconds": 60 if run == "a" else 120}
+        return result
+
+    working.store.approved_snapshot = differing_budget
+    result = compare.compare_runs(working, "project", ["a", "b"])
+    assert result["same_protocol"]
+    assert result["ranked_run_ids"] == ["a", "b"]
+    assert any("training_seconds" in item for item in result["fairness_warnings"])
+    assert result["tracking_backend"] == "workbench"

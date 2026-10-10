@@ -1,0 +1,2 @@
+# Optional MLflow-backed comparison; not needed for Kaggle execution.
+mlflow>=3.7,<4
