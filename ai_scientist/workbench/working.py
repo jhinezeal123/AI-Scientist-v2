@@ -55,6 +55,7 @@ class WorkingService:
                          if getattr(config, 'donor_root', None) else None)
         self.tasks, self.terminals, self.stop_requests = {}, {}, set()
         self.workers = {}
+        self.runtime_for_run = None
         self.queue_task = None
         self.closed = False
         self.cookie_lock = asyncio.Lock()
@@ -69,7 +70,8 @@ class WorkingService:
         """Each run owns its process, persisted state and cancellation signal."""
         if key not in self.workers:
             template = self.planner.worker
-            self.workers[key] = RuntimeWorker(template.runtime,
+            runtime = self.runtime_for_run(key) if self.runtime_for_run else template.runtime
+            self.workers[key] = RuntimeWorker(runtime,
                 self.view.root(*key) / 'working-agent' / 'runtime-state.json',
                 uncertain_error=template.uncertain_error)
         return self.workers[key]
