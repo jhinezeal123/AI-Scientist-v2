@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .kaggle import connect_kaggle
-from .runtime import load_runtime
+from .runtime import load_runtime, _agent_gateway_class
 from .worker import RuntimeWorker
 from .api import library_router
 from .store import ProjectStore
@@ -53,6 +53,11 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
     store = ProjectStore(config.workspace_root / ".workbench/projects", config.workspace_root)
     app.state.store = store
     app.include_router(library_router(store, config.workspace_root))
+    # The agent gateway owns its control routes; existing domain services do not
+    # import the orchestration package or change their single-agent call sites.
+    _agent_gateway_class()  # Load root-level package, without sys.path changes.
+    from _ai_scientist_agent_management.http_api import create_router
+    app.include_router(create_router())
 
     @app.get("/health")
     async def health():
