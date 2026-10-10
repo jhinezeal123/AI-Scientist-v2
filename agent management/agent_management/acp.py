@@ -13,7 +13,7 @@ from pathlib import Path
 import queue
 import signal
 import subprocess
-from threading import Thread
+from threading import Event, Thread
 import time
 
 from ai_scientist.workbench.agents.contracts import (
@@ -104,14 +104,38 @@ class AcpStdioRuntime:
         next_id = [0]
         texts = []
         session_id = None
-        completed = False
+        writers = []
+        text_bytes = 0
         progress(RuntimeProgress("agent", "Starting configured ACP v1 agent"))
 
         def send(payload):
-            proc.stdin.write((json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode())
-            proc.stdin.flush()
+            # A stalled agent may stop reading stdin. Keep writes off the
+            # control thread so cancellation/deadlines can still stop it.
+            encoded = (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+            done, errors = Event(), []
+            def write():
+                try:
+                    proc.stdin.write(encoded)
+                    proc.stdin.flush()
+                except (OSError, ValueError) as exc:
+                    errors.append(exc)
+                finally:
+                    done.set()
+            writer = Thread(target=write, daemon=True)
+            writers.append(writer)
+            writer.start()
+            while not done.wait(0.05):
+                if cancelled():
+                    raise RuntimeCancelled("ACP request cancelled")
+                if overflow[0]:
+                    raise ValueError("ACP event exceeded limits or was invalid")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("ACP agent exceeded its time limit")
+            if errors:
+                raise RuntimeError("ACP agent closed its input stream") from errors[0]
 
         def receive():
+            nonlocal text_bytes
             while True:
                 if cancelled():
                     raise RuntimeCancelled("ACP request cancelled")
@@ -147,9 +171,10 @@ class AcpStdioRuntime:
                     if isinstance(update, dict) and update.get("sessionUpdate") == "agent_message_chunk":
                         part = update.get("content", {})
                         if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
-                            texts.append(part["text"])
-                            if sum(len(x) for x in texts) > min(_MAX_LINE, request.max_output_bytes):
+                            text_bytes += len(part["text"].encode("utf-8"))
+                            if text_bytes > min(_MAX_LINE, request.max_output_bytes):
                                 raise ValueError("ACP output exceeded the configured size limit")
+                            texts.append(part["text"])
                             progress(RuntimeProgress("agent", "ACP agent returned a text chunk"))
                     continue
                 if "id" in msg:
@@ -164,6 +189,9 @@ class AcpStdioRuntime:
                 receive()
             message = pending.pop(ident)
             if "error" in message:
+                error = message["error"]
+                if isinstance(error, dict) and error.get("code") == -32000:
+                    raise RuntimeError("ACP agent needs authentication; sign in separately")
                 raise RuntimeError(f"ACP {method} returned a protocol error")
             result = message.get("result")
             if not isinstance(result, dict):
@@ -177,8 +205,8 @@ class AcpStdioRuntime:
             })
             if initialized.get("protocolVersion") != 1:
                 raise RuntimeError("This adapter only supports ACP v1")
-            if initialized.get("authMethods"):
-                raise RuntimeError("ACP agent needs interactive authentication; sign in separately")
+            # authMethods advertises supported methods, not current login state.
+            # An already authenticated agent may still advertise them.
             session = rpc("session/new", {"cwd": str(cwd.resolve()), "mcpServers": []})
             session_id = session.get("sessionId")
             if not isinstance(session_id, str) or not session_id:
@@ -188,9 +216,11 @@ class AcpStdioRuntime:
             })
             if result.get("stopReason") != "end_turn":
                 raise RuntimeError("ACP turn did not complete successfully")
-            completed = True
             return RuntimeResult(text="".join(texts), files={}, session_id=session_id)
         finally:
-            if not self._stop(proc):
+            stopped = self._stop(proc)
+            for writer in writers:
+                writer.join(timeout=1)
+            if not stopped:
                 # Prefer UNKNOWN over a fabricated completion or safe cancellation.
                 raise RuntimeUncertain("ACP process could not be confirmed stopped")

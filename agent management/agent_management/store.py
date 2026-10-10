@@ -94,6 +94,15 @@ class AgentStore:
         con.execute("INSERT INTO events(rig_id,kind,ref,timestamp) VALUES(?,?,?,?)",
                     (rig_id, kind, ref, _now()))
 
+    @staticmethod
+    def _require_members(con, rig_id: str, seats):
+        rig = con.execute("SELECT spec_json FROM rigs WHERE id=?", (rig_id,)).fetchone()
+        if rig is None:
+            raise KeyError("Unknown rig")
+        members = {seat['id'] for seat in json.loads(rig['spec_json'])['seats']}
+        if any(seat not in members for seat in seats):
+            raise ValueError("Seat does not belong to this rig")
+
     def enqueue(self, rig_id: str, seat: str, request_id: str, payload: dict,
                 *, depends_on: str | None = None) -> dict:
         if not all(isinstance(x, str) and x for x in (rig_id, seat, request_id)):
@@ -105,8 +114,7 @@ class AgentStore:
             raise ValueError("Task metadata exceeds 128KB")
         digest = hashlib.sha256(_json([rig_id, seat, raw, depends_on]).encode()).hexdigest()
         with self._connection(write=True) as con:
-            if not con.execute("SELECT 1 FROM rigs WHERE id=?", (rig_id,)).fetchone():
-                raise KeyError("Unknown rig")
+            self._require_members(con, rig_id, [seat])
             old = con.execute("SELECT * FROM tasks WHERE request_id=?", (request_id,)).fetchone()
             if old:
                 if old["content_hash"] != digest:
@@ -134,10 +142,14 @@ class AgentStore:
         if not 1 <= lease_seconds <= 3600:
             raise ValueError("Invalid lease duration")
         with self._connection(write=True) as con:
+            self._require_members(con, rig_id, [seat])
             # A lease that timed out is UNKNOWN, never auto-retried: the harness may still run.
             con.execute("""UPDATE tasks SET state='UNKNOWN'
                            WHERE rig_id=? AND state='LEASED' AND lease_until < ?""",
                         (rig_id, _now()))
+            if con.execute("""SELECT 1 FROM tasks WHERE rig_id=? AND seat=?
+                              AND state IN ('LEASED','UNKNOWN') LIMIT 1""", (rig_id, seat)).fetchone():
+                return None
             row = con.execute("""SELECT t.* FROM tasks t
                  LEFT JOIN tasks dep ON dep.id=t.depends_on
                  WHERE t.rig_id=? AND t.seat=? AND t.state='PENDING'
@@ -158,17 +170,22 @@ class AgentStore:
                uncertain: bool = False) -> dict:
         if not isinstance(result, (dict, type(None))):
             raise ValueError("Result must be JSON object or null")
+        expired = False
         with self._connection(write=True) as con:
             row = con.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if row is None:
                 raise KeyError("Unknown task")
             if row["state"] != "LEASED" or row["lease_token"] != lease_token:
                 raise ValueError("Lease invalid or task needs reconciliation")
-            state = "UNKNOWN" if uncertain else "DONE"
+            expired = row['lease_until'] is None or row['lease_until'] <= _now()
+            state = "UNKNOWN" if uncertain or expired else "DONE"
             con.execute("UPDATE tasks SET state=?, result_json=?, lease_token=NULL WHERE id=?",
-                        (state, _json(result) if result is not None else None, task_id))
-            self._event(con, row["rig_id"], "task_unknown" if uncertain else "task_done", task_id)
-            return {**self._task(row), "state": state}
+                        (state, _json(result) if result is not None and not expired else None, task_id))
+            self._event(con, row["rig_id"], "task_unknown" if state == 'UNKNOWN' else "task_done", task_id)
+            finished = {**self._task(row), "state": state}
+        if expired:
+            raise ValueError("Lease expired; task needs reconciliation")
+        return finished
 
     def send(self, rig_id: str, sender: str, recipient: str, body: str) -> int:
         if not all(isinstance(x, str) and x for x in (rig_id, sender, recipient, body)):
@@ -176,8 +193,7 @@ class AgentStore:
         if len(body) > 20_000:
             raise ValueError("Message exceeds size limit")
         with self._connection(write=True) as con:
-            if not con.execute("SELECT 1 FROM rigs WHERE id=?", (rig_id,)).fetchone():
-                raise KeyError("Unknown rig")
+            self._require_members(con, rig_id, [sender] + ([recipient] if recipient != '*' else []))
             cursor = con.execute("INSERT INTO messages(rig_id,sender,recipient,body,created_at) VALUES(?,?,?,?,?)",
                                  (rig_id, sender, recipient, body, _now()))
             self._event(con, rig_id, "message_sent", str(cursor.lastrowid))
@@ -187,6 +203,7 @@ class AgentStore:
         if not 1 <= limit <= 200:
             raise ValueError("Invalid inbox limit")
         with self._connection() as con:
+            self._require_members(con, rig_id, [recipient])
             rows = con.execute("""SELECT id,sender,recipient,body,created_at FROM messages
                    WHERE rig_id=? AND (recipient=? OR recipient='*') AND id>?
                    ORDER BY id LIMIT ?""", (rig_id, recipient, after, limit)).fetchall()
