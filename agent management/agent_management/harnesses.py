@@ -66,14 +66,28 @@ class HarnessAdapter(Protocol):
 
 
 class NativeHarness:
-    def __init__(self, spec: HarnessSpec, *, codex=None):
+    def __init__(self, spec: HarnessSpec, *, codex=None, sandbox=None):
         self.spec = spec
         self.codex = codex
+        self.sandbox = sandbox
+        self._fork_supported = None
 
     @property
     def capabilities(self):
         return Capabilities(resume=self.spec.kind in {"native_codex", "native_claude"},
-                            fork=self.spec.kind == "native_claude", usage=self.spec.kind != "cli_json")
+                            fork=self.spec.kind == "native_claude" or self.codex_fork_supported(), usage=self.spec.kind != "cli_json")
+
+    def codex_fork_supported(self):
+        if self.spec.kind!='native_codex':
+            return False
+        if self._fork_supported is None:
+            try:
+                result=subprocess.run([self.executable(),'exec','fork','--help'],capture_output=True,timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW if __import__('os').name=='nt' else 0)
+                self._fork_supported=result.returncode==0 and b'Usage: codex exec fork' in result.stdout
+            except (OSError,ValueError,subprocess.SubprocessError):
+                self._fork_supported=False
+        return self._fork_supported
 
     def executable(self):
         configured = self.spec.executable
@@ -149,7 +163,7 @@ class NativeHarness:
             if self.spec.kind == "native_codex":
                 args = [executable, "exec"]
                 if handle.provider_session:
-                    args += ["resume", handle.provider_session]
+                    args += ["fork" if handle.fork else "resume", handle.provider_session]
                 args += ["--json", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
                          "--output-schema", str(schema_file), "--config", 'sandbox_mode="read-only"',
                          "--config", 'approval_policy="never"', "--config", 'web_search="disabled"']
@@ -180,6 +194,8 @@ class NativeHarness:
                 args = [executable, *self.spec.args]
                 body = json.dumps({"request_id": request_id, "prompt": prompt, "model": model,
                                    "workdir": str(handle.workspace), "result_schema": RESULT_SCHEMA}).encode()
+                if self.sandbox:
+                    args = self.sandbox(handle, args)
             raw, receipt = run_process(args, handle.workspace, body, timeout=timeout,
                                        cancelled=handle.interrupted.is_set, emit=emit, started=started)
             handle.stop_receipt = receipt
@@ -218,8 +234,10 @@ class NativeHarness:
 
 
 class HarnessRegistry:
-    def __init__(self, store, *, codex=None, permission=None):
+    def __init__(self, store, *, codex=None, permission=None, repository=None, protected=()):
         self.store, self.codex, self.permission = store, codex, permission
+        self.repository = repository
+        self.protected = tuple(protected)
         existing = {spec.id for spec in store.harnesses()}
         for spec in (HarnessSpec(id="codex", kind="native_codex"), HarnessSpec(id="claude", kind="native_claude")):
             if spec.id not in existing:
@@ -231,8 +249,36 @@ class HarnessRegistry:
             raise ValueError("Unknown harness; no implicit fallback")
         if spec.kind == "acp":
             from .acp_sessions import AcpHarness
-            return AcpHarness(spec, permission=self.permission)
-        return NativeHarness(spec, codex=self.codex)
+            adapter=AcpHarness(spec, permission=self.permission, sandbox=self.sandbox)
+        else:
+            adapter=NativeHarness(spec, codex=self.codex, sandbox=self.sandbox if spec.kind=='cli_json' else None)
+        if __import__('os').name=='nt' and spec.kind in {'acp','cli_json'}:
+            from .windows_isolation import SandboxedHarness
+            return SandboxedHarness(adapter)
+        return adapter
+
+    def sandbox(self, handle, argv, *, provider_home=None):
+        from .terminal import sandbox_command
+        if self.repository is None:
+            raise ValueError('Registry has no repository sandbox boundary')
+        executable=NativeHarness(HarnessSpec(id='sandbox',kind='native_codex'),codex=self.codex).executable()
+        if provider_home is None:
+            import hashlib
+            import sys
+            key=hashlib.sha256(str(handle.workspace.resolve()).encode()).hexdigest()
+            home=self.repository/'.workbench/agents/runtimes'/('cli-'+handle.seat.harness+'-'+key)
+            if any(p.is_symlink() or getattr(p,'is_junction',lambda:False)() for p in (home,*home.parents) if p.is_relative_to(self.repository)):
+                raise ValueError('Refusing redirected harness runtime storage')
+            home.mkdir(parents=True,exist_ok=True)
+            provider_home=home
+            shim='import json,subprocess,sys; args=json.loads(sys.argv[1]); raise SystemExit(subprocess.run(args,cwd=sys.argv[2],shell=False).returncode)'
+            argv=[sys.executable,'-I','-c',shim,json.dumps(argv),str(handle.workspace)]
+        # Transport to a model provider is separate from the seat's tool-network
+        # permission. Direct tool requests still pass the permission broker.
+        policy=handle.seat.policy.model_copy(update={'network':True})
+        handle.repository=self.repository
+        handle.runtime_home=provider_home
+        return sandbox_command(executable,handle.workspace,policy,self.repository,argv,provider_home=provider_home,protected=self.protected)
 
     def probes(self):
         return [self.resolve(spec.id).probe() for spec in self.store.harnesses()]

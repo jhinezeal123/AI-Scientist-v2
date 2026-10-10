@@ -16,9 +16,9 @@ _DENIED = {".git", ".workbench", ".env", "profiles", "credentials.json", "kaggle
 
 def safe_path(root: Path, value: str, *, allow_missing=True) -> Path:
     relative = PurePosixPath(value)
-    if not value or "\\" in value or ":" in value or "\x00" in value or relative.is_absolute() or ".." in relative.parts:
+    if not value or relative.as_posix() != value.rstrip("/") or "\\" in value or ":" in value or "\x00" in value or relative.is_absolute() or ".." in relative.parts:
         raise ValueError("Path must stay inside the seat workspace")
-    if any(p in _DENIED or p.startswith(".") for p in relative.parts):
+    if any(p.lower() in {x.lower() for x in _DENIED} or p.startswith(".") for p in relative.parts):
         raise ValueError("Hidden, secret and runtime paths are outside the agent scope")
     target = root.joinpath(*relative.parts)
     root = root.resolve(strict=True)
@@ -175,11 +175,14 @@ class Workspaces:
                      "commit", "-m", "Agent checkpoint " + task_id)
         return self.git(path, "rev-parse", "HEAD")
 
-    def review(self, path, base_ref):
+    def review(self, path, base_ref, *, allowed_paths=None):
         base = self.revision(base_ref)
+        paths = [':(literal)' + p.rstrip('/') for p in allowed_paths] if allowed_paths is not None else []
+        if allowed_paths is not None and not paths:
+            return {"head": self.git(path, "rev-parse", "HEAD"), "base": base, "status": "", "diff": "", "log": ""}
         return {"head": self.git(path, "rev-parse", "HEAD"), "base": base,
-                "status": self.git(path, "status", "--porcelain"),
-                "diff": self.git(path, "diff", "--no-ext-diff", "--no-textconv", base, "--"),
+                "status": self.git(path, "status", "--porcelain", "--", *paths),
+                "diff": self.git(path, "diff", "--no-ext-diff", "--no-textconv", base, "--", *paths),
                 "log": self.git(path, "log", "-10", "--oneline")}
 
     def restore_checkpoint(self, path, revision):

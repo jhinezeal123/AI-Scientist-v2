@@ -40,6 +40,7 @@ class HarnessSpec(StrictModel):
     args: list[str] = Field(default_factory=list, max_length=32)
     protocol_version: Literal[1, 2] = 1
     models: list[str] = Field(default_factory=list, max_length=100)
+    managed_home: str | None = Field(default=None, max_length=2048)
     # A local command is an explicit administrator configuration, never an installer.
     enabled: bool = True
 
@@ -71,7 +72,7 @@ class PodSpec(StrictModel):
 
 class ContextSource(StrictModel):
     id: str = Field(pattern=ID)
-    kind: Literal["source", "skill", "knowledge", "roster"]
+    kind: Literal["source", "skill", "knowledge", "roster", "library"]
     path: str = Field(min_length=1, max_length=512)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     seats: list[str] = Field(default_factory=list, max_length=32)
@@ -110,6 +111,7 @@ class TaskRequest(StrictModel):
     kind: Literal["coding", "review", "research"] = "coding"
     input_checkpoint: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     resume_session: str | None = Field(default=None, max_length=128)
+    fork_session: bool = False
 
 
 class FileEdit(StrictModel):

@@ -52,12 +52,13 @@ class ControlStore:
         with self.connect(True) as con:
             return self.event(con, kind, data, **identity)
 
-    def events(self, *, rig_id: str | None = None, after=0, limit=200):
+    def events(self, *, rig_id: str | None = None, after=0, limit=200, seat_id=None):
         if after < 0 or not 1 <= limit <= 500:
             raise ValueError("Invalid journal cursor")
         with self.connect() as con:
             rows = con.execute("""SELECT * FROM journal WHERE id>? AND (? IS NULL OR rig_id=?)
-                ORDER BY id LIMIT ?""", (after, rig_id, rig_id, limit)).fetchall()
+                AND (? IS NULL OR seat_id IS NULL OR seat_id=?)
+                ORDER BY id LIMIT ?""", (after, rig_id, rig_id, seat_id, seat_id, limit)).fetchall()
         return [{**{k: row[k] for k in row.keys() if k != "data_json"},
                  "data": json.loads(row["data_json"])} for row in rows]
 
@@ -77,6 +78,7 @@ class ControlStore:
             con.execute("INSERT OR IGNORE INTO rig_runtime(rig_id) VALUES(?)", (rig_id,))
             for seat in spec.seats:
                 con.execute("INSERT OR IGNORE INTO seats(rig_id,id) VALUES(?,?)", (rig_id, seat.id))
+                con.execute("UPDATE seats SET state='IDLE' WHERE rig_id=? AND id=? AND state='REMOVED'", (rig_id, seat.id))
             self.event(con, "team_created", {"name": spec.name}, rig_id=rig_id)
         return self.snapshot(rig_id)
 
@@ -95,6 +97,7 @@ class ControlStore:
 
     def snapshot(self, rig_id):
         result = self.queue.snapshot(rig_id)
+        result['id'] = rig_id
         with self.connect() as con:
             runtime = con.execute("SELECT enabled,revision FROM rig_runtime WHERE rig_id=?", (rig_id,)).fetchone()
             if runtime is None:
@@ -124,11 +127,13 @@ class ControlStore:
 
     def update_spec(self, rig_id, spec: RigSpec, revision: int):
         with self.connect(True) as con:
-            current = con.execute("SELECT revision FROM rig_runtime WHERE rig_id=?", (rig_id,)).fetchone()
+            current = con.execute("SELECT revision,enabled FROM rig_runtime WHERE rig_id=?", (rig_id,)).fetchone()
             if current is None:
                 raise KeyError("Unknown team")
             if current[0] != revision:
                 raise ValueError("Team revision changed; refresh before editing")
+            if current['enabled']:
+                raise ValueError('Pause the team before changing topology')
             active = con.execute("SELECT 1 FROM tasks WHERE rig_id=? AND state IN ('LEASED','UNKNOWN','PENDING')", (rig_id,)).fetchone()
             if active:
                 raise ValueError("Pause and resolve queued/active tasks before changing topology")
@@ -138,8 +143,12 @@ class ControlStore:
             con.execute("UPDATE rigs SET spec_json=? WHERE id=?", (_json(spec.model_dump()), rig_id))
             con.execute("UPDATE rig_runtime SET revision=revision+1 WHERE rig_id=?", (rig_id,))
             names = {s.id for s in spec.seats}
+            resources = con.execute('SELECT spec_json FROM resources WHERE rig_id=?', (rig_id,)).fetchall()
+            if any(set(json.loads(row[0])['seat_ids'])-names for row in resources):
+                raise ValueError('Remove resource references before shrinking their seats')
             for seat in spec.seats:
                 con.execute("INSERT OR IGNORE INTO seats(rig_id,id) VALUES(?,?)", (rig_id, seat.id))
+                con.execute("UPDATE seats SET state='IDLE' WHERE rig_id=? AND id=? AND state='REMOVED'", (rig_id, seat.id))
             for seat in old.seats:
                 if seat.id not in names:
                     con.execute("UPDATE seats SET state='REMOVED' WHERE rig_id=? AND id=?", (rig_id, seat.id))
@@ -156,7 +165,10 @@ class ControlStore:
             con.execute("""INSERT INTO sessions(id,rig_id,seat_id,task_id,request_id,provider_id,state,created_at,updated_at)
                 VALUES(?,?,?,?,?,?,'STARTING',?,?)""", (session_id, task["rig_id"], task["seat"], task["id"], task["request_id"], provider_id, now, now))
             con.execute("UPDATE seats SET state='BUSY',session_id=? WHERE rig_id=? AND id=?", (session_id, task["rig_id"], task["seat"]))
-            self.event(con, "session_starting", rig_id=task["rig_id"], seat_id=task["seat"], task_id=task["id"], request_id=task["request_id"], provider_id=provider_id, session_id=session_id)
+            spec=json.loads(con.execute('SELECT spec_json FROM rigs WHERE id=?',(task['rig_id'],)).fetchone()[0])
+            seat=next(s for s in spec['seats'] if s['id']==task['seat'])
+            self.event(con, "session_starting", {'model':seat.get('model'),'role':seat.get('role'),'policy':seat.get('policy')},
+                rig_id=task["rig_id"], seat_id=task["seat"], task_id=task["id"], request_id=task["request_id"], provider_id=provider_id, session_id=session_id)
         return session_id
 
     def process_started(self, session_id, process_id, birth_identity=None):
@@ -191,6 +203,21 @@ class ControlStore:
                 raise KeyError("Unknown session")
             return self.session_row(row)
 
+    def complete_turn(self, task_id, token, session_id, *, result, receipt, provider_session=None, usage=None):
+        with self.connect(True) as con:
+            task=con.execute('SELECT * FROM tasks WHERE id=?',(task_id,)).fetchone()
+            session=con.execute('SELECT * FROM sessions WHERE id=? AND task_id=?',(session_id,task_id)).fetchone()
+            if not task or not session or task['state']!='LEASED' or task['lease_token']!=token or task['lease_until']<=_now():
+                raise ValueError('Task completion is fenced; reconcile its session')
+            if not receipt.get('tree_stopped'):
+                raise ValueError('Completion requires a verified stop receipt')
+            con.execute("UPDATE tasks SET state='DONE',result_json=?,lease_token=NULL WHERE id=?",(_json(result),task_id))
+            con.execute("UPDATE sessions SET state='DONE',stop_receipt_json=?,provider_session=?,usage_json=?,updated_at=? WHERE id=?",(_json(receipt),provider_session,_json(usage or {}),_now(),session_id))
+            con.execute("UPDATE seats SET state='IDLE' WHERE rig_id=? AND id=?",(task['rig_id'],task['seat']))
+            self.queue._event(con,task['rig_id'],'task_done',task_id)
+            self.event(con,'session_finished',{'state':'DONE','receipt':receipt,'usage':usage or {}},
+                       rig_id=task['rig_id'],seat_id=task['seat'],task_id=task_id,request_id=task['request_id'],provider_id=session['provider_id'],session_id=session_id)
+
     def heartbeat(self, task_id, token, seconds=30):
         until = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
         with self.connect(True) as con:
@@ -209,12 +236,19 @@ class ControlStore:
     def recover(self):
         # Previous supervisor may have died while its child was still alive. Never replay.
         with self.connect(True) as con:
+            con.execute("UPDATE outbox SET state='UNKNOWN' WHERE state='DISPATCHING'")
             rows = con.execute("SELECT * FROM sessions WHERE state IN ('STARTING','RUNNING','STOPPING')").fetchall()
             for row in rows:
                 con.execute("UPDATE sessions SET state='UNKNOWN',updated_at=? WHERE id=?", (_now(), row["id"]))
                 con.execute("UPDATE tasks SET state='UNKNOWN',lease_token=NULL WHERE id=? AND state='LEASED'", (row["task_id"],))
                 con.execute("UPDATE seats SET state='UNKNOWN' WHERE rig_id=? AND id=?", (row["rig_id"], row["seat_id"]))
                 self.event(con, "session_recovery_required", rig_id=row["rig_id"], seat_id=row["seat_id"], task_id=row["task_id"], session_id=row["id"])
+            # A crash can occur after claim, before begin_session. No child existed there.
+            orphans = con.execute("SELECT * FROM tasks WHERE state='LEASED' AND NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.task_id=tasks.id AND sessions.state IN ('STARTING','RUNNING','STOPPING','UNKNOWN'))").fetchall()
+            for row in orphans:
+                state='CANCELLED' if json.loads(row['payload_json']).get('kind')=='terminal' else 'PENDING'
+                con.execute("UPDATE tasks SET state=?,lease_token=NULL,lease_until=NULL WHERE id=?", (state,row['id']))
+                self.event(con, "unstarted_claim_recovered", rig_id=row['rig_id'], seat_id=row['seat'], task_id=row['id'])
 
     def reconcile(self, session_id, receipt, *, retry=False):
         if not receipt.get("process_exited") or not receipt.get("tree_stopped"):
@@ -234,6 +268,21 @@ class ControlStore:
             if not cursor.rowcount:
                 raise ValueError("Only a pending task can be cancelled without a stop receipt")
             self.event(con, "task_cancelled", rig_id=rig_id, task_id=task_id)
+
+    def retry_stopped(self, rig_id, task_id):
+        with self.connect(True) as con:
+            runtime=con.execute('SELECT enabled FROM rig_runtime WHERE rig_id=?',(rig_id,)).fetchone()
+            task=con.execute('SELECT * FROM tasks WHERE rig_id=? AND id=?',(rig_id,task_id)).fetchone()
+            if not runtime or not task:
+                raise KeyError(task_id)
+            if runtime['enabled'] or task['state'] not in {'FAILED','CANCELLED'}:
+                raise ValueError('Pause the team; only stopped FAILED/CANCELLED tasks can be retried')
+            sessions=con.execute('SELECT stop_receipt_json FROM sessions WHERE task_id=?',(task_id,)).fetchall()
+            if any(not (json.loads(s[0]) if s[0] else {}).get('tree_stopped') for s in sessions):
+                raise ValueError('Reconcile every session stop receipt before retry')
+            con.execute("UPDATE tasks SET state='PENDING',lease_token=NULL,lease_until=NULL,result_json=NULL WHERE id=?",(task_id,))
+            self.event(con,'task_retry_requested',rig_id=rig_id,task_id=task_id,request_id=task['request_id'])
+            return self.queue._task(con.execute('SELECT * FROM tasks WHERE id=?',(task_id,)).fetchone())
 
     def chatroom(self, rig_id, after=0):
         self.rig(rig_id)

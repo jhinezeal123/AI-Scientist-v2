@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+from threading import RLock
 from typing import Any
 
 from .acp import AcpStdioRuntime
@@ -28,18 +29,46 @@ class AgentGateway:
             self.workspace_root / ".workbench" / "agent-management.json")
         self.spec: GatewaySpec = load_spec(self.spec_path)
         self._store: AgentStore | None = None
+        self._platform = None
+        self._lock = RLock()
+        self.protected_paths = ()
 
     @property
     def store(self) -> AgentStore:
-        if self._store is None:
-            self._store = AgentStore(
-                self.workspace_root / ".workbench" / "agent-management.sqlite")
+        with self._lock:
+            if self._store is None:
+                self._store = AgentStore(
+                    self.workspace_root / ".workbench" / "agent-management.sqlite")
         return self._store
+
+    @property
+    def platform(self):
+        with self._lock:
+            if self._platform is None:
+                from .orchestrator import TeamPlatform
+                self._platform = TeamPlatform(self.store, self.workspace_root, codex=self.codex_runtime, protected=self.protected_paths)
+            return self._platform
+
+    def close(self):
+        if self._platform is not None:
+            return self._platform.close()
 
     def run(self, request, progress, cancelled):
         profile = self.spec.for_role(request.role)
         if profile.kind == "native_codex":
             # Golden path: same request object, callbacks, Codex process and result.
+            if self._platform is not None and __import__('os').name=='nt':
+                from .windows_isolation import lease, refresh_scope, protect_scope
+                path=Path(str(request.workdir).removeprefix('\\\\?\\'))
+                owned=path.resolve().is_relative_to((self.workspace_root/'.workbench/projects').resolve())
+                with lease(request.timeout_seconds,cancelled):
+                    if owned:
+                        refresh_scope(self.workspace_root,[path],legacy=True)
+                    try:
+                        return self.codex_runtime.run(request,progress,cancelled)
+                    finally:
+                        if owned:
+                            protect_scope(self.workspace_root,[path],legacy=True)
             return self.codex_runtime.run(request, progress, cancelled)
         if profile.kind == "acp":
             return AcpStdioRuntime(

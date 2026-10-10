@@ -70,7 +70,7 @@ export default function SettingsPage() {
   return <>
     <aside className="rail settings-rail"><a className="brand" href="/" style={{textDecoration:'none'}}><span className="brand-mark">∿</span><span>AI SCIENTIST<small>LOCAL WORKBENCH</small></span></a>
       <a href={backProject?`/?project=${backProject}`:'/'}>← Quay về Workbench</a>
-      <nav className="settings-nav" aria-label="Settings"><a className="active" href="/?page=settings&tab=kaggle-proxy" aria-current="page">Kaggle proxy</a></nav>
+      <nav className="settings-nav" aria-label="Settings"><a className="active" href="/?page=settings&tab=kaggle-proxy" aria-current="page">Kaggle proxy</a><a href="/?page=settings&tab=multi-agent">Multi-agent</a></nav>
       <div className="rail-footer">Cài đặt dùng chung<br/>cho các project trên máy này.</div>
     </aside>
     <main className="settings-page"><header><div><span className="eyebrow">SETTINGS</span><h1>Kaggle proxy</h1><p className="muted">Quản lý account, quota và các phiên Kaggle.</p></div></header>

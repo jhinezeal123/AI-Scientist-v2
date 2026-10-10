@@ -57,7 +57,7 @@ flowchart LR
     M1 --> M2["MVP 2: Implement tổng quát"]
     M2 --> M3["MVP 3: Quản lý thí nghiệm"]
     M3 --> M4["MVP 4: Retrieval có nguồn"]
-    M4 --> M5["MVP 5: Đa harness"]
+    M4 --> M5["MVP 5: Unified Multi-Agent Coding Platform"]
     M5 --> M6["MVP 6: Ideathon + bản cá nhân hoàn chỉnh"]
     M6 --> M7["MVP 7: Team 3–4 người"]
 ```
@@ -73,7 +73,7 @@ Library PDF của MVP 1 phục vụ MVP 2; semantic retrieval của MVP 4 cải 
 | MVP 2 | Implement workshop/paper mới, tự sửa lỗi đúng scope | 12–24 giờ chủ động |
 | MVP 3 | Điều phối/theo dõi/so sánh nhiều thí nghiệm | 12–24 giờ chủ động |
 | MVP 4 | Tìm paper/context/run bằng ngôn ngữ tự nhiên có evidence | 12–24 giờ chủ động |
-| MVP 5 | Chọn và thay harness thật qua cùng workflow | 6–12 giờ chủ động |
+| MVP 5 | Workspace và orchestration cho nhiều AI agent, tích hợp research đã duyệt | Theo gates M5-0…M5-9 trong issue #2 |
 | MVP 6 | Ideathon tùy chọn, bàn giao bản cá nhân hoàn chỉnh | 6–12 giờ chủ động |
 | MVP 7 | Shared workspace 3–4 người | 16–32 giờ chủ động, chỉ lập lịch sau CP-PERSONAL |
 
@@ -335,38 +335,36 @@ Chọn thuật toán đơn giản đạt bộ truy vấn; thêm local embedding/
 Không mặc định thêm vector DB server hay API trả phí. Chưa đủ tài nguyên model thì báo dependency,
 không đổi truy vấn kiểm thử cho dễ đạt.
 
-## 9. MVP 5 — Đa harness qua AgentPort
+## 9. MVP 5 — Unified Multi-Agent Coding Platform
 
-**Bài toán trong nhu cầu gốc được giải quyết:**
-- N06: user chọn harness phù hợp; đổi harness không phải đổi sản phẩm hay mất lịch sử.
-- N01 + N02: cùng idea/proposal/GUI vẫn đi hết flow với agent phía sau khác nhau.
-Nghiệm thu bằng hai harness thật; khả năng thêm harness thứ ba đi theo contract,
-không đồng nghĩa mọi model/account đều đã được chạy kiểm chứng.
+Phạm vi đầy đủ thay thế MVP5 chỉ có AgentPort, theo
+[issue #2](https://github.com/jhinezeal123/AI-Scientist-v2/issues/2).
+GUI nằm trong **Settings → Multi-agent**, cùng cấp Kaggle proxy.
 
-**User làm được:** chọn Codex hoặc harness khác cho cùng project/task từ GUI,
-vẫn giữ approval, execution, history và report theo một workflow.
+**User làm được:** quản lý team nhiều AI agent/harness, giao task có dependency,
+theo dõi topology/threads/code/terminal/Git diff, checkpoint/resume/fork theo
+capability, và đưa code đã review vào research run được human duyệt.
 
 **Bàn giao:**
-- Contract AgentPort đủ cho context/task, progress, result/files, cancellation và capabilities.
-- Codex cùng ít nhất một harness thật thứ hai: Claude Code hoặc harness phù hợp dùng DeepSeek,
-  tùy CLI/account được phép và sẵn có.
-- Profile/readiness trong GUI, mapping event/output, lỗi và resume theo capability.
-- Hướng dẫn thêm adapter mới; domain không import trực tiếp SDK/provider cụ thể.
+- RigSpec/AgentSpec, pods/seats/templates; durable queue/leases/messages/handoffs.
+- Native Codex/Claude, generic ACP v1/v2, DSH ACP, raw CLI/JSON, model/policy theo seat.
+- Worktree isolation, supervisor/stop receipts, snapshot/restore/discover/adopt/grow/shrink.
+- Settings workspace GUI; private HTTPS/pairing/scopes/revoke/cursor/idempotency.
+- MCP/CLI/TUI, context/skills/rosters/Library, bundles, telemetry/resource pools,
+  SDLC workflow và Slack opt-in.
+- Research bridge gắn đúng proposal/version/context/scope/budget/checkpoint,
+  dùng Working/Kaggle/project DB hiện có, provenance và report.
 
-| Checkpoint | Bàn giao dùng được |
-| --- | --- |
-| CP5-A: boundary hoàn chỉnh | Cùng task contract, profile/harness lưu vào request/run; lỗi readiness nhìn thấy |
-| CP5-B: harness thứ hai thật | Đi hết idea → approval → implement → Kaggle → report bằng harness thứ hai |
-| CP5-C: thay harness và hồi quy | Codex vẫn hoạt động; đổi harness không mất nguồn/history hoặc bỏ qua approval |
+**Gates nghiệm thu:** M5-0…M5-9 tại [IMPLEMENT_MVP5.md](IMPLEMENT_MVP5.md),
+đối chiếu từng subsystem tại [MVP5_FEATURE_MATRIX.md](MVP5_FEATURE_MATRIX.md).
+Phải có hai harness thật, team bốn seat, restart/retry/remote và bằng chứng không
+chạy research trùng; fixtures không thay thế demo thật. Capability thiếu hiển thị
+unsupported, không fallback. Coding pool và quota/account Kaggle quản lý riêng.
 
-**Tiêu chí nghiệm thu:**
-- P5-01: hai harness thật đi được golden path; mock adapter không chứng minh đạt.
-- P5-02: không sửa application/domain logic để chọn harness thứ hai; khác biệt nằm trong adapter/capability.
-- P5-03: files/progress/errors/cancel được chuẩn hóa; capability thiếu hiển thị rõ và không giả lập thành công.
-- P5-04: approval/version/scope có cùng hiệu lực ở cả hai; không tự fallback provider phát sinh chi phí.
-- P5-05: history ghi harness/profile/model được dùng khi có thông tin; credential không đi vào Library/report.
-
-**Demo chốt:** hai biến thể nhỏ của cùng project bằng hai harness; artifact/result truy được đúng adapter.
+**Giới hạn vận hành:** Windows ACP/CLI/terminal dùng chung một OS sandbox slot;
+native tool-free agents vẫn chạy đồng thời. Claude native cần auth riêng;
+DSH ACP là harness thứ hai đã nghiệm thu. Remote dành cho thiết bị của một người;
+MVP7 vẫn là lớp multi-human RBAC, không phải các tính năng team AI bị hoãn.
 Không yêu cầu mua subscription mới. Nếu chưa có quyền gọi harness thứ hai thì checkpoint bị chặn,
 không tuyên bố “đa harness đã hoàn tất” chỉ vì interface có sẵn.
 Adapter thứ ba được thêm theo cùng contract khi có harness và quyền gọi hợp lệ.

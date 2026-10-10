@@ -104,7 +104,7 @@ class AgentStore:
             raise ValueError("Seat does not belong to this rig")
 
     def enqueue(self, rig_id: str, seat: str, request_id: str, payload: dict,
-                *, depends_on: str | None = None) -> dict:
+                *, depends_on: str | None = None, max_pending: int | None = None) -> dict:
         if not all(isinstance(x, str) and x for x in (rig_id, seat, request_id)):
             raise ValueError("Invalid task identity")
         if not isinstance(payload, dict):
@@ -120,6 +120,10 @@ class AgentStore:
                 if old["content_hash"] != digest:
                     raise ValueError("Request ID reused with different task input")
                 return self._task(old)
+            if max_pending is not None:
+                count = con.execute("SELECT count(*) FROM tasks WHERE rig_id=? AND state IN ('PENDING','LEASED','UNKNOWN')", (rig_id,)).fetchone()[0]
+                if count >= max_pending:
+                    raise ValueError("Team queue is full; resolve outstanding tasks before submitting more")
             if depends_on:
                 predecessor = con.execute("SELECT rig_id FROM tasks WHERE id=?", (depends_on,)).fetchone()
                 if not predecessor or predecessor["rig_id"] != rig_id:

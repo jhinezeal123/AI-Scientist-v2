@@ -22,12 +22,12 @@ from .workspaces import Workspaces
 
 
 class TeamPlatform:
-    def __init__(self, queue, repository: Path, *, codex=None, registry=None):
+    def __init__(self, queue, repository: Path, *, codex=None, registry=None, protected=()):
         self.store = ControlStore(queue)
         self.workspaces = Workspaces(repository)
         self.context = ContextRouter(repository, self.workspaces)
         self.permissions = PermissionBroker(self.store)
-        self.registry = registry or HarnessRegistry(self.store, codex=codex, permission=self.permissions)
+        self.registry = registry or HarnessRegistry(self.store, codex=codex, permission=self.permissions, repository=repository, protected=protected)
         self.active = {}
         self.lock = RLock()
         self.stopping = Event()
@@ -49,7 +49,13 @@ class TeamPlatform:
         # Research commands use the approval-bound bridge; coding prompts cannot submit jobs.
         if request.kind == "research":
             raise ValueError("Research execution requires an approved bridge command")
-        return self.store.queue.enqueue(rig_id, seat_id, request_id, request.model_dump(), depends_on=depends_on)
+        if request.input_checkpoint:
+            team = self.store.snapshot(rig_id)
+            known = {s['checkpoint'] for s in team['seats'] if s['checkpoint']}
+            known.update(t['result']['checkpoint'] for t in team['tasks'] if t.get('result') and t['result'].get('checkpoint'))
+            if request.input_checkpoint not in known:
+                raise ValueError('Checkpoint does not belong to this team')
+        return self.store.queue.enqueue(rig_id, seat_id, request_id, request.model_dump(), depends_on=depends_on, max_pending=256)
 
     def start(self, rig_id):
         if os.environ.get("AI_SCIENTIST_AGENT_ORCHESTRATION", "1") != "1":
@@ -85,20 +91,28 @@ class TeamPlatform:
                     continue
                 rig_id = team["id"]
                 rig = RigSpec.model_validate(team["spec"])
+                from .resources import resource_limits
+                resources = resource_limits(self.store, rig_id)
                 count = sum(key[0] == rig_id for key in self.active)
                 for seat in rig.seats:
                     if count >= rig.max_parallel or len(self.active) >= 32:
                         break
                     if (rig_id, seat.id) in self.active:
                         continue
+                    with self.store.connect() as con:
+                        status = con.execute('SELECT state FROM seats WHERE rig_id=? AND id=?', (rig_id, seat.id)).fetchone()
+                    if status and status['state'] in {'UNKNOWN', 'REMOVED'}:
+                        continue
                     pod = next(p for p in rig.pods if p.id == seat.pod)
                     busy_in_pod = sum(key[0] == rig_id and value["handle"].seat.pod == pod.id for key, value in self.active.items())
                     if busy_in_pod >= pod.max_parallel:
                         continue
+                    if any(seat.id in r.seat_ids and sum(k[0] == rig_id and k[1] in r.seat_ids for k in self.active) >= r.max_parallel for r in resources):
+                        continue
                     task = self.store.queue.claim(rig_id, seat.id, lease_seconds=30)
                     if task is None:
                         continue
-                    adapter, handle = None, None
+                    adapter, handle, session_id = None, None, None
                     try:
                         adapter = self.registry.resolve(seat.harness)
                         path, checkpoint = self.workspaces.ensure(rig_id, seat.id, rig.base_ref)
@@ -118,6 +132,10 @@ class TeamPlatform:
                         count += 1
                     except Exception as exc:
                         self.store.fail_task(task["id"], task["lease_token"], error=str(exc)[:1000])
+                        if session_id:
+                            self.store.complete_session(session_id, state='FAILED', receipt={'not_started': True, 'tree_stopped': True, 'process_exited': True})
+                            self.permissions.identities.pop(session_id, None)
+                            self.active.pop((rig_id, seat.id), None)
 
     def _execute(self, rig, record):
         task, adapter, handle, identity = [record[key] for key in ("task", "adapter", "handle", "identity")]
@@ -138,6 +156,10 @@ class TeamPlatform:
                 with self.store.connect() as con:
                     predecessor = con.execute("SELECT result_json FROM tasks WHERE id=?", (task["depends_on"],)).fetchone()
                     predecessor = json.loads(predecessor[0]) if predecessor and predecessor[0] else None
+            if predecessor and 'files' in predecessor:
+                predecessor={**predecessor,'files':[f for f in predecessor['files'] if any(
+                    f['path']==p.rstrip('/') or f['path'].startswith(p.rstrip('/')+'/')
+                    for p in handle.seat.policy.allowed_paths)]}
             checkpoint = request.input_checkpoint or (predecessor or {}).get("checkpoint")
             if checkpoint:
                 self.workspaces.restore_checkpoint(handle.workspace, checkpoint)
@@ -149,7 +171,10 @@ class TeamPlatform:
                     raise ValueError("Previous session must have a verified stop receipt")
                 if not previous["provider_session"]:
                     raise ValueError("Previous session has no resumable provider token")
-                adapter.resume(handle, previous["provider_session"])
+                if request.fork_session:
+                    adapter.fork(handle, previous['provider_session'])
+                else:
+                    adapter.resume(handle, previous["provider_session"])
             context = self.context.pack(rig, task["seat"])
             inbox = self.store.queue.inbox(task["rig_id"], task["seat"], limit=100)
             # Supply scoped source text to tool-free native agents. File reads stay in the service.
@@ -180,19 +205,25 @@ class TeamPlatform:
             checkpoint = self.workspaces.checkpoint(handle.workspace, task_id=task["id"])
             self.store.seat_workspace(task["rig_id"], task["seat"], handle.workspace, checkpoint)
             result = {**turn.result.model_dump(), "checkpoint": checkpoint, "session_id": handle.id}
-            self.store.queue.finish(task["id"], token, result=result)
-            self.store.complete_session(handle.id, state="DONE", receipt=turn.receipt,
-                                        provider_session=turn.provider_session, usage=turn.usage)
-            self.store.queue.send(task["rig_id"], task["seat"], "*", turn.result.handoff or turn.result.summary or "Task completed")
-            self.store.publish("task_done", {"checkpoint": checkpoint, "summary": turn.result.summary}, **identity)
+            self.store.complete_turn(task['id'],token,handle.id,result=result,receipt=turn.receipt,
+                                     provider_session=turn.provider_session,usage=turn.usage)
             state = "DONE"
+            # Durable completion must survive an ancillary chat/event failure.
+            try:
+                handoff = (turn.result.handoff or turn.result.summary or "Task completed")[:20000]
+                self.store.queue.send(task["rig_id"], task["seat"], "*", handoff)
+                self.store.publish("task_done", {"checkpoint": checkpoint, "summary": turn.result.summary}, **identity)
+            except Exception:
+                self.store.publish('handoff_attention', {'message': 'Task completed; chat notification could not be delivered'}, **identity)
         except Exception as exc:
+            if state == 'DONE':
+                return
             receipt = getattr(exc, "receipt", None) or handle.stop_receipt
             # If a process was never started, there is no uncertain external execution.
             if receipt is None and not self.store.process_record(handle.id):
                 receipt = {"process_exited": True, "tree_stopped": True, "not_started": True}
             uncertain = not receipt or not receipt.get("tree_stopped")
-            state = "UNKNOWN" if uncertain else ("CANCELLED" if getattr(exc, "cancelled", False) else "FAILED")
+            state = "UNKNOWN" if uncertain else ("CANCELLED" if getattr(exc, "cancelled", False) or isinstance(exc,InterruptedError) else "FAILED")
             try:
                 self.store.fail_task(task["id"], token, error=str(exc)[:1000], uncertain=uncertain, cancelled=state == "CANCELLED")
             except ValueError:

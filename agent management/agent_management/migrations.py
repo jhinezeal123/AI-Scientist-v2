@@ -54,6 +54,8 @@ def migrate(path: Path):
             if version == VERSION:
                 return
             backup = path.with_name(path.name + f".before-v{VERSION}.bak")
+            if backup.is_symlink():
+                raise ValueError("Refusing symlinked migration backup")
             if not backup.exists():
                 if backup.is_symlink():
                     raise ValueError("Refusing symlinked migration backup")

@@ -24,11 +24,11 @@ class AcpProtocolError(ValueError):
 
 
 class RpcChannel:
-    def __init__(self, argv, cwd, timeout, cancelled, handler, started):
+    def __init__(self, argv, cwd, timeout, cancelled, handler, started, environment=None):
         if Path(argv[0]).suffix.lower() in {".cmd", ".bat", ".ps1"}:
             raise ValueError("ACP requires a native executable/Node entrypoint, not a shell shim")
         self.proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, shell=False, env=private_environment(), start_new_session=os.name != "nt",
+            stderr=subprocess.PIPE, shell=False, env=environment or private_environment(), start_new_session=os.name != "nt",
             creationflags=(subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0)
         self.group = ProcessGroup(self.proc)
         self.deadline = time.monotonic() + timeout
@@ -38,6 +38,7 @@ class RpcChannel:
         self.pending, self.counter = {}, 0
         self.threads = []
         self.receipt = None
+        self.stderr = bytearray()
         def read():
             count = 0
             try:
@@ -69,8 +70,13 @@ class RpcChannel:
                 self.failed.set()
         def stderr():
             try:
-                while self.proc.stderr.read1(8192):
-                    pass
+                count = 0
+                while chunk := self.proc.stderr.read1(8192):
+                    count += len(chunk)
+                    self.stderr.extend(chunk[:max(0,100000-len(self.stderr))])
+                    if count > 2000000:
+                        self.failed.set()
+                        break
             except OSError:
                 pass
         try:
@@ -157,8 +163,9 @@ class RpcChannel:
 
 
 class AcpHarness:
-    def __init__(self, spec, *, permission=None):
+    def __init__(self, spec, *, permission=None, sandbox=None):
         self.spec, self.permission = spec, permission
+        self.sandbox = sandbox
         self.negotiated = {}
 
     def executable(self):
@@ -279,8 +286,18 @@ class AcpHarness:
                             messages[ident] += text
                 return {}
             return {"error": {"code": -32601, "message": "Client filesystem/terminal capability disabled"}}
-        channel = RpcChannel([self.executable(), *self.spec.args], handle.workspace, timeout,
-                             handle.interrupted.is_set, handler, started)
+        environment = private_environment()
+        if self.spec.managed_home:
+            from .dsh import session_home
+            environment['DSH_HOME'] = str(session_home(Path(self.spec.managed_home), handle.workspace))
+            temporary=Path(environment['DSH_HOME'])/'tmp'
+            temporary.mkdir(exist_ok=True)
+            environment.update(TEMP=str(temporary),TMP=str(temporary),TMPDIR=str(temporary))
+        argv = [self.executable(), *self.spec.args]
+        if self.sandbox:
+            argv = self.sandbox(handle, argv, provider_home=environment.get('DSH_HOME'))
+        channel = RpcChannel(argv, handle.workspace, timeout,
+                             handle.interrupted.is_set, handler, started, environment)
         try:
             initialized = self.initialize(channel)
             emit(json.dumps({"type": "capabilities", "protocol": self.spec.protocol_version,
@@ -338,8 +355,9 @@ class AcpHarness:
         except BaseException as exc:
             receipt = channel.close()
             handle.stop_receipt = receipt
+            exc.diagnostic = getattr(exc, 'diagnostic', None) or {'stderr':bytes(channel.stderr)}
             if isinstance(exc, (InterruptedError, TimeoutError)) or not receipt["tree_stopped"]:
-                raise ProcessFailure(str(exc), receipt, cancelled=isinstance(exc, InterruptedError)) from None
+                raise ProcessFailure(str(exc), receipt, cancelled=isinstance(exc, InterruptedError), diagnostic=exc.diagnostic) from None
             raise
         else:
             receipt = channel.close()
