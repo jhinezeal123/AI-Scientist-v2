@@ -1,11 +1,12 @@
 """Compose the GUI, planning worker, independent run workers and Kaggle backend."""
 from contextlib import asynccontextmanager
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .kaggle import connect_kaggle
-from .runtime import load_runtime
+from .runtime import load_runtime, _agent_gateway_class
 from .worker import RuntimeWorker
 from .api import library_router
 from .store import ProjectStore
@@ -44,6 +45,9 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
                 try:
                     yield
                 finally:
+                    gateway = getattr(loaded, 'runtime', None)
+                    if hasattr(gateway, 'close'):
+                        await asyncio.to_thread(gateway.close)
                     await app.state.kaggle_settings.close()
                     await app.state.working.close(config.shutdown_seconds)
                     await service.close()
@@ -54,10 +58,17 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
                 await worker.close(config.shutdown_seconds)
 
     app = FastAPI(title="AI Scientist Workbench", lifespan=lifespan)
+    app.state.config = config
     store = ProjectStore(config.workspace_root / ".workbench/projects", config.workspace_root)
     app.state.store = store
     app.include_router(library_router(store, config.workspace_root))
     app.include_router(settings_router())
+    _agent_gateway_class()
+    from _ai_scientist_agent_management.http_api import create_router
+    app.include_router(create_router())
+    from _ai_scientist_agent_management.team_api import create_team_router, remote_boundary
+    app.include_router(create_team_router())
+    app.middleware('http')(remote_boundary)
 
     @app.get("/health")
     async def health():

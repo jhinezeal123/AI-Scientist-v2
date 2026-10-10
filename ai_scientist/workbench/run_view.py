@@ -9,7 +9,7 @@ from .modes import mode_metadata
 from .named_paths import display_path
 
 BUNDLE_FILES = ('notebook.ipynb', 'kernel-metadata.json', 'context.json', 'payload.json', 'checks.json')
-ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json',
+ARTIFACT_FILES = (*BUNDLE_FILES, 'source/workload.py', 'journal.json', 'bundle-manifest.json', 'scope-review.json', 'team-provenance.json',
                   'submission-intent.json', 'launch-readiness.json', 'remote-identity.json',
                   'save-receipt.json', 'launch-diagnostic.json',
                   'collection-manifest.json', 'result-facts.json', 'report.md', 'retry-feedback.json', 'memory_journal.json', 'execution.json',

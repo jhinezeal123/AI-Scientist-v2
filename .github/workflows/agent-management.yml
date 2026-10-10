@@ -1,0 +1,41 @@
+name: Agent management gateway
+
+on:
+  pull_request:
+    branches:
+      - codex/personal-implementation-agent
+    paths:
+      - 'agent management/**'
+      - 'ai_scientist/workbench/**'
+      - 'tests/workbench/test_agent*.py'
+      - 'workbench-ui/**'
+      - 'tools/agent_management.py'
+      - '.github/workflows/agent-management.yml'
+  workflow_dispatch:
+
+jobs:
+  gateway-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Existing Workbench storage uses pathlib junction checks (Python 3.12).
+          # Match the documented/accepted Workbench runtime, not the upstream CLI.
+          python-version: '3.12'
+      - name: Install isolated gateway test dependencies
+        run: python -m pip install 'fastapi>=0.115,<1' 'pydantic>=2.8,<3' 'httpx>=0.27,<1' 'pytest>=8,<10' 'pyyaml>=6,<7'
+      - name: Validate syntax
+        run: python -m compileall -q 'agent management' ai_scientist/workbench/runtime.py ai_scientist/workbench/app.py
+      - name: Test gateway, execution, scopes, recovery and research bridge
+        run: python -m pytest tests/workbench/test_agent_management.py tests/workbench/test_agent_team_execution.py tests/workbench/test_agent_team_api.py tests/workbench/test_agent_research_bridge.py tests/workbench/test_agent_release_guards.py -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workbench-ui/package-lock.json
+      - name: Build Workbench UI
+        working-directory: workbench-ui
+        run: |
+          npm ci
+          npm run build
