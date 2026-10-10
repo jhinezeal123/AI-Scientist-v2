@@ -59,8 +59,9 @@ manager and research finishing modules. No external daemon is required.
 4. Select benchmark, Library sources, account, maximum runs/calls and session/output
    limits. Enable the four-stage experiment manager when wanted; select finishing outputs.
 5. Save the workflow, then start. Answer Human stages or review candidates at the
-   selected gates. The activity cards select the current agent; Tasks & sessions and
-   workspace show its actual records. Run links open the normal run GUI.
+   selected gates. The activity observer offers a per-stage table and a connected
+   graph. Select a stage to inspect its live output, saved result and sessions
+   beside the overview. Run links open the normal run GUI.
 6. Pause invalidates the old actor generation and stops an admitted Working session.
    Resume preserves pending human inputs/completed pre-execution candidates.
    A stopped/failed run is never submitted again by resuming; inspect it and create
@@ -107,3 +108,28 @@ manager and research finishing modules. No external daemon is required.
   Selected-node limitations are explicitly scoped to that node at execution time;
   a Draft baseline selected after later stages does not describe the aggregate
   experiment as Draft-only.
+
+## Activity UI correction
+
+The first stage release supplied configuration forms and status cards. The
+operator clarified that the OpenRig reference also calls for an immediately
+inspectable view of each actor's work. The follow-up adds:
+
+- A stage/agent table with harness, model, workflow state, call count, queued tasks
+  and session count, plus a connected graph with active handoff motion.
+- An adjacent inspector with Activity, Result and Sessions views. Each action
+  turn can be selected independently, including its saved response and handoff.
+- Exact workflow-event task IDs and session IDs for history selection. A shared
+  seat does not merge outputs from other stages or workflows.
+- Explicit Human/waiting, paused, failed, unknown and disconnected observations.
+  An enabled team means ready to accept work, not that an agent is executing.
+- A two-column graph on narrow screens, keyboard stage selection, bounded output
+  scrolling and reduced-motion support. The existing configuration and human
+  gate controls remain in Settings alongside Kaggle proxy.
+
+The interface uses the repository's own queue/session journal. It does not claim
+to reproduce the OpenRig TUI or estimate provider context-window percentages.
+Eight frontend selector cases and a production build passed. The actual saved
+22-call workflow was inspected at 1280px and 520px without horizontal page overflow;
+result/session selection and table/graph switching were verified without executing
+another provider turn or Kaggle session.
