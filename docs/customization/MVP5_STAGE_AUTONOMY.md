@@ -23,8 +23,9 @@ per stage. This corrects the previous coding-team interpretation of issue #2.
 6. Pause/takeover and restart preserve completed work. Unknown model/Working
    outcomes require reconciliation; no automatic uncertain replay.
 
-Implementation is performed in the attached review worktree. Main checkout and
-the user's backend keep the accepted release until the correction is verified.
+Implementation was verified in the attached review worktree. PRs #4 and #5 are
+merged into codex/personal-implementation-agent; the main checkout serves the
+verified correction on port 8000. Live acceptance receipts remain in the QA workspace.
 Refactor commit dc019d2 passed 30 affected baseline tests before behavior work.
 Local fixtures do not establish real-provider/real-Kaggle acceptance. The approved
 live scope and measured acceptance receipts are recorded in MVP5_STAGE_QA_RESULTS.md.
@@ -45,7 +46,8 @@ manager and research finishing modules. No external daemon is required.
 - [x] A7: local regression and fixture QA, including actual experiment-manager code.
 - [x] A8: live human gate, native/ACP providers, all four Kaggle stages,
   summary/report, confirmed stop and restart without replay verified.
-- [ ] A9: review release, bring the verified correction to the main checkout.
+- [x] A9: reviewed release, merged PRs #4/#5, updated the main checkout and
+  restarted backend 8000; health, latest frontend and 14-stage template verified.
 
 ## How to use
 
