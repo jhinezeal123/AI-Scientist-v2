@@ -20,8 +20,9 @@ def prompt_root(tmp_path, monkeypatch):
 
 
 def test_packaged_working_aliases_are_complete():
-    aliases = json.loads((system_prompt._ROOT / 'aliases.json').read_text())
-    assert set(aliases) == {'working.agent', 'working.instructions', 'search.node',
+    aliases = json.loads((system_prompt._ROOT / 'aliases.json').read_text(encoding='utf-8'))
+    assert set(aliases) == {'working.agent', 'working.instructions', 'working.etc', 'working.benchmark',
+                            'planner.training_research', 'planner.etc', 'planner.benchmark', 'search.node',
                             'search.node_instructions', 'search.query', 'search.stage_goals'}
     for alias in ('search.node', 'search.query'):
         assert 'fixture' in system_prompt.load_prompt(alias, workdir='fixture')
@@ -30,7 +31,8 @@ def test_packaged_working_aliases_are_complete():
     agent = system_prompt.load_prompt('working.agent', workdir='fixture')
     instructions = system_prompt.load_prompt('working.instructions').split('\n\n')
     assert 'Request workspace: fixture\nRead working-request.json, then perform the approved work through terminal.py.' in agent
-    assert len(instructions) == 12
+    assert any('never create debug child nodes' in item for item in instructions)
+    assert any('Only the user creates improve runs' in item for item in instructions)
     assert any('approved.snapshot.resources[*].file_path' in instruction for instruction in instructions)
     assert any('do not print full package inventories' in item for item in instructions)
 
@@ -100,9 +102,10 @@ def test_working_request_uses_configured_prompt_aliases(tmp_path, prompt_root):
             workdir.mkdir(parents=True)
             request = service._request((project, run), store.approved_snapshot(project, run),
                 {'remote_directory': '/fixture', 'ttl_seconds': 600}, workdir)
-            saved = json.loads((workdir / 'working-request.json').read_text())
+            saved = json.loads((workdir / 'working-request.json').read_text(encoding='utf-8'))
             assert request.prompt == f'Custom agent in {workdir}.\nRead working-request.json.'
-            assert saved['instructions'] == ['Only libraries needed.', 'Only terminal helper.']
+            assert saved['instructions'][:2] == ['Only libraries needed.', 'Only terminal helper.']
+            assert any('đúng một run' in item for item in saved['instructions'][2:])
             assert 'approved' in saved and saved['remote_directory'] == '/fixture'
         finally:
             await worker.close(1)

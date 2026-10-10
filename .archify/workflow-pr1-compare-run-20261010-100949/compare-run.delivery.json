@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b32a847a-7600-400c-ab8c-f7ea3667ed69",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "D:\\Documents\\AI-Scientist-v2\\.archify\\workflow-pr1-compare-run-20261010-100949\\candidate.json",
+  "output": "D:\\Documents\\AI-Scientist-v2\\.archify\\workflow-pr1-compare-run-20261010-100949\\compare-run.html",
+  "specification": {
+    "sha256": "4e71ac47fa183ebe46ce379a02b4adc200d3b2a2cb8147b3ceee1781f3cd481f",
+    "bytes": 16919
+  },
+  "artifact": {
+    "sha256": "86d36b47660b2c60afe2caa9631f5d4db3348c702ee75ab3f99e2c70f7e8d230",
+    "bytes": 795182
+  }
+}

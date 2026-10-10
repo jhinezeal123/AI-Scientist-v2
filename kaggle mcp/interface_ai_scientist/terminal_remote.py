@@ -67,7 +67,10 @@ class Terminal:
         marker = uuid.uuid4().hex.encode()
         marker_prefix = b'\x1e' + marker + b':'
         pattern = re.compile(b'\x1e' + marker + rb':(-?\d+)\x1f\r?\n')
-        script = "eval " + shlex.quote(command) + " </dev/null\n__working_status=$?\nprintf '\\036" + marker.decode() + ":%s\\037\\n' \"$__working_status\"\n"
+        # Errexit from a previous request must not kill the persistent shell
+        # before this request can report its nonzero result. Cwd and exports
+        # still persist; a command can explicitly enable errexit for itself.
+        script = "set +e\neval " + shlex.quote(command) + " </dev/null\n__working_status=$?\nprintf '\\036" + marker.decode() + ":%s\\037\\n' \"$__working_status\"\n"
         self.shell.stdin.write(script.encode())
         self.shell.stdin.flush()
         self.command_count += 1

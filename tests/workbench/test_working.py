@@ -143,6 +143,48 @@ def fixture(tmp_path, runtime=None, bootstrap=None, donor=None):
     return store, project, run['id'], worker, planner, service, runtime, bootstrap, donor
 
 
+def cookie_fixture(tmp_path, *, readiness='needs_login', login_status='renewed', after='verified_idle', hold=None, active_count=2):
+    from ai_scientist.workbench.accounts import AccountCatalog
+    items = fixture(tmp_path)
+    _, _, _, _, _, service, _, bootstrap, donor = items
+    profiles = tmp_path/'bundle'/'profiles'
+    for alias in ('chosen', 'other'):
+        (profiles/alias).mkdir(parents=True)
+        (profiles/alias/'token.txt').write_text('KGAT_fixture_only')
+    (profiles/'accounts.json').write_text(json.dumps({'accounts': {
+        'chosen.txt': {'alias':'chosen','username':'verified-user','token_file':'profiles/chosen/token.txt'},
+        'other.txt': {'alias':'other','username':'default-user','token_file':'profiles/other/token.txt'}}}))
+    service.config.kaggle_account_alias = 'other.txt'
+    service.accounts = AccountCatalog(profiles.parent, 'other.txt')
+    state = {'readiness': readiness, 'events': [], 'entered': threading.Event()}
+    def for_account(account):
+        assert account == 'chosen.txt'
+        return donor
+    def observe():
+        state['events'].append('observe')
+        if state['readiness'] == 'network_error':
+            raise RuntimeError('fixture network failure')
+        idle = state['readiness'] == 'verified_idle'
+        return {'account':'chosen.txt','username':'verified-user','readiness':state['readiness'],
+                'idle':idle,'active_session_count':0 if idle else active_count if state['readiness']=='busy' else None,'observed_at':'now'}
+    def admin(action, arguments, cancelled):
+        assert action == 'cookie-check' and arguments is None and not cancelled.is_set()
+        state['events'].append('login')
+        state['entered'].set()
+        if hold:
+            assert hold.wait(5)
+        state['readiness'] = after
+        return {'account':'chosen.txt','status':login_status}
+    original_start = bootstrap.start
+    def start(arguments):
+        assert arguments['account'] == 'chosen.txt'
+        assert state['readiness'] in {'verified_idle', 'busy'}
+        state['events'].append('submit')
+        return {**original_start(arguments), 'account':'chosen.txt'}
+    donor.for_account, donor.account_readiness, donor.account_admin, donor.start = for_account, observe, admin, start
+    return items, state
+
+
 async def wait_for(predicate):
     for _ in range(500):
         if predicate():
@@ -178,13 +220,14 @@ def test_unstarted_approvals_do_not_block_but_remote_or_active_runs_still_do(tmp
         with store.connection(other) as connection:
             connection.execute('UPDATE runs SET identity_json=NULL WHERE id=?', (other_run['id'],))
         assert (await service.start(project, second['id']))['state'] == 'STARTING'
-        assert (await service.start(project, original))['state'] == 'QUEUED'
-        assert (await service.stop(project, original))['state'] == 'CANCELLED'
+        assert (await service.start(project, original))['state'] == 'STARTING'
+        await service.stop(project, original)
+        await service.tasks[project, original]
         await service.tasks[project, second['id']]
         assert service.record(project, second['id'])['stop_confirmed']
         assert store.run(project, original)['state'] == 'CANCELLED'
         assert store.run(other, other_run['id'])['state'] == 'APPROVED'
-        await worker.close(1)
+        await service.close(1); await planner.close(); await worker.close(1)
     asyncio.run(scenario())
 
 
@@ -304,6 +347,13 @@ def test_working_http_routes_ownership_and_artifact_allowlist(tmp_path, monkeypa
         kaggle_username='verified-user', kaggle_account_alias='fixture-account')
     app = create_app(config, bindings=SimpleNamespace(runtime=runtime, request_type=__import__('test_planning').request_type), kaggle_connection=connection)
     project, run = approved_run(app.state.store)
+    from benchmark_fixture import BENCHMARK
+    approved = app.state.store.approved_snapshot(project, run['id'])
+    approved['snapshot']['idea']['benchmark'] = BENCHMARK
+    from ai_scientist.workbench.store import canonical, digest
+    with app.state.store.connection(project) as connection:
+        connection.execute('UPDATE proposals SET context_snapshot_json=?,context_sha256=? WHERE id=?',
+                           (canonical(approved['snapshot']), digest(canonical(approved['snapshot'])), run['proposal_id']))
     other = app.state.store.create_project('Other')['id']
     path = f'/api/projects/{project}/runs/{run["id"]}'
     with TestClient(app) as client:
@@ -379,13 +429,20 @@ def test_queued_run_waits_for_slot_and_cancel_never_submits(tmp_path):
         assert (await service.start(project, first))['state'] == 'STARTING'
         await wait_for(lambda: runtime.entered.is_set())
         second = (await planner.approve(project, proposal, 1, context['context_sha256']))['id']
-        assert (await service.start(project, second))['state'] == 'QUEUED'
-        assert not any(call[1].get('request_id') == second for call in bootstrap.calls)
-        assert (await service.stop(project, second))['state'] == 'CANCELLED'
+        assert (await service.start(project, second))['state'] == 'STARTING'
+        idea = store.save_idea(project, 'Third run waits for two sessions')
+        context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
+        proposal = store.save_proposal(project, idea['id'], approved['body'], context)
+        third = (await planner.approve(project, proposal, 1, context['context_sha256']))['id']
+        assert (await service.start(project, third))['state'] == 'QUEUED'
+        assert not any(call[1].get('request_id') == third for call in bootstrap.calls)
+        assert (await service.stop(project, third))['state'] == 'CANCELLED'
         await service.stop(project, first)
         await service.tasks[project, first]
-        assert not any(call[1].get('request_id') == second for call in bootstrap.calls)
-        assert service.record(project, second)['stop_confirmed']
+        assert not any(call[1].get('request_id') == third for call in bootstrap.calls)
+        assert service.record(project, third)['stop_confirmed']
+        await service.stop(project, second)
+        await service.tasks[project, second]
         await service.close(1)
         await planner.close()
         await worker.close(1)
@@ -401,15 +458,22 @@ def test_queue_drains_once_after_previous_stop(tmp_path):
         context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
         proposal = store.save_proposal(project, idea['id'], approved['body'], context)
         second = (await planner.approve(project, proposal, 1, context['context_sha256']))['id']
+        idea = store.save_idea(project, 'Third approved run')
+        context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
+        proposal = store.save_proposal(project, idea['id'], approved['body'], context)
+        third = (await planner.approve(project, proposal, 1, context['context_sha256']))['id']
         await service.start(project, first)
         await wait_for(lambda: runtime.entered.is_set())
         await service.start(project, second)
+        assert (await service.start(project, third))['state'] == 'QUEUED'
         await service.stop(project, first)
         await service.tasks[project, first]
-        await wait_for(lambda: any(call[1].get('request_id') == second for call in bootstrap.calls))
-        assert sum(call[1].get('request_id') == second for call in bootstrap.calls) == 1
+        await wait_for(lambda: any(call[1].get('request_id') == third for call in bootstrap.calls))
+        assert sum(call[1].get('request_id') == third for call in bootstrap.calls) == 1
         await service.stop(project, second)
         await service.tasks[project, second]
+        await service.stop(project, third)
+        await service.tasks[project, third]
         await service.close(1)
         await planner.close()
         await worker.close(1)
@@ -429,4 +493,110 @@ def test_queue_unknown_worker_blocks_visibly_without_submission(tmp_path):
         assert not bootstrap.calls
         await service.stop(project, run)
         await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())
+
+
+def test_expired_selected_account_logs_in_before_any_submission_and_continues_working(tmp_path):
+    async def scenario():
+        release = threading.Event()
+        items, auth = cookie_fixture(tmp_path, hold=release)
+        store, project, run, worker, planner, service, runtime, bootstrap, _ = items
+        request = asyncio.create_task(service.start(project, run, account='chosen.txt'))
+        await wait_for(lambda: auth['entered'].is_set())
+        assert not bootstrap.calls and not runtime.calls and service.record(project, run) is None
+        release.set()
+        assert (await request)['state'] == 'STARTING'
+        await service.tasks[project, run]
+        assert auth['events'][:5] == ['observe', 'login', 'observe', 'observe', 'submit']
+        assert len(bootstrap.calls) == 1 and len(runtime.calls) == 1
+        assert service.record(project, run)['account'] == 'chosen.txt'
+        assert store.run(project, run)['state'] == 'COMPLETED'
+        await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('status', ['needs_manual_verification', 'no_credentials', 'error'])
+def test_failed_auto_login_never_reserves_or_submits_run(tmp_path, status):
+    async def scenario():
+        items, auth = cookie_fixture(tmp_path, login_status=status)
+        store, project, run, worker, planner, service, runtime, bootstrap, _ = items
+        with pytest.raises(StoreConflict):
+            await service.start(project, run, account='chosen.txt')
+        assert auth['events'].count('login') == 1
+        assert not bootstrap.calls and not runtime.calls and service.record(project, run) is None
+        assert store.run(project, run)['state'] == 'APPROVED'
+        await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('readiness', ['verified_idle', 'busy', 'network_error'])
+def test_valid_busy_or_unavailable_accounts_do_not_trigger_auto_login(tmp_path, readiness):
+    async def scenario():
+        items, auth = cookie_fixture(tmp_path, readiness=readiness)
+        _, project, run, worker, planner, service, _, bootstrap, _ = items
+        if readiness == 'verified_idle':
+            await service.start(project, run, account='chosen.txt')
+            await service.tasks[project, run]
+            assert len(bootstrap.calls) == 1
+        elif readiness == 'busy':
+            assert (await service.start(project, run, account='chosen.txt'))['state'] == 'QUEUED'
+            assert not bootstrap.calls
+        else:
+            with pytest.raises(StoreConflict):
+                await service.start(project, run, account='chosen.txt')
+            assert not bootstrap.calls
+        assert 'login' not in auth['events']
+        await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())
+
+
+def test_renewed_cookie_still_requires_capacity_before_submission(tmp_path):
+    async def scenario():
+        items, auth = cookie_fixture(tmp_path, after='busy')
+        _, project, run, worker, planner, service, _, bootstrap, _ = items
+        assert (await service.start(project, run, account='chosen.txt'))['state'] == 'QUEUED'
+        assert auth['events'] == ['observe', 'login', 'observe'] and not bootstrap.calls
+        await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_queued_run_rechecks_cookie_at_dispatch_and_can_cancel_during_login(tmp_path, cancel):
+    async def scenario():
+        release = threading.Event()
+        items, auth = cookie_fixture(tmp_path, hold=release)
+        store, project, run, worker, planner, service, _, bootstrap, _ = items
+        service.records.reserve(project, run, 'cpu', 1800, 'chosen.txt', queued=True)
+        assert not auth['events']
+        service._ensure_queue_loop()
+        await wait_for(lambda: auth['entered'].is_set())
+        assert service.record(project, run)['phase'] == 'renewing_cookie' and not bootstrap.calls
+        if cancel:
+            stopped = asyncio.create_task(service.stop(project, run))
+            await wait_for(lambda: (project, run) in service.stop_requests)
+            release.set()
+            assert (await stopped)['state'] == 'CANCELLED'
+            assert not bootstrap.calls
+        else:
+            release.set()
+            await wait_for(lambda: bool(bootstrap.calls))
+            await service.tasks[project, run]
+            assert store.run(project, run)['state'] == 'COMPLETED' and len(bootstrap.calls) == 1
+        await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())
+
+
+def test_interrupted_cookie_login_recovers_as_unsubmitted_queue(tmp_path):
+    async def scenario():
+        items, _ = cookie_fixture(tmp_path)
+        _, project, run, worker, planner, service, _, bootstrap, donor = items
+        service.records.reserve(project, run, 'cpu', 1800, 'chosen.txt', queued=True)
+        service.records.update(project, run, phase='renewing_cookie')
+        recovered = WorkingService(planner, service.config, service.view, donor=donor)
+        recovered.accounts = service.accounts
+        recovered._ensure_queue_loop = lambda: None
+        await recovered.recover()
+        assert recovered.record(project, run)['phase'] == 'queued'
+        assert not recovered.tasks and not bootstrap.calls and not donor.calls
+        await recovered.close(1); await service.close(1); await planner.close(); await worker.close(1)
     asyncio.run(scenario())

@@ -9,13 +9,13 @@ type Props = {idea?: Idea; proposals: Proposal[]; resources:Resource[]; busy: bo
   onContinue: (proposal: Proposal) => Promise<void>;
   onApprove: (proposal: Proposal) => Promise<void>};
 
-const labels:Record<string,string> = {method:'Cách chia',group_key:'Nhóm',subset:'Phạm vi dữ liệu',seed:'Seed',
+const labels:Record<string,string> = {test:'Tập test',train:'Tập train',method:'Cách chia',group_key:'Nhóm',subset:'Phạm vi dữ liệu',seed:'Seed',
   name:'Tên',direction:'Hướng đánh giá',definition:'Định nghĩa',training_seconds:'Thời gian training (giây)',
   execution_seconds:'Thời gian thực thi (giây)',output_bytes:'Dung lượng đầu ra (byte)'};
 function Details({value}:{value:string|Record<string,unknown>}) {
   if (typeof value === 'string')return <p>{value}</p>;
   return <div className="stack">{Object.entries(value).filter(([key])=>!['coder_calls','training_attempts'].includes(key))
-    .map(([key,item])=><p key={key}><strong>{labels[key] || key}: </strong>{typeof item==='string' ? item : JSON.stringify(item)}</p>)}</div>;
+    .map(([key,item])=><p key={key}><strong>{labels[key] || key}: </strong>{key==='train' && item==null ? 'Không có tập train' : typeof item==='string' ? item : JSON.stringify(item)}</p>)}</div>;
 }
 
 export default function ProposalPanel({idea,proposals,resources,busy,onOpenParent,onAnswer,onContinue,onApprove,onReplan}:Props) {

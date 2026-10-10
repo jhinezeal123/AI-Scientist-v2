@@ -16,9 +16,14 @@ See `SOURCE.json` for source hashes and extraction notes.
   when an older ambiguous notebook cannot be reconciled by its reference.
 - Native backend operations: `bootstrap_service.start` and `account_runtime.account_idle`.
   The backend calls CLI actions `start`/`idle` through its existing SSH adapter.
+- Selected quota, active-session and account operations in `account_admin.py`,
+  used by [Workbench Settings](../docs/customization/KAGGLE_PROXY_SETTINGS.md).
+- Public benchmark publication in `benchmark_publish.py`: KaggleHub upload,
+  SDK public create, dataset naming/availability gates and verified version receipt.
+  See [Benchmark workflow](../docs/customization/BENCHMARK_TASKS.md).
 
 The old notebook builder/preflight, browser log/output download, cancel tools,
-quota/account administration UI, datasets tool suite and agent_platform are
+the donor's administration UI, datasets tool suite and agent_platform are
 not included. Working owns execution, logs, artifact collection and shutdown.
 
 ## Local configuration
@@ -65,10 +70,31 @@ The external `D:/Documents/kaggle_token` checkout is not
 required after configuring this bundle. Saved stopped runs remain readable;
 live sessions created by the external checkout retain its private state there.
 
-MVP3 adds account selection in the Workbench Run panel. Readiness checks verify
-idle status before a new account submits. Expired cookies require renewal in
-that profile; a token file alone does not prove Kaggle readiness. Each run
+MVP3 adds account selection in the Workbench Run panel. Parallel Working runs
+have independent workers and SSH sessions, limited to two sessions per account.
+Admission includes external Kaggle sessions and local reservations until a
+matching stop receipt, reconciling notebook references to avoid double counting.
+Readiness checks verify identity and available capacity before submission.
+Expired cookies require renewal in
+that profile; starting Working now performs auto-login before continuing when
+the selected cookie is expired or rejected. Queued runs repeat this check when
+dispatched. A token file alone does not prove Kaggle readiness. Each run
 persists its selected account so stop and recovery use the same identity.
+
+With local username/password entries in ignored `profiles/credentials.json`,
+reuse the bundled auto-login helper from the repository root:
+
+```powershell
+Push-Location "kaggle mcp"
+..\.venv-mvp0\Scripts\python.exe -c "from account_runtime import auto_login_core; print(auto_login_core('iyppxm.txt'))"
+Pop-Location
+```
+
+The helper reads credentials locally, passes them only through the child process
+environment, and saves the new cookie in that account's bundled profile. Stop
+and complete sign-in manually if Kaggle requests additional verification.
+On 2026-10-10 the five remaining accounts renewed successfully this way;
+Workbench readiness then verified all seven identities with zero active sessions.
 
 To renew a cookie manually in this bundle, run from the repository root (replace
 the account key with the desired profile):

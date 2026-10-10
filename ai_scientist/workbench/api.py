@@ -8,6 +8,8 @@ from pydantic import Field, field_validator
 
 from .models import StrictModel, ResearchPlan
 from .modes import RunMode
+from .benchmarks import BenchmarkCatalog, BenchmarkDefinition
+from .benchmark_tracking import TrackingUnavailable
 from .log_window import read_log_window
 from .resources import readiness_sources
 from .store import StoreConflict
@@ -43,6 +45,8 @@ class IdeaInput(StrictModel):
     title: str | None = Field(default=None, min_length=1, max_length=80)
     mode: RunMode = 'training_research'
     desired_output: str = Field(default='', max_length=20_000)
+    benchmark_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{32}$')
+    benchmark_definition: BenchmarkDefinition | None = None
     research: ResearchPlan | None = None
     tags: list[Literal['research', 'tuning', 'ablation']] = Field(default_factory=list, max_length=3)
 
@@ -61,6 +65,8 @@ class IdeaUpdate(IdeaInput):
     expected_desired_output: str | None = Field(default=None, max_length=20_000)
     expected_research: ResearchPlan | None = None
     expected_tags: list[str] | None = None
+    expected_benchmark_id: str | None = None
+    expected_benchmark_definition: BenchmarkDefinition | None = None
 
 
 class IdeaTitleUpdate(StrictModel):
@@ -91,11 +97,12 @@ class OutputCopyInput(StrictModel):
 
 
 class VariantInput(StrictModel):
+    benchmark_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{32}$')
     request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     title: str = Field(min_length=1, max_length=80)
     purpose: str = Field(min_length=1, max_length=20_000)
     change_summary: str = Field(min_length=1, max_length=20_000)
-    mode: RunMode | None = None
+    mode: Literal['training_research', 'etc'] | None = None
     desired_output: str | None = Field(default=None, max_length=20_000)
     research: ResearchPlan | None = None
     tags: list[Literal['research', 'tuning', 'ablation']] = Field(default_factory=list, max_length=3)
@@ -135,6 +142,8 @@ def library_router(store, workspace_root):
             raise HTTPException(409, str(exc)) from exc
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(422, str(exc)) from exc
+        except (RuntimeError, TimeoutError) as exc:
+            raise HTTPException(503, str(exc)) from exc
 
     async def async_call(operation, *args):
         try:
@@ -145,6 +154,8 @@ def library_router(store, workspace_root):
             raise HTTPException(409, str(exc)) from exc
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(422, str(exc)) from exc
+        except TrackingUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
         except (RuntimeError, TimeoutError) as exc:
             raise HTTPException(503, 'MCP readiness unavailable; no new push authorized') from exc
 
@@ -159,6 +170,15 @@ def library_router(store, workspace_root):
     @router.post('/kaggle/accounts/{account}/readiness')
     async def kaggle_account_readiness(account: str, request: Request):
         return await async_call(request.app.state.working.account_readiness, account)
+
+    @router.get('/projects/{project_id}/benchmarks')
+    def benchmarks(project_id: str):
+        return call(BenchmarkCatalog(store).list, project_id)
+
+    @router.get('/projects/{project_id}/benchmarks/{benchmark_id}/comparison')
+    def benchmark_comparison(project_id: str, benchmark_id: str, request: Request):
+        from .compare import compare_benchmark
+        return call(compare_benchmark, request.app.state.working, project_id, benchmark_id)
 
     @router.post("/projects", status_code=201)
     def create_project(body: ProjectInput):
@@ -325,7 +345,8 @@ def library_router(store, workspace_root):
     @router.post("/projects/{project_id}/ideas", status_code=201)
     def add_idea(project_id: str, body: IdeaInput):
         return call(store.save_idea, project_id, body.text, body.title, body.mode, body.desired_output,
-                    body.research.model_dump() if body.research else None, body.tags)
+                    body.research.model_dump() if body.research else None, body.tags, body.benchmark_id,
+                    body.benchmark_definition.model_dump() if body.benchmark_definition else None)
 
     @router.put("/projects/{project_id}/ideas/{idea_id}")
     def update_idea(project_id: str, idea_id: str, body: IdeaUpdate):
@@ -333,7 +354,9 @@ def library_router(store, workspace_root):
                     body.title, body.expected_title, body.mode, body.desired_output,
                     body.expected_mode, body.expected_desired_output,
                     body.research.model_dump() if body.research else None, body.tags,
-                    body.expected_research.model_dump() if body.expected_research else None, body.expected_tags)
+                    body.expected_research.model_dump() if body.expected_research else None, body.expected_tags,
+                    body.benchmark_id, body.benchmark_definition.model_dump() if body.benchmark_definition else None,
+                    body.expected_benchmark_id, body.expected_benchmark_definition.model_dump() if body.expected_benchmark_definition else None)
 
     @router.patch("/projects/{project_id}/ideas/{idea_id}/title")
     def rename_idea(project_id: str, idea_id: str, body: IdeaTitleUpdate):
@@ -364,13 +387,25 @@ def library_router(store, workspace_root):
         working = getattr(request.app.state, 'working', None)
         return call(working.history if working else store.history, project_id, include_deleted=include_deleted)
 
+    @router.post('/projects/{project_id}/runs/{run_id}/tracking/sync')
+    async def sync_tracking(project_id: str, run_id: str, request: Request):
+        return await async_call(request.app.state.working.sync_tracking, project_id, run_id)
+
     @router.post('/projects/{project_id}/runs/compare')
     def compare_runs(project_id: str, body: CompareInput, request: Request):
         from .compare import compare_runs as build_comparison
         return call(build_comparison, request.app.state.working, project_id, body.run_ids)
 
+    def require_run_benchmark(project_id, run_id):
+        approved = call(store.approved_snapshot, project_id, run_id)
+        idea = approved['snapshot']['idea']
+        if idea.get('mode', 'training_research') == 'training_research' and not idea.get('benchmark'):
+            raise HTTPException(409, 'Training/Research bắt buộc có benchmark. Tạo Improve và chọn benchmark trước khi chạy.')
+
     @router.post('/projects/{project_id}/runs/batch', status_code=202)
     async def batch_runs(project_id: str, body: BatchInput, request: Request):
+        for item in body.runs:
+            require_run_benchmark(project_id, item.run_id)
         return await async_call(request.app.state.working.start_batch, project_id,
                                 [item.model_dump() for item in body.runs])
 
@@ -381,6 +416,7 @@ def library_router(store, workspace_root):
 
     @router.post('/projects/{project_id}/runs/{run_id}/working', status_code=202)
     async def working(project_id: str, run_id: str, body: WorkingInput, request: Request):
+        require_run_benchmark(project_id, run_id)
         return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds, body.search, body.account)
 
     @router.post('/projects/{project_id}/runs/{run_id}/stop', status_code=202)
@@ -389,6 +425,7 @@ def library_router(store, workspace_root):
 
     @router.post('/projects/{project_id}/runs/{run_id}/queue/resume')
     async def resume_queued(project_id: str, run_id: str, request: Request):
+        require_run_benchmark(project_id, run_id)
         return await async_call(request.app.state.working.resume_queued, project_id, run_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}')
@@ -403,7 +440,7 @@ def library_router(store, workspace_root):
     async def create_variant(project_id: str, run_id: str, body: VariantInput, request: Request):
         return await async_call(request.app.state.service.create_variant, project_id, run_id,
                                 body.request_id, body.title, body.purpose, body.change_summary, body.mode, body.desired_output,
-                                body.research.model_dump() if body.research else None, body.tags)
+                                body.research.model_dump() if body.research else None, body.tags, body.benchmark_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}/logs')
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):

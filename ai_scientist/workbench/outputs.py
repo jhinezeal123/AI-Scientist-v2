@@ -10,8 +10,8 @@ from .store import StoreConflict
 
 
 def prepare_output(store, project_id, run_id, approved):
-    if snapshot_settings(approved['snapshot'], require_output=True)[0] != 'etc':
-        raise ValueError('Only an approved Etc request belongs in project/output')
+    if snapshot_settings(approved['snapshot'], require_output=True)[0] not in {'etc', 'benchmark'}:
+        raise ValueError('Only an approved Etc/Benchmark request belongs in project/output')
     with PATH_LOCK, store.connection(project_id) as connection:
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute('SELECT artifact_dir FROM runs WHERE id=?', (run_id,)).fetchone()
@@ -51,7 +51,7 @@ def save_output(store, root, project_id, run_id, approved, record, receipt, outc
     summary = record['summary'] or {
         'summary': 'Working dừng trước khi agent trả kết quả cuối.', 'limitations': ['Chưa xác minh hoàn tất công việc.']}
     result = {
-        'project_id': project_id, 'run_id': run_id, 'mode': 'etc',
+        'project_id': project_id, 'run_id': run_id, 'mode': snapshot_settings(approved['snapshot'])[0],
         'context_sha256': approved['context_sha256'],
         'desired_output': snapshot_settings(approved['snapshot'])[1],
         'outcome': outcome, 'stop_confirmed': True, 'stop': receipt,

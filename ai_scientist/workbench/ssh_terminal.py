@@ -63,10 +63,16 @@ class DonorSession:
         self.config = config
         self.account = account or config.kaggle_account_alias
 
+    def publish_benchmark(self, arguments):
+        return self._json('benchmark-publish', arguments, timeout=300)
+
+    def check_benchmark_name(self, arguments):
+        return self._json('benchmark-name', arguments, timeout=60)
+
     def for_account(self, account):
         return DonorSession(self.config, account)
 
-    def _json(self, action, arguments=None, timeout=60):
+    def _json(self, action, arguments=None, timeout=60, cancelled=None):
         # Native CLI shares the existing account/state boundary. No MCP transport.
         command = [str(self.config.donor_python), '-m', 'interface_ai_scientist', action,
                    '--account', self.account]
@@ -74,7 +80,22 @@ class DonorSession:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             start_new_session=os.name != 'nt', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         try:
-            output, _ = process.communicate(json.dumps(arguments).encode() if arguments is not None else None, timeout=timeout)
+            payload = json.dumps(arguments).encode() if arguments is not None else None
+            if cancelled is None:
+                output, _ = process.communicate(payload, timeout=timeout)
+            else:
+                deadline = time.monotonic() + timeout
+                while True:
+                    if cancelled.is_set():
+                        raise RuntimeError('Kaggle settings operation cancelled')
+                    remaining = deadline-time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError('Kaggle settings operation timed out')
+                    try:
+                        output, _ = process.communicate(payload, timeout=min(.5, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        payload = None
             if process.returncode:
                 raise RuntimeError(f'Kaggle {action} failed; outcome must be reconciled')
             value = json.loads(output)
@@ -98,6 +119,9 @@ class DonorSession:
 
     def account_readiness(self):
         return self._json('readiness', timeout=60)
+
+    def account_admin(self, action, arguments=None, cancelled=None):
+        return self._json(action, arguments, timeout=260 if action == 'cookie-check' else 150, cancelled=cancelled)
 
     def command(self, action, session_id):
         return [str(self.config.donor_python), '-m', 'interface_ai_scientist', action, '--session', session_id,
@@ -232,6 +256,15 @@ class AgentTerminalBridge:
             def do_POST(self):
                 if self.path != '/terminal' or not secrets.compare_digest(
                         self.headers.get('Authorization', ''), 'Bearer ' + bridge.token):
+                    # Drain a bounded body before closing. Windows can reset a
+                    # connection with unread request bytes, hiding the 403.
+                    try:
+                        size = int(self.headers.get('Content-Length', '0'))
+                        if 0 < size <= 2_000_000:
+                            self.connection.settimeout(5)
+                            self.rfile.read(size)
+                    except (ValueError, OSError):
+                        pass
                     self.send_error(403)
                     return
                 try:

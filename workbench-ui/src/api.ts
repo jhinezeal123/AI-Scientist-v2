@@ -1,6 +1,8 @@
+export type BenchmarkDefinition={metric:{name:string;direction:'minimize'|'maximize';definition:string};test_split:string;train_split:string|null};
+export type Benchmark={id:string;run_id:string;title:string;definition:BenchmarkDefinition;dataset:{handle:string;url:string;version:number;visibility:'public';manifest_sha256:string}};
 export type Project = {id: string; name: string; created_at: string; directory_name:string;library_path:string};
-export type RunMode = 'training_research'|'etc';
-export const modeLabel=(mode?:RunMode,legacy=false)=>legacy || !mode ? 'Phiên bản cũ' : mode==='etc' ? 'Etc' : 'Training/Research';
+export type RunMode = 'training_research'|'etc'|'benchmark';
+export const modeLabel=(mode?:RunMode,legacy=false)=>legacy || !mode ? 'Phiên bản cũ' : mode==='etc' ? 'Etc' : mode==='benchmark' ? 'Tạo benchmark mới' : 'Training/Research';
 export type OutputOrigin = {kind:'etc_output';project_id:string;run_id:string;proposal_id:string;proposal_version:number;
   context_sha256:string;selection:'file'|'text';path:string|null;sha256:string;bytes:number;copied_at:string;
   run_state:string;output_status:'completed'|'partial'|'pending';stop_confirmed:boolean;limitations:string[]};
@@ -26,7 +28,7 @@ export type Variant = {project_id:string;idea_id:string;parent_run_id:string;par
     result:Record<string,unknown>;artifact_refs:{path:string;bytes:number;sha256:string;kind?:string}[];
     text_files:{path:string;stage_path:string;kind:string;available:boolean;bytes?:number;sha256?:string;reason?:string}[]}};
 export type Idea = {id: string; title: string; text: string; state: string; error: string|null; created_at: string;deleted_at?:string|null;variant?:Variant|null;
-  research?:ResearchPlan|null;tags?:string[];
+  research?:ResearchPlan|null;tags?:string[];benchmark_id?:string|null;benchmark_definition?:BenchmarkDefinition|null;
   mode:RunMode;desired_output:string;mode_legacy?:boolean;
   conversation: ({role:'user';text:string;reply_to:string}|{role:'assistant';proposal_id:string;version:number;body:PlanBody})[]};
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
@@ -41,7 +43,7 @@ export type Context = {context_sha256: string; snapshot: {project_id: string;
 export type History = {proposals: {id: string; version: number; state: string; context_sha256: string}[];
   runs: {id: string; proposal_id: string; proposal_version?:number; idea_id?:string|null; state: string; error: string|null;deleted_at?:string|null;
     title?:string;parent_run_id?:string|null;tags?:string[];run_model?:'single'|'legacy';can_delete?:boolean;
-    mode?:RunMode;desired_output?:string;mode_legacy?:boolean;
+    mode?:RunMode;desired_output?:string;mode_legacy?:boolean;benchmark?:Benchmark|null;
     purpose?: string; idea_text?:string; proposal_objective?:string; context_sha256?:string;
     variant?:Pick<Variant,'parent_run_id'|'purpose'|'change_summary'>|null;
     source_refs?:{id:string;title:string;kind:string;version:number;content_sha256:string}[];

@@ -1,8 +1,10 @@
 import base64
 import hashlib
 import io
+import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -16,6 +18,33 @@ import pytest
 from ai_scientist.workbench.ssh_terminal import AgentTerminalBridge, SshTerminal, TerminalDisconnected, collect_files
 from ai_scientist.workbench.agents.codex import CodexCliRuntime
 from ai_scientist.workbench.codex_executable import resolve_codex_executable
+
+
+def test_remote_shell_nonzero_after_errexit_preserves_session_state(tmp_path, monkeypatch):
+    bash = shutil.which('bash') if os.name != 'nt' else None
+    if os.name == 'nt':
+        git = shutil.which('git')
+        candidate = Path(git).resolve().parent.parent / 'bin/bash.exe' if git else None
+        bash = str(candidate) if candidate and candidate.is_file() else None
+    if not bash:
+        pytest.skip('A local Bash executable is required for the real shell regression')
+    source = Path(__file__).resolve().parents[2] / 'kaggle mcp/interface_ai_scientist/terminal_remote.py'
+    spec = importlib.util.spec_from_file_location('qa_remote_terminal', source)
+    remote = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(remote)
+    events = []
+    monkeypatch.setattr(remote, 'send', events.append)
+    terminal = remote.Terminal(tmp_path, shell=bash)
+    try:
+        prepared = terminal.execute({'id':'prepare','command':'export QA_REMOTE_STATE=kept; cd source; set -e','timeout':5})
+        assert prepared['returncode'] == 0
+        failed = terminal.execute({'id':'expected-failure','command':'false','timeout':5})
+        assert failed['returncode'] == 1 and failed['timed_out'] is False
+        next_command = terminal.execute({'id':'continue','command':'test "$QA_REMOTE_STATE" = kept && test "${PWD##*/}" = source && printf "continued\\n"','timeout':5})
+        assert next_command['returncode'] == 0 and next_command['command_count'] == 3
+        assert any(event['id']=='continue' and 'continued' in event['text'] for event in events)
+    finally:
+        terminal.terminate()
 
 
 PROTOCOL = '''import json,sys
@@ -140,4 +169,42 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
     assert 'Use tools to read working-request.json' in arguments[-1]
     assert arguments[-1] == prompt
     assert 'Do not call tools' not in arguments[-1]
+    assert not list(tmp_path.glob('.codex-output-*.json'))
+
+
+def test_planner_cli_returns_native_json_with_read_only_tools(tmp_path, monkeypatch):
+    executable = tmp_path / 'codex.exe'
+    executable.write_bytes(b'fixture, not executed')
+    payload = {'needs_clarification':False,'questions':[],'paraphrase':'Test-only benchmark',
+        'objective':'Prepare fixed test','implementation_steps':['Prepare evaluator'],
+        'data_refs':[],'expected_outputs':['output/benchmark/benchmark.json']}
+    wire = {**payload,'split_json':json.dumps({'test':'all rows','train':None}),
+        'metric_json':json.dumps({'name':'mse_test','direction':'minimize'}),'budget_json':json.dumps({'output_bytes':5000000})}
+    events = [{'type':'item.completed','item':{'type':'agent_message','text':json.dumps(wire)}},
+        {'type':'turn.completed'}]
+    arguments = []
+    class Process:
+        returncode = 0
+        def __init__(self):
+            self.stdout = io.BytesIO(('\n'.join(json.dumps(event) for event in events)).encode())
+            self.stderr = io.BytesIO()
+        def poll(self):
+            return 0
+    def launch(args, **options):
+        arguments.extend(args)
+        schema = json.loads(Path(args[args.index('--output-schema')+1]).read_text())
+        assert 'needs_clarification' in schema['properties'] and 'text' not in schema['properties']
+        assert set(schema['required']) == set(schema['properties'])
+        return Process()
+    monkeypatch.setattr('ai_scientist.workbench.agents.codex.subprocess.Popen', launch)
+    runtime = CodexCliRuntime(str(executable), model='fixture', reasoning_effort='max')
+    result = runtime.run(SimpleNamespace(role='mvp0_plan',workdir=tmp_path,
+        prompt='Return JSON in the generic text envelope, files={}.',timeout_seconds=1,max_output_bytes=100000),
+        lambda event:None, lambda:False)
+    assert json.loads(result.text) == {**payload,'split':{'test':'all rows','train':None},
+        'metric':{'name':'mse_test','direction':'minimize'},'budget':{'output_bytes':5000000}}
+    assert result.files == {}
+    assert arguments[arguments.index('--sandbox')+1] == 'read-only'
+    assert 'Read-only terminal tools' in arguments[-1]
+    assert 'overrides any generic text-envelope instruction' in arguments[-1]
     assert not list(tmp_path.glob('.codex-output-*.json'))

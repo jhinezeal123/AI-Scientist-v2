@@ -16,6 +16,17 @@ from ai_scientist.workbench.app import create_app
 from fastapi.testclient import TestClient
 
 
+from benchmark_fixture import BENCHMARK, BENCHMARK_ID
+
+
+@pytest.fixture(autouse=True)
+def known_benchmark(monkeypatch):
+    # Planner/approval tests consume an already verified benchmark; catalog and
+    # publication are exercised separately by test_benchmarks.py.
+    monkeypatch.setattr('ai_scientist.workbench.benchmarks.BenchmarkCatalog.require',
+                        lambda self, project_id, benchmark_id: BENCHMARK)
+
+
 def ready(source_id):
     return {"needs_clarification": False, "questions": [], "paraphrase": "small real-data baseline",
         "objective": "validate a small baseline", "data_refs": [source_id],
@@ -53,7 +64,7 @@ def setup(tmp_path):
     store = ProjectStore(tmp_path / ".workbench/projects")
     project = store.create_project("test")["id"]
     source = store.save_resource(project, {"kind": "dataset", "title": "soil", "url": None, "content": "real soil source"})
-    idea = store.save_idea(project, "small baseline")
+    idea = store.save_idea(project, "small baseline", benchmark_id=BENCHMARK_ID)
     fake = FakeRuntime()
     worker = RuntimeWorker(fake, tmp_path / "worker.json")
     service = PlanningService(store, SimpleNamespace(request_type=request_type), worker, tmp_path)
@@ -127,7 +138,8 @@ def test_idea_edit_and_restart_do_not_replay(tmp_path):
         await service.start(project, idea["id"], [source["id"]])
         await service.task
         proposal = store.proposals(project)[0]
-        store.update_idea(project, idea["id"], "changed objective", idea["text"])
+        store.update_idea(project, idea["id"], "changed objective", idea["text"],
+                          benchmark_id=BENCHMARK_ID, expected_benchmark_id=BENCHMARK_ID)
         with pytest.raises(StoreConflict):
             await service.approve(project, proposal["id"], 1, proposal["context_sha256"])
         store.reserve_plan(project, idea["id"])
@@ -154,7 +166,10 @@ def test_budget_contract_and_incomplete_clarification():
 def test_atomic_approval_across_threads_and_project_isolation(tmp_path):
     store, project, source, idea, fake, worker, service = setup(tmp_path)
     context = store.context_snapshot(project, idea["id"], [source["id"]])
-    proposal_id = store.save_proposal(project, idea["id"], ready(source["id"]), context)
+    body = ready(source['id'])
+    definition = BENCHMARK['definition']
+    body.update(metric=definition['metric'], split={'test': definition['test_split'], 'train': definition['train_split']})
+    proposal_id = store.save_proposal(project, idea["id"], body, context)
     def approve():
         return store.approve_proposal(project, proposal_id, 1, context["context_sha256"])
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -184,7 +199,7 @@ def test_http_planner_approval_gate_never_calls_mcp_or_coder(tmp_path):
         project = client.post('/api/projects',json={'name':'test'}).json()['id']
         base = '/api/projects/'+project
         source = client.post(base+'/resources',json={'kind':'text','title':'data','content':'real data'}).json()
-        idea = client.post(base+'/ideas',json={'text':'small baseline'}).json()
+        idea = client.post(base+'/ideas',json={'text':'small baseline','benchmark_id':BENCHMARK_ID}).json()
         body = {'idea_id':idea['id'],'resource_ids':[source['id']]}
         assert client.post(base+'/plan',json={**body,'role':'mvp0_code'}).status_code == 422
         assert fake.calls == []
