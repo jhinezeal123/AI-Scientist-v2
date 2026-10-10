@@ -43,7 +43,8 @@ manager and research finishing modules. No external daemon is required.
 - [x] A6: Settings UI, human idea/proposal forms, per-agent harness/model/instructions,
   activity map, human review controls and explicit remote research scope.
 - [x] A7: local regression and fixture QA, including actual experiment-manager code.
-- [ ] A8: real-provider/Kaggle acceptance under the new scope; not authorized yet.
+- [ ] A8: live scope authorized; human gate and both harnesses verified. Full
+  four-stage Kaggle acceptance is pending after three stopped attempts.
 - [ ] A9: review release, bring the verified correction to the main checkout.
 
 ## How to use
@@ -74,10 +75,27 @@ manager and research finishing modules. No external daemon is required.
 - A saved workflow is immutable; create a new configuration to change the grant.
   Pause the team before changing its seat harness/model/instructions.
 - Existing manual Idea/Run and optional coding templates remain available.
-- Full Workbench regression: 366 passed (one existing MLflow deprecation warning).
+- Full Workbench regression after the Windows/context fixes: 382 passed in 383.97s
+  (one existing MLflow deprecation warning). After the last proposal schema and
+  native action prompt fixes, 27 affected harness/workflow tests passed in 28.59s.
   24 follow-up tests passed (17 stage/search cases and 7 planning cases), covering same-input pause/resume, agent candidate reuse, old-actor
   invalidation and selected-context freshness. The actual original experiment manager
   traversed Draft/Tuning/Research/Ablation with one simulated SSH session and file-verified
   metrics. These checks did not call a model or Kaggle.
 - Frontend production build passed. Desktop/mobile GUI and both presets were verified; mobile had no horizontal overflow and the console had no errors. GUI fixture endpoints reject model/Kaggle execution.
-- No new paid model call, Kaggle session, public dataset or remote exposure was created.
+- Live QA uses the explicit scope in MVP5_STAGE_QA_SCOPE.md. It has verified human
+  pause/resume/rejection without admission and delegated agent approval with exact
+  version/hash/grant. Three CPU attempts have confirmed stop receipts; the third
+  reached the Draft actor, which refused the contradictory native harness prompt.
+  Full research completion is not yet established. No new dataset or remote
+  exposure was created.
+- Follow-up QA fixed unrelated team inbox/source leakage into structured stage turns,
+  atomic JSON publication under Windows readers and redirected Unicode console output.
+  One same-actor schema-format repair is allowed per invocation; it uses the existing
+  call budget/deadline and never retries UNKNOWN outcomes. 25 affected tests passed,
+  followed by 18 workflow tests and 5 search/Windows tests after the last fixes.
+- Delegated proposal schemas now require exact execution/output budget keys within
+  the grant, before approval. Native harnesses permit returning structured action
+  JSON for the backend-owned approved session while retaining disabled local tools.
+  Two pre-admission workflow attempts stopped on invalid output/budget; neither
+  consumed a Kaggle session. Total live usage so far: 16 agent calls, 3 CPU sessions.

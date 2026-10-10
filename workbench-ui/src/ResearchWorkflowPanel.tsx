@@ -21,6 +21,7 @@ export default function ResearchWorkflowPanel({team,harnesses,canResearch,call,u
   async function action(work:()=>Promise<void>){setBusy(true);setError('');try{await work();}catch(e){setError(String(e instanceof Error?e.message:e));}finally{setBusy(false);}}
   useEffect(()=>{setFlow(null);setSpec(defaults(team));setFlows([]);setOptions(null);setError('');setAnswers({});setIdeas({});if(!team.spec.project_id)return;void call<Options>(base+'/workflow-options').then(setOptions).catch(e=>setError(String(e.message)));void call<Flow[]>(base+'/workflows').then(setFlows).catch(e=>setError(String(e.message)));},[team.id,team.spec.project_id]);
   useEffect(()=>{if(!flow)return;let stopped=false;const timer=setInterval(()=>void call<Flow>(base+'/workflows/'+flow.id).then(value=>{if(!stopped)setFlow(value);}).catch(e=>{if(!stopped)setError(String(e.message));}),2000);return()=>{stopped=true;clearInterval(timer);};},[flow?.id,team.id]);
+  useEffect(()=>{if(!team.spec.project_id)return;let stopped=false;const timer=setInterval(()=>void call<Flow[]>(base+'/workflows').then(value=>{if(!stopped)setFlows(value);}).catch(e=>{if(!stopped)setError(String(e.message));}),5000);return()=>{stopped=true;clearInterval(timer);};},[team.id,team.spec.project_id]);
   const visible=flow?.spec||spec;
   const set=(patch:Partial<Spec>)=>setSpec(s=>({...s,...patch}));
   const stageSet=(id:string,patch:Partial<Binding>)=>setSpec(s=>({...s,stages:{...s.stages,[id]:{...s.stages[id],...patch}}}));

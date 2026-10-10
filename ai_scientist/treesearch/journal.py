@@ -603,5 +603,5 @@ class Journal:
             temperature=cfg.agent.summary.temp if cfg.agent.get("summary", None) else 0.3
         )
 
-        with open(os.path.join(notes_dir, f"{stage_name}_summary.txt"), "w") as f:
+        with open(os.path.join(notes_dir, f"{stage_name}_summary.txt"), "w", encoding="utf-8") as f:
             f.write(stage_summary)

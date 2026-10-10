@@ -154,7 +154,8 @@ class NativeHarness:
     def send(self, handle, message, *, request_id, timeout, emit, started):
         executable = self.executable()
         model = handle.seat.model or (getattr(self.codex, "model", None) if self.spec.kind == "native_codex" else None)
-        prompt = "Return only the requested JSON object. Do not execute tools, install software, access credentials or submit research.\n" + message
+        prompt = ("Return only the requested JSON object. Do not call local tools, install software, access credentials or independently create research sessions. "
+                  "You may return requested structured remote actions as JSON; the backend executes them only in an already authorized session.\n" + message)
         schema_file = handle.workspace / ".team-result-schema.json"
         if schema_file.is_symlink():
             raise ValueError("Refusing redirected result schema")

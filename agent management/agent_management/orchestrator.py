@@ -176,10 +176,12 @@ class TeamPlatform:
                 else:
                     adapter.resume(handle, previous["provider_session"])
             context = self.context.pack(rig, task["seat"])
-            inbox = self.store.queue.inbox(task["rig_id"], task["seat"], limit=100)
+            # Structured stage requests already carry the pinned workflow inputs.
+            # A team inbox can contain handoffs from a different workflow/grant.
+            inbox = [] if request.structured_only else self.store.queue.inbox(task["rig_id"], task["seat"], limit=100)
             # Supply scoped source text to tool-free native agents. File reads stay in the service.
             files = []
-            for entry in self.workspaces.files(handle.workspace):
+            for entry in ([] if request.structured_only else self.workspaces.files(handle.workspace)):
                 if any(entry["path"] == p.rstrip("/") or entry["path"].startswith(p.rstrip("/") + "/") for p in handle.seat.policy.allowed_paths):
                     if sum(len(f["content"]) for f in files) + entry["bytes"] > 300_000:
                         break

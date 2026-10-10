@@ -1,6 +1,7 @@
 """Compose the GUI, planning worker, independent run workers and Kaggle backend."""
 from contextlib import asynccontextmanager
 import asyncio
+import sys
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +19,16 @@ from .kaggle_settings import KaggleProxySettings
 from .settings_api import settings_router
 
 
+def configure_console():
+    """Research modules print operator/model text, including Vietnamese, to logs."""
+    for stream in (sys.stdout,sys.stderr):
+        reconfigure=getattr(stream,'reconfigure',None)
+        if callable(reconfigure):
+            reconfigure(encoding='utf-8',errors='backslashreplace')
+
+
 def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
+    configure_console()
     @asynccontextmanager
     async def lifespan(app):
         loaded = bindings or load_runtime(config)

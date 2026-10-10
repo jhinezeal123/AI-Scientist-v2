@@ -147,6 +147,47 @@ def test_pause_rejects_stage_before_queueing(tmp_path):
         runtime.invoke('ideation',{}, {'type':'object'})
     assert owner.gateway.platform.messages==[]
 
+
+def test_stage_schema_repair_is_bounded_and_charged_to_grant(tmp_path):
+    from ai_scientist.workbench.research_workflows import IDEA_SCHEMA
+    owner,identity,project,_=setup(tmp_path)
+    owner.store.change(project,identity,lambda s:s.update(status='RUNNING'))
+    platform=owner.gateway.platform
+    platform.answer=lambda m:{'title':'short' if 'result_validation_error' in m['input'] else 'x'*81,'text':'hypothesis'}
+    runtime=StageRuntime(owner,project,identity)
+    result=runtime.invoke('ideation',{},IDEA_SCHEMA)
+    assert result['title']=='short'
+    assert owner.store.get(project,identity)['state']['calls']==2
+    assert len(platform.messages)==2
+    # A replay observes the exact repaired candidate without another provider call.
+    assert runtime.invoke('ideation',{},IDEA_SCHEMA)==result
+    assert owner.store.get(project,identity)['state']['calls']==2
+
+
+def test_repeated_invalid_stage_schema_stops_after_one_repair(tmp_path):
+    from ai_scientist.workbench.research_workflows import IDEA_SCHEMA
+    owner,identity,project,_=setup(tmp_path)
+    owner.store.change(project,identity,lambda s:s.update(status='RUNNING'))
+    owner.gateway.platform.answer=lambda m:{'title':'x'*81,'text':'hypothesis'}
+    with pytest.raises(ValueError,match='after one repair'):
+        StageRuntime(owner,project,identity).invoke('ideation',{},IDEA_SCHEMA)
+    assert owner.store.get(project,identity)['state']['calls']==2
+
+@pytest.mark.parametrize('invalid_budget',[{'work_seconds':60,'output_bytes':1000},
+                                          {'execution_seconds':61,'output_bytes':1000}])
+def test_delegated_proposal_schema_repairs_missing_or_excess_budget(tmp_path,invalid_budget):
+    owner,identity,project,_=setup(tmp_path)
+    owner.store.change(project,identity,lambda s:s.update(status='RUNNING'))
+    def answer(message):
+        budget={'execution_seconds':60,'output_bytes':1000} if 'result_validation_error' in message['input'] else invalid_budget
+        return {'needs_clarification':False,'questions':[],'paraphrase':'scope','objective':'scope',
+                'implementation_steps':['execute'],'budget':budget}
+    owner.gateway.platform.answer=answer
+    result=StageRuntime(owner,project,identity).run(RuntimeRequest('plan','mvp0_plan','Plan within grant',tmp_path,timeout_seconds=5),lambda _:None,lambda:False)
+    assert json.loads(result.text)['budget']=={'execution_seconds':60,'output_bytes':1000}
+    assert owner.store.get(project,identity)['state']['calls']==2
+    assert owner.working.admissions==0
+
 def test_tool_free_harness_actions_reach_existing_terminal_bridge(tmp_path):
     owner, identity, project, _=setup(tmp_path)
     owner.store.change(project,identity,lambda s:s.update(status='RUNNING'))
