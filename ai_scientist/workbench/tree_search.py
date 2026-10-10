@@ -234,9 +234,12 @@ class TreeSearchRun:
                              'truncated':bool(result.get('output_truncated')) or len(text)>remaining})
             write_json(node_root / 'execution.json',commands)
         with_gateway = AgentTerminalBridge(self.terminal, self.workdir,on_command=on_command)
+        previous_stage = getattr(self, 'agent_stage', None)
+        self.agent_stage = {'1': 'draft', '2': 'tuning', '3': 'research', '4': 'ablation'}.get(stage_name.split('_')[0], 'execution')
         try:
             payload = self.call_agent('mvp1_search_node', load_prompt('search.node', workdir=self.workdir), self.workdir)
         finally:
+            self.agent_stage = previous_stage
             with_gateway.close()
         self.check_running()
         manifest = collect_files(self.terminal, node_root, self.approved['body'].get('budget', {}).get('output_bytes'))

@@ -112,6 +112,7 @@ class TaskRequest(StrictModel):
     input_checkpoint: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     resume_session: str | None = Field(default=None, max_length=128)
     fork_session: bool = False
+    structured_only: bool = False
 
 
 class FileEdit(StrictModel):
@@ -134,4 +135,8 @@ def templates() -> list[dict]:
                  for role in ("lead", "builder", "qa", "reviewer")]
         result.append(RigSpec(name=name.title(), seats=seats,
                               max_parallel=parallel, template=name).model_dump())
+    stages = ('ideation', 'proposal', 'approval', 'execution', 'draft', 'tuning', 'research', 'ablation', 'analysis', 'summary',
+              'report', 'plots', 'writeup', 'review')
+    result.append(RigSpec(name='Research pipeline', seats=[AgentSpec(id=s, role='specialist') for s in stages],
+                          max_parallel=2, template='research').model_dump())
     return result

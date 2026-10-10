@@ -201,6 +201,8 @@ class TeamPlatform:
                 raise ProcessFailure("Harness outcome is unknown", turn.receipt)
             if not self.store.heartbeat(task["id"], token):
                 raise ProcessFailure("Task lease expired; reconcile before applying edits", turn.receipt)
+            if request.structured_only and turn.result.files:
+                raise ValueError('Structured research stages cannot edit the local workspace')
             self.workspaces.apply(handle.workspace, turn.result, handle.seat.policy)
             checkpoint = self.workspaces.checkpoint(handle.workspace, task_id=task["id"])
             self.store.seat_workspace(task["rig_id"], task["seat"], handle.workspace, checkpoint)

@@ -81,7 +81,7 @@ class ResearchPipeline:
         write_json(self.root / 'pipeline.json', self.state)
 
     def set(self, name, status, reason='', artifacts=()):
-        self.owner.agent_stage = name if status == 'running' else None
+        self.owner.agent_stage = ('analysis' if name=='multi_seed' else name) if status == 'running' else None
         self.state['components'][name] = {'status':status, 'reason':reason, 'artifacts':list(artifacts)}
         self.save()
 

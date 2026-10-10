@@ -9,6 +9,11 @@ from pydantic import ValidationError
 
 from .models import validate_result
 
+def observed_future(future):
+    wrapped = asyncio.wrap_future(future)
+    wrapped.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+    return wrapped
+
 
 class RuntimeWorker:
     def __init__(self, runtime, state_path: Path, *, uncertain_error=None):
@@ -49,7 +54,7 @@ class RuntimeWorker:
                                            self.cancelled.is_set)
         result = None
         try:
-            result = await asyncio.shield(asyncio.wrap_future(self.future))
+            result = await asyncio.shield(observed_future(self.future))
             payload = validate_result(request.role, result)
             if on_result is not None:
                 persisted = on_result(payload)
@@ -98,13 +103,19 @@ class RuntimeWorker:
             if self.future.done():
                 self.future = None
 
+    def acknowledge_stopped(self):
+        """After the owner reconciles external receipts, clear its local uncertainty."""
+        if self.future is not None and not self.future.done():
+            raise RuntimeError('Runtime thread is still active')
+        self._save({**self.state, 'status':'interrupted'})
+
     async def close(self, timeout):
         self.closed = True
         self.cancelled.set()
         if self.future is not None:
             self._save({**self.state, "status": "interrupted"})
             try:
-                await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(self.future)), timeout)
+                await asyncio.wait_for(asyncio.shield(observed_future(self.future)), timeout)
             except (Exception, asyncio.CancelledError) as exc:
                 if isinstance(exc, (TimeoutError, asyncio.CancelledError)) or (
                     self.uncertain_error is not None and isinstance(exc, self.uncertain_error)):

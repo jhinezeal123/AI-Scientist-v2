@@ -42,9 +42,14 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.working.check_idle
                 await app.state.working.recover()
+                from .research_workflows import ResearchWorkflows
+                app.state.research_workflows = ResearchWorkflows(service, app.state.working, loaded.runtime)
+                app.state.working.runtime_for_run = app.state.research_workflows.runtime_for_run
+                app.state.research_workflows.recover()
                 try:
                     yield
                 finally:
+                    await app.state.research_workflows.close()
                     gateway = getattr(loaded, 'runtime', None)
                     if hasattr(gateway, 'close'):
                         await asyncio.to_thread(gateway.close)
@@ -68,6 +73,8 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
     app.include_router(create_router())
     from _ai_scientist_agent_management.team_api import create_team_router, remote_boundary
     app.include_router(create_team_router())
+    from .workflow_api import create_workflow_router
+    app.include_router(create_workflow_router())
     app.middleware('http')(remote_boundary)
 
     @app.get("/health")
