@@ -391,9 +391,15 @@ def notebook_status(account, kernel_ref, session_id=None):
     owner, slug = kernel_ref.split('/', 1)
     if owner != metadata.get('username') or not re.fullmatch('[a-zA-Z0-9_-]+', slug):
         raise ValueError('Bootstrap owner mismatch')
-    response = requests.get('https://www.kaggle.com/api/v1/kernels/status',
-        params={'user_name': owner, 'kernel_slug': slug},
-        headers={'Authorization': 'Bearer ' + account_store.read_token(key)}, timeout=(10, 20))
+    from provider_metrics import record as record_metrics
+    started, response = time.perf_counter(), None
+    try:
+        response = requests.get('https://www.kaggle.com/api/v1/kernels/status',
+            params={'user_name': owner, 'kernel_slug': slug},
+            headers={'Authorization': 'Bearer ' + account_store.read_token(key)}, timeout=(10, 20))
+    finally:
+        record_metrics(key, 0, len(response.content) if response is not None else 0, started,
+                       response is None or response.status_code >= 400)
     response.raise_for_status()
     payload = response.json()
     current = str(payload.get('status', '')).lower()
@@ -464,7 +470,7 @@ def state_for(session_id, state_root=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Kaggle SDK bootstrap and Tailcat SSH')
-    parser.add_argument('action', choices=('start', 'idle', 'prepare', 'push', 'connect', 'ssh', 'shell', 'bridge', 'status', 'inspect', 'stop', 'network'))
+    parser.add_argument('action', choices=('start', 'idle', 'readiness', 'prepare', 'push', 'connect', 'ssh', 'shell', 'bridge', 'status', 'inspect', 'stop', 'network'))
     parser.add_argument('--account')
     parser.add_argument('--config', type=Path)
     parser.add_argument('--state-root', type=Path, default=DEFAULT_STATE)
@@ -494,6 +500,10 @@ def main():
     if args.action == 'idle':
         from account_runtime import account_idle
         print(json.dumps(account_idle(args.account), ensure_ascii=False))
+        return
+    if args.action == 'readiness':
+        from account_runtime import account_readiness
+        print(json.dumps(account_readiness(args.account), ensure_ascii=False))
         return
     if args.action == 'prepare':
         state = prepare(args)

@@ -59,13 +59,17 @@ def transfer_library_file(terminal, name, data):
 
 
 class DonorSession:
-    def __init__(self, config):
+    def __init__(self, config, account=None):
         self.config = config
+        self.account = account or config.kaggle_account_alias
+
+    def for_account(self, account):
+        return DonorSession(self.config, account)
 
     def _json(self, action, arguments=None, timeout=60):
         # Native CLI shares the existing account/state boundary. No MCP transport.
         command = [str(self.config.donor_python), '-m', 'interface_ai_scientist', action,
-                   '--account', self.config.kaggle_account_alias]
+                   '--account', self.account]
         process = subprocess.Popen(command, cwd=self.config.donor_root, env=kaggle_environment(),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             start_new_session=os.name != 'nt', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -92,9 +96,12 @@ class DonorSession:
     def account_idle(self):
         return self._json('idle', timeout=60)
 
+    def account_readiness(self):
+        return self._json('readiness', timeout=60)
+
     def command(self, action, session_id):
         return [str(self.config.donor_python), '-m', 'interface_ai_scientist', action, '--session', session_id,
-                '--account', self.config.kaggle_account_alias]
+                '--account', self.account]
 
     def call(self, action, session_id, timeout=40):
         result = subprocess.run(self.command(action, session_id), cwd=self.config.donor_root,
@@ -113,7 +120,7 @@ class DonorSession:
 
     def inspect(self, kernel_ref):
         command = [str(self.config.donor_python), '-m', 'interface_ai_scientist', 'inspect',
-                   '--account', self.config.kaggle_account_alias, '--kernel-ref', kernel_ref]
+                   '--account', self.account, '--kernel-ref', kernel_ref]
         result = subprocess.run(command, cwd=self.config.donor_root, capture_output=True, timeout=40,
                                 env=kaggle_environment())
         if result.returncode:

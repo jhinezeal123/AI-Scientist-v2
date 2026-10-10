@@ -25,9 +25,12 @@ not included. Working owns execution, logs, artifact collection and shutdown.
 
 Install `requirements.txt` into the Workbench Python environment. Configure
 `donor_root` as this directory and `donor_python` as that environment's Python.
-Credentials never ship in Git. Copy/configure only your selected account:
-Copy `accounts.example.json` to `profiles/accounts.json`, then fill in the
-username/alias and save your token in that profile's `token.txt`.
+Credentials never ship in Git. Copy `accounts.example.json` to
+`profiles/accounts.json` and add one entry per account to the registry. Save
+each token in its own `profiles/<alias>/token.txt`; only that account's
+`web-session.json` is needed for account-wide idle verification. The local
+MVP3 workspace has seven configured profiles. This folder remains ignored by
+Git, so another checkout must import its own credentials.
 
 ```text
 profiles/
@@ -37,7 +40,7 @@ profiles/
   <alias>/web-session.json        # cookie for account-wide idle verification
 ```
 
-The selected registry entry must use `token_file: profiles/<alias>/token.txt`.
+Each registry entry must use `token_file: profiles/<alias>/token.txt`.
 Cookie/login support uses the same profile folder. Browser profile databases
 are created locally on demand, not copied or versioned. New transient SSH keys,
 Tailcat binaries and session state are under `.runtime/`; logs are in `logs/`.
@@ -61,3 +64,22 @@ There is no MCP server, tool registration or MCP connection for normal GUI use.
 The external `D:/Documents/kaggle_token` checkout is not
 required after configuring this bundle. Saved stopped runs remain readable;
 live sessions created by the external checkout retain its private state there.
+
+MVP3 adds account selection in the Workbench Run panel. Readiness checks verify
+idle status before a new account submits. Expired cookies require renewal in
+that profile; a token file alone does not prove Kaggle readiness. Each run
+persists its selected account so stop and recovery use the same identity.
+
+To renew a cookie manually in this bundle, run from the repository root (replace
+the account key with the desired profile):
+
+```powershell
+Push-Location "kaggle mcp"
+..\.venv-mvp0\Scripts\python.exe web_session.py --account iyppxm.txt --login --headed
+Pop-Location
+```
+
+Complete sign-in in the opened browser. It saves the cookie in the bundled
+profile. Readiness only observes state and never opens that browser on its own.
+Aggregate API counters are ignored at `.runtime/provider-metrics.sqlite3`;
+credentials and response contents are not stored there.

@@ -1,0 +1,37 @@
+{
+  "project_id": "ca7f24b04c2e4eaea17d3e7467914d48",
+  "run_id": "20d810675c5740df86bda8c90da5a81e",
+  "state": "WORKING",
+  "account": "jhin_access_token.txt",
+  "initial_cursor": "1:17",
+  "samples": 20,
+  "patterns": {
+    "full_page": {
+      "client_requests": 20,
+      "client_bytes": 35280,
+      "client_mean_latency_ms": 110.18217500095489,
+      "returned_entries": 340,
+      "upstream_api_delta": {
+        "requests": 0,
+        "request_bytes": 0,
+        "response_bytes": 0,
+        "latency_ms": 0.0
+      },
+      "upstream_frames_delta": 0
+    },
+    "cursor_delta": {
+      "client_requests": 20,
+      "client_bytes": 5500,
+      "client_mean_latency_ms": 68.54158999994979,
+      "returned_entries": 0,
+      "upstream_api_delta": {
+        "requests": 0,
+        "request_bytes": 0,
+        "response_bytes": 0,
+        "latency_ms": 0.0
+      },
+      "upstream_frames_delta": 0
+    }
+  },
+  "scope": "Same run, sequential cached full-page vs delta reads; payload bytes exclude HTTP headers/TLS. Does not establish an MVP2 upstream-speed baseline."
+}

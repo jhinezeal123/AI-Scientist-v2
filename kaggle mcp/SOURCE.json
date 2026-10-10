@@ -27,6 +27,9 @@
     "Independent proxy port 8013 with service-root identity",
     "SDK endpoint uses bundled proxy",
     "Cookie recovery imports slim account_runtime instead of old tool suite",
-    "Quote OpenSSH known-hosts path for bundle folders containing spaces"
+    "Quote OpenSSH known-hosts path for bundle folders containing spaces",
+    "MVP3 copies all seven registered token/cookie profiles into ignored local bundle profiles",
+    "Noninteractive readiness action reports expired cookies without launching login",
+    "SDK proxy, cookie API and native status reads record per-account aggregate payload bytes/attempt latency into ignored .runtime SQLite"
   ]
 }

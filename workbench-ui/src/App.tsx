@@ -121,11 +121,12 @@ export default function App() {
 
   const planning = ideas.some(idea => idea.state === 'PLANNING');
   const implementing = history.runs.some(run => ['IMPLEMENTING','SUBMITTING','STARTING','WORKING','STOPPING'].includes(run.state));
+  const queued = history.runs.some(run => run.state==='QUEUED');
   useEffect(() => {
-    if ((!planning && !implementing) || connectionError) return;
+    if ((!planning && !implementing && !queued) || connectionError) return;
     const timer = window.setInterval(() => setRevision(n => n+1),1500);
     return () => window.clearInterval(timer);
-  },[planning,implementing,projectId,connectionError]);
+  },[planning,implementing,queued,projectId,connectionError]);
 
   useEffect(() => {
     if (!projectId || !history.runs.length || connectionError)return;
@@ -378,8 +379,13 @@ export default function App() {
           const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
           setRunId(run.id);setTab('Run');
         });}}/></div>}
-        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning || implementing}
+        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning}
           onOutputCopied={()=>setRevision(n=>n+1)}
+          onBatch={async items=>{await action(async()=>{
+            const result=await api<{runs:{run_id:string;state:string;reason?:string}[]}>(`/projects/${projectId}/runs/batch`,'POST',{runs:items});
+            const rejected=result.runs.filter(item=>item.state==='REJECTED');
+            setRevision(n=>n+1);setNotice(`Batch: ${result.runs.length-rejected.length} run đã bắt đầu/xếp hàng; ${rejected.length} bị từ chối. ${rejected.map(item=>`${item.run_id.slice(0,8)}: ${item.reason||'kiểm tra scope/account'}`).join(' · ')}`);
+          });}}
           onBranch={beginBranch}
           onDelete={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}`,'DELETE');setRunId('');setRevision(n=>n+1);setNotice('Đã xóa node lá và các file của run.');
@@ -387,11 +393,14 @@ export default function App() {
           onRestore={async id=>{await action(async()=>{
             await api(`/projects/${projectId}/runs/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục run.');
           });}}
-          onWorking={async (id,accelerator,ttl) => {
-          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl});setRevision(n => n+1);
+          onWorking={async (id,accelerator,ttl,account) => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/working`, 'POST',{accelerator,ttl_seconds:ttl,account});setRevision(n => n+1);
             setNotice('Đã bắt đầu Working cho run này trong một phiên SSH riêng.');});
         }} onStop={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/stop`, 'POST');setRevision(n => n+1);setNotice('Đã yêu cầu dừng Working. Backend sẽ xác nhận phiên Kaggle đã dừng.');});
+        }} onResumeQueue={async id => {
+          await action(async () => {await api(`/projects/${projectId}/runs/${id}/queue/resume`,'POST');setRevision(n=>n+1);
+            setNotice('Đã đưa run về hàng chờ; backend sẽ kiểm tra trước khi mở phiên.');});
         }} onReconcile={async id => {
           await action(async () => {await api(`/projects/${projectId}/runs/${id}/reconcile`, 'POST');setRevision(n => n+1);setNotice('Đã đối soát trạng thái qua MCP; không gửi notebook lần nữa.');});
         }}/>} 

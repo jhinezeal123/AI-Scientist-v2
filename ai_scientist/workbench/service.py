@@ -117,7 +117,8 @@ class PlanningService:
                 if self.idle_check is not None:
                     allowed.add('UNKNOWN')
                 unstarted = await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])
-                blocking = next((run for run in candidates if run['state'] not in allowed and run['id'] not in unstarted), None)
+                blocking = next((run for run in candidates if run['state'] not in allowed and run['id'] not in unstarted
+                                 and not self.store.is_working_intent(project['id'], run['id'])), None)
                 if blocking:
                     raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) của project {project['name']} đang chặn lượt mới.")
             if unknown_ids:
@@ -129,7 +130,7 @@ class PlanningService:
                 if directory.is_symlink() or destination.is_symlink():
                     raise StoreConflict('Linked approval evidence path refused')
                 destination.write_text(json.dumps({**evidence,'unknown_run_ids':unknown_ids},indent=2),encoding='utf-8')
-            return await asyncio.to_thread(self.store.approve_proposal, project_id, proposal_id, version, context_sha256, tuple(unknown_ids))
+            return await asyncio.to_thread(self.store.approve_proposal, project_id, proposal_id, version, context_sha256, tuple(unknown_ids), True)
 
     async def implementation_context(self, project_id, run_id):
         return await asyncio.to_thread(self.store.approved_context, project_id, run_id)

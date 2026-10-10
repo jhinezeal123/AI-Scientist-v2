@@ -1,6 +1,7 @@
 > **Personal customization fork:** product checkpoints and acceptance criteria are in
 > [docs/customization/PRODUCT_ROADMAP.md](docs/customization/PRODUCT_ROADMAP.md).
 > Integration plan: [docs/customization/CUSTOMIZATION_PLAN.md](docs/customization/CUSTOMIZATION_PLAN.md).
+> MVP 3 task tracker: [docs/customization/IMPLEMENT_MVP3.md](docs/customization/IMPLEMENT_MVP3.md).
 > MVP 0 developer plan: [docs/customization/IMPLEMENT_MVP0.md](docs/customization/IMPLEMENT_MVP0.md).
 > Local Codex/Kaggle GUI: [setup and run guide](docs/customization/MVP0_RUN_GUIDE.md).
 > MVP0/T09 has verified the GUI workflow through real Codex code, Kaggle training,

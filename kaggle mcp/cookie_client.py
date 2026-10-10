@@ -1,5 +1,6 @@
 """Original persistent cookie client and mtime cache for idle verification."""
-import os,json,threading,http.client,urllib.parse
+import os,json,threading,http.client,urllib.parse,time
+from provider_metrics import record as record_metrics
 import web_session
 from account_runtime import _account
 
@@ -8,7 +9,8 @@ class _IClient:
     thay vì mở mới mỗi request (tiết kiệm TCP+TLS handshake). Cookie header được build
     từ cookie jar của account; X-XSRF-TOKEN lấy từ cookie XSRF-TOKEN/CSRF-TOKEN."""
 
-    def __init__(self, cookie_file):
+    def __init__(self, cookie_file, account='external'):
+        self._account = account
         self._cookie_file = cookie_file  # để invalidate_cookie() khi server từ chối cookie
         jar = web_session.cookie_jar(cookie_file)
         self._cookie_header = '; '.join('%s=%s' % (c.name, c.value) for c in jar if c.value)
@@ -42,11 +44,14 @@ class _IClient:
                 if self._conn is None:
                     self._conn = http.client.HTTPSConnection('www.kaggle.com', 443, timeout=timeout)
                 conn = self._conn
+                started, response_bytes, failed = time.perf_counter(), 0, True
                 try:
                     conn.request('POST', '/api/i/' + method, body=data, headers=headers)
                     resp = conn.getresponse()
                     raw = resp.read()
+                    response_bytes = len(raw)
                     status = resp.status
+                    failed = status >= 400
                     if getattr(resp, 'will_close', False):
                         self._drop()
                     text = raw.decode('utf-8', 'ignore')
@@ -61,6 +66,8 @@ class _IClient:
                     self._drop()
                     if attempt == 1:
                         raise RuntimeError('_IClient %s thất bại: %s' % (method, exc)) from exc
+                finally:
+                    record_metrics(self._account, len(data), response_bytes, started, failed)
         raise RuntimeError('_IClient unreachable')
 
 
@@ -80,6 +87,6 @@ def _client_for(account):
     with _iclient_lock:
         entry = _iclient_cache.get(a['account'])
         if entry is None or entry[0] != mtime:
-            entry = (mtime, _IClient(a['cookie_file']))
+            entry = (mtime, _IClient(a['cookie_file'], a['account']))
             _iclient_cache[a['account']] = entry
         return entry[1]

@@ -1,9 +1,11 @@
 import {useCallback,useEffect,useState} from 'react';
-import {api,History,Variant,Working,RunMode,RunOutput,Resource,ResearchPlan,ResearchPipeline} from './api';
+import {api,History,Variant,Working,RunMode,RunOutput,Resource,ResearchPlan,ResearchPipeline,KaggleAccount} from './api';
 import RunMonitorPanel from './RunMonitorPanel';
 import OutputToLibrary from './OutputToLibrary';
 import ResearchScope from './ResearchScope';
 import ProjectRunTree from './ProjectRunTree';
+import RunBoard from './RunBoard';
+import RunComparison from './RunComparison';
 
 type RunDetail={id:string;title:string;state:string;error:string|null;deleted_at:string|null;can_delete:boolean;
   mode:RunMode;desired_output:string;parent_run_id:string|null;variant:Variant|null;
@@ -14,13 +16,35 @@ type RunDetail={id:string;title:string;state:string;error:string|null;deleted_at
   identity:{kernel_ref:string;username:string;status?:string;session_id?:number}|null;
   result_metric?:{name:string;direction:string;final_value:number;best_value:number}};
 
-export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onWorking,onStop,onReconcile,
-  onDelete,onRestore,onBranch,onOutputCopied}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
-  runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number)=>Promise<void>;
-  onStop:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;onDelete:(id:string)=>Promise<void>;
-  onRestore:(id:string)=>Promise<void>;onBranch:(id:string,mode:RunMode)=>void;onOutputCopied:(resource:Resource)=>void}) {
+export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onWorking,onStop,onResumeQueue,onReconcile,
+  onDelete,onRestore,onBranch,onBatch,onOutputCopied}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
+  runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,account:string)=>Promise<void>;
+  onStop:(id:string)=>Promise<void>;onResumeQueue:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;onDelete:(id:string)=>Promise<void>;
+  onRestore:(id:string)=>Promise<void>;onBranch:(id:string,mode:RunMode)=>void;
+  onBatch:(items:{run_id:string;account:string;accelerator:string;ttl_seconds:number}[])=>Promise<void>;
+  onOutputCopied:(resource:Resource)=>void}) {
   const [showDeleted,setShowDeleted]=useState(false),[detail,setDetail]=useState<RunDetail|null>(null),[error,setError]=useState('');
   const [accelerator,setAccelerator]=useState('cpu'),[ttl,setTtl]=useState(1800);
+  const [accounts,setAccounts]=useState<KaggleAccount[]>([]),[account,setAccount]=useState('');
+  const [accountError,setAccountError]=useState(''),[checking,setChecking]=useState(false);
+  const [comparison,setComparison]=useState<string[]>([]);
+  const [batchIds,setBatchIds]=useState<string[]>([]),[batchAccounts,setBatchAccounts]=useState<Record<string,string>>({});
+  useEffect(()=>{let cancelled=false;
+    api<KaggleAccount[]>('/kaggle/accounts').then(items=>{if(!cancelled){setAccounts(items);setAccount(current=>current || items.find(item=>item.default)?.account || items[0]?.account || '');}})
+      .catch(e=>{if(!cancelled)setAccountError(e instanceof Error?e.message:String(e));});
+    return ()=>{cancelled=true;};
+  },[]);
+  const selectedAccount=accounts.find(item=>item.account===account);
+  const readinessLabel={verified_idle:'đã kiểm tra idle',unverified:'chưa kiểm tra',busy:'đang có phiên chạy',
+    needs_login:'cần đăng nhập lại',unavailable:'chưa kết nối được'};
+  async function checkAccount() {
+    if(!account)return;
+    setChecking(true);setAccountError('');
+    try {const updated=await api<KaggleAccount>(`/kaggle/accounts/${encodeURIComponent(account)}/readiness`,'POST');
+      setAccounts(items=>items.map(item=>item.account===updated.account?updated:item));
+    } catch(e) {setAccountError(e instanceof Error?e.message:String(e));}
+    finally {setChecking(false);}
+  }
   const visible=runs.filter(run=>Boolean(run.deleted_at)===showDeleted);
   const selectedId=visible.some(run=>run.id===selectedRunId && !run.deleted_at) ? selectedRunId : null;
   const parent=detail?.variant?.parent_run_id || detail?.parent_run_id;
@@ -42,6 +66,20 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
     <a href={`/?page=run-tree&project=${projectId}`} target="_blank" rel="noreferrer">Mở cây toàn màn hình ↗</a>
     {runs.some(item=>item.deleted_at) && <button type="button" onClick={()=>{setShowDeleted(!showDeleted);onSelect('');}}>
       {showDeleted ? 'Cây hiện hành' : 'Run đã xóa trước đây'}</button>}</div>
+    <RunBoard runs={visible} selectedId={selectedId} onSelect={onSelect} onCompare={ids=>setComparison(ids)}
+      onBatch={ids=>{setBatchIds(ids);setBatchAccounts(Object.fromEntries(ids.map(id=>[id,account])));}}/>
+    {batchIds.length>=2 && <section className="run-comparison" aria-label="Batch Working"><div className="panel-head"><h3>Batch đã duyệt</h3>
+      <button type="button" onClick={()=>setBatchIds([])}>Đóng</button></div>
+      <p className="muted">Tối đa một Working dùng slot agent tại một thời điểm; các run tiếp theo vào hàng chờ theo thứ tự.</p>
+      {batchIds.map(id=><label key={id}>{runs.find(run=>run.id===id)?.title||id.slice(0,8)} · account
+        <select value={batchAccounts[id]||account} onChange={e=>setBatchAccounts(current=>({...current,[id]:e.target.value}))}>
+          {accounts.filter(item=>item.configured).map(item=><option key={item.account} value={item.account}>{item.username}</option>)}
+        </select></label>)}
+      <button className="primary" type="button" disabled={busy || batchIds.some(id=>!batchAccounts[id])}
+        onClick={()=>void onBatch(batchIds.map(id=>({run_id:id,account:batchAccounts[id],accelerator,ttl_seconds:ttl})))
+          .then(()=>setBatchIds([]))}>Bắt đầu batch / xếp hàng</button></section>}
+    {comparison.length>=2 && <RunComparison projectId={projectId} runIds={comparison}
+      onClose={()=>setComparison([])} onOpen={onSelect}/>}
     {!visible.length ? <p className="empty">Chưa có run. Lập và duyệt proposal trong Idea để tạo draft.</p>
       : <ProjectRunTree runs={visible} selectedId={selectedId} onSelect={id=>{
         const item=visible.find(item=>item.id===id);
@@ -66,20 +104,32 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
       {parent && <p>Run cha: <button type="button" onClick={()=>onSelect(parent)}>{runs.find(item=>item.id===parent)?.title || parent.slice(0,8)}</button></p>}
       {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
         <h3>Working</h3><p>Một run, một phiên SSH. Agent tự sửa lỗi trong run này. Bạn chủ động tạo các phiên bản improve.</p>
+        <label>Account Kaggle<select value={account} disabled={busy || checking} onChange={e=>setAccount(e.target.value)}>
+          {accounts.map(item=><option key={item.account} value={item.account} disabled={!item.configured}>
+            {item.username} · {readinessLabel[item.readiness]}
+          </option>)}</select></label>
+        {selectedAccount && <div className="actions"><small className="muted">{selectedAccount.readiness==='verified_idle'
+          ? `Idle đã xác minh ${selectedAccount.observed_at || ''}` : readinessLabel[selectedAccount.readiness]}</small>
+          <button type="button" disabled={busy || checking} onClick={()=>void checkAccount()}>
+            {checking?'Đang kiểm tra…':'Kiểm tra account'}</button></div>}
+        {accountError && <p role="alert" className="alert error">{accountError}</p>}
         <label>Phần cứng<select value={accelerator} disabled={busy} onChange={e=>setAccelerator(e.target.value)}>
           <option value="cpu">CPU</option><option value="NvidiaT4">GPU · T4 x2</option>
           <option value="TpuV5E8">TPU · v5e-8</option><option value="TpuV6E8">TPU · v6e-8</option></select></label>
         <label>Thời gian tối đa của phiên (phút)<input type="number" min={1} max={720} step={1} value={ttl/60}
           disabled={busy} onChange={e=>setTtl(Number(e.target.value)*60)}/></label>
-        <button className="primary" disabled={busy || !Number.isInteger(ttl) || ttl<60 || ttl>43200}
-          onClick={()=>void onWorking(run.id,accelerator,ttl)}>Bắt đầu Working</button></div>}
+        <button className="primary" disabled={busy || checking || !selectedAccount?.configured || !Number.isInteger(ttl) || ttl<60 || ttl>43200}
+          onClick={()=>void onWorking(run.id,accelerator,ttl,account)}>Bắt đầu Working</button></div>}
       {run.working && <div className="context"><h3>Phiên Working</h3>
+        <p>Account: {accounts.find(item=>item.account===run.working?.account)?.username || run.working.account || 'chưa rõ'}</p>
         <p>{run.working.accelerator==='NvidiaT4' ? 'GPU · T4 x2' : run.working.accelerator} · tối đa {run.working.ttl_seconds/60} phút</p>
         <p role="status">{run.working.stop_confirmed ? 'Backend đã xác nhận Kaggle dừng.' : run.state==='STARTING'
-          ? 'Đang mở phiên SSH…' : run.state==='STOPPING' ? 'Đang chờ xác nhận Kaggle dừng.'
+          ? 'Đang mở phiên SSH…' : run.state==='QUEUED' ? run.working.phase==='blocked' ? 'Hàng chờ bị chặn; kiểm tra account rồi tiếp tục thủ công.' : 'Đang chờ slot agent/Kaggle.'
+          : run.state==='STOPPING' ? 'Đang chờ xác nhận Kaggle dừng.'
           : run.working.phase.startsWith('research_') ? 'Đang tạo các đầu ra bạn đã chọn.' : 'Agent đang làm việc trong phiên SSH của run.'}</p>
         {run.working.notebook_ref && <a href={`https://www.kaggle.com/code/${run.working.notebook_ref}`} target="_blank" rel="noreferrer">Mở phiên Kaggle ↗</a>}
-        {!run.working.stop_confirmed && <p><button onClick={()=>void onStop(run.id)}>Dừng Working / kiểm tra lại</button></p>}
+        {!run.working.stop_confirmed && <p><button onClick={()=>void onStop(run.id)}>{run.state==='QUEUED'?'Hủy hàng chờ':'Dừng Working / kiểm tra lại'}</button>
+          {run.state==='QUEUED' && run.working.phase==='blocked' && <button onClick={()=>void onResumeQueue(run.id)}>Tiếp tục hàng chờ</button>}</p>}
       </div>}
       {run.mode!=='etc' && run.research && <div className="context"><h3>Đầu ra đã chọn</h3>
         <ResearchScope plan={run.research.plan} pipeline={run.research.pipeline} projectId={projectId} runId={run.id}/></div>}

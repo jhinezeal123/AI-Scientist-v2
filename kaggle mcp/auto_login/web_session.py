@@ -696,18 +696,31 @@ def cookie_rejected(status, body=''):
 
 
 def _post_i(opener, headers, method, body, cookie_file=None):
+    from provider_metrics import record as record_metrics
+    selected = 'external'
+    if cookie_file:
+        try:
+            selected = account_store.resolve(os.path.basename(os.path.dirname(cookie_file)))[0]
+        except ValueError:
+            pass
     req = urllib.request.Request(
         'https://www.kaggle.com/api/i/' + method,
         data=json.dumps(body).encode(),
         method='POST',
         headers=dict(headers, **{'Content-Type': 'application/json'}),
     )
+    started, response_bytes, failed = time.perf_counter(), 0, True
     try:
         with opener.open(req, timeout=30) as r:
-            return json.loads(r.read().decode('utf-8', 'ignore'))
+            raw_response = r.read()
+            response_bytes = len(raw_response)
+            result = json.loads(raw_response.decode('utf-8', 'ignore'))
+            failed = False
+            return result
     except urllib.error.HTTPError as exc:
         try:
             raw = exc.read(500).decode('utf-8', 'ignore')
+            response_bytes = len(raw.encode('utf-8'))
         except Exception:
             raw = ''
         if cookie_rejected(exc.code, raw):
@@ -723,6 +736,8 @@ def _post_i(opener, headers, method, body, cookie_file=None):
             raise RuntimeError(
                 'Kaggle từ chối quyền cho %s (HTTP 403): %s' % (method, raw[:200])) from exc
         raise
+    finally:
+        record_metrics(selected, len(req.data or b''), response_bytes, started, failed)
 
 
 def resolve_session_id(cookie_file, kernel_ref, version_number=0, wait_seconds=120):
@@ -764,7 +779,7 @@ def resolve_session_id(cookie_file, kernel_ref, version_number=0, wait_seconds=1
     while True:
         versions = _post_i(opener, headers, 'kernels.KernelsService/ListKernelVersions',
                            {'kernelId': kernel_id, 'sortOption': 'VERSION_ID',
-                            'pageSize': max(int(view.get('totalVersionCount') or 200), 200)})
+                            'pageSize': max(int(view.get('totalVersionCount') or 200), 200)}, cookie_file=cookie_file)
         for item in versions.get('items', []):
             v = item.get('version', {})
             run_id = int((item.get('run') or {}).get('id') or 0)

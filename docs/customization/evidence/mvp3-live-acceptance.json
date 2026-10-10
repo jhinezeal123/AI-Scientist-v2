@@ -1,0 +1,1171 @@
+{
+  "observed_at": "2026-10-10T02:30:56.065141+07:00",
+  "scope_approval": "Human approved docs/customization/MVP3_DEMO_SCOPE.md in the current Codex chat on 2026-10-10.",
+  "project_id": "ca7f24b04c2e4eaea17d3e7467914d48",
+  "origin": {
+    "project_id": "ae58ccc219304c68913d35400fab62f4",
+    "run_id": "c3ea17bb7a314f429e24467a63b45723",
+    "code_sha256": "e7b4aa02955acb56f9377e19d32dbddd5b6667db15b90318926c860391c3b782"
+  },
+  "runs": [
+    {
+      "run_id": "20d810675c5740df86bda8c90da5a81e",
+      "title": "MVP3 baseline · lr 0.1",
+      "parent_run_id": null,
+      "account": "jhin_access_token.txt",
+      "session_id": "20d810675c5740df86bda8c90da5a81e",
+      "notebook_ref": "huynhtrungcuong/ai-scientist-ssh-20d810675c57",
+      "learning_rate": 0.1,
+      "state": "COMPLETED",
+      "metric": {
+        "name": "mse_validation",
+        "direction": "minimize",
+        "final_value": 0.01990025951573262,
+        "best_value": 0.01990025951573262,
+        "source": "ssh_telemetry"
+      },
+      "metric_points": 30,
+      "dataset_matches_mvp2": true,
+      "independent_numeric_check": true,
+      "stop_receipt": {
+        "session_id": "20d810675c5740df86bda8c90da5a81e",
+        "notebook_ref": "huynhtrungcuong/ai-scientist-ssh-20d810675c57",
+        "status": "complete",
+        "stopped": true,
+        "observed_at": "2026-10-09T19:21:09.438412+00:00"
+      },
+      "artifacts": [
+        "execution.json",
+        "idea.json",
+        "idea.md",
+        "journal.json",
+        "memory_journal.json",
+        "output/dataset.npz",
+        "output/loss.npy",
+        "output/metrics.json",
+        "output/predictions.csv",
+        "source/dataset.csv",
+        "source/train.py",
+        "working-manifest.json",
+        "working-stop.json"
+      ],
+      "collector": {
+        "run_id": "20d810675c5740df86bda8c90da5a81e",
+        "upstream_frames": 183,
+        "upstream_log_bytes": 11845,
+        "client_reads": 134,
+        "client_bytes": 259276,
+        "client_latency_ms": 4843.814199892222,
+        "provider": {
+          "requests": 1,
+          "request_bytes": 5212,
+          "response_bytes": 182,
+          "latency_ms": 1584.5050000061747,
+          "errors": 0,
+          "mean_latency_ms": 1584.5050000061747
+        },
+        "provider_scope": "Kaggle SDK proxy + cookie API payloads; excludes SSH, headers and TLS",
+        "client_mean_latency_ms": 36.14786716337479
+      }
+    },
+    {
+      "run_id": "55be1ad9b20a4da39139281a48361dd4",
+      "title": "MVP3 variant A · lr 0.05",
+      "parent_run_id": "20d810675c5740df86bda8c90da5a81e",
+      "account": "25520221_access_token.txt",
+      "session_id": "55be1ad9b20a4da39139281a48361dd4",
+      "notebook_ref": "cnghunhtrung/ai-scientist-ssh-55be1ad9b20a",
+      "learning_rate": 0.05,
+      "state": "COMPLETED",
+      "metric": {
+        "name": "mse_validation",
+        "direction": "minimize",
+        "final_value": 0.13359086016887964,
+        "best_value": 0.13359086016887964,
+        "source": "ssh_telemetry"
+      },
+      "metric_points": 30,
+      "dataset_matches_mvp2": true,
+      "independent_numeric_check": true,
+      "stop_receipt": {
+        "session_id": "55be1ad9b20a4da39139281a48361dd4",
+        "notebook_ref": "cnghunhtrung/ai-scientist-ssh-55be1ad9b20a",
+        "status": "complete",
+        "stopped": true,
+        "observed_at": "2026-10-09T19:25:25.463505+00:00"
+      },
+      "artifacts": [
+        "execution.json",
+        "idea.json",
+        "idea.md",
+        "journal.json",
+        "memory_journal.json",
+        "output/dataset.npz",
+        "output/loss.npy",
+        "output/metrics.json",
+        "output/predictions.csv",
+        "source/dataset.csv",
+        "source/train.py",
+        "working-manifest.json",
+        "working-stop.json"
+      ],
+      "collector": {
+        "run_id": "55be1ad9b20a4da39139281a48361dd4",
+        "upstream_frames": 1188,
+        "upstream_log_bytes": 63554,
+        "client_reads": 2,
+        "client_bytes": 34143,
+        "client_latency_ms": 41.64279998803977,
+        "provider": {
+          "requests": 5,
+          "request_bytes": 5209,
+          "response_bytes": 441,
+          "latency_ms": 4260.779599993839,
+          "errors": 0,
+          "mean_latency_ms": 852.1559199987678
+        },
+        "provider_scope": "Kaggle SDK proxy + cookie API payloads; excludes SSH, headers and TLS",
+        "client_mean_latency_ms": 20.821399994019885
+      }
+    },
+    {
+      "run_id": "dcf76c25b61340fb836109b89ebe4363",
+      "title": "MVP3 variant B · lr 0.2",
+      "parent_run_id": "20d810675c5740df86bda8c90da5a81e",
+      "account": "jhin_access_token.txt",
+      "session_id": "dcf76c25b61340fb836109b89ebe4363",
+      "notebook_ref": "huynhtrungcuong/ai-scientist-ssh-dcf76c25b613",
+      "learning_rate": 0.2,
+      "state": "COMPLETED",
+      "metric": {
+        "name": "mse_validation",
+        "direction": "minimize",
+        "final_value": 0.0018004327585372992,
+        "best_value": 0.0018004327585372992,
+        "source": "ssh_telemetry"
+      },
+      "metric_points": 30,
+      "dataset_matches_mvp2": true,
+      "independent_numeric_check": true,
+      "stop_receipt": {
+        "session_id": "dcf76c25b61340fb836109b89ebe4363",
+        "notebook_ref": "huynhtrungcuong/ai-scientist-ssh-dcf76c25b613",
+        "status": "complete",
+        "stopped": true,
+        "observed_at": "2026-10-09T19:30:46.663024+00:00"
+      },
+      "artifacts": [
+        "execution.json",
+        "idea.json",
+        "idea.md",
+        "journal.json",
+        "memory_journal.json",
+        "output/dataset.npz",
+        "output/loss.npy",
+        "output/metrics.json",
+        "output/predictions.csv",
+        "source/dataset.csv",
+        "source/train.py",
+        "working-manifest.json",
+        "working-stop.json"
+      ],
+      "collector": {
+        "run_id": "dcf76c25b61340fb836109b89ebe4363",
+        "upstream_frames": 70,
+        "upstream_log_bytes": 7129,
+        "client_reads": 2,
+        "client_bytes": 6771,
+        "client_latency_ms": 27.077899998403154,
+        "provider": {
+          "requests": 5,
+          "request_bytes": 5212,
+          "response_bytes": 447,
+          "latency_ms": 4830.730699992273,
+          "errors": 0,
+          "mean_latency_ms": 966.1461399984546
+        },
+        "provider_scope": "Kaggle SDK proxy + cookie API payloads; excludes SSH, headers and TLS",
+        "client_mean_latency_ms": 13.538949999201577
+      }
+    }
+  ],
+  "batch_admission": {
+    "runs": [
+      {
+        "run_id": "55be1ad9b20a4da39139281a48361dd4",
+        "state": "STARTING"
+      },
+      {
+        "run_id": "dcf76c25b61340fb836109b89ebe4363",
+        "state": "QUEUED",
+        "reason": "Agent/Kaggle slot đang bận; chờ lượt."
+      }
+    ]
+  },
+  "comparison": {
+    "runs": [
+      {
+        "run_id": "20d810675c5740df86bda8c90da5a81e",
+        "title": "MVP3 baseline · lr 0.1",
+        "purpose": "Approved MVP3 demo baseline: reuse the selected train.py and the exact 96-point dataset from MVP2. Train linear regression for 30 CPU steps with learning rate 0.1, seed 42, w=b=0 and fixed index split 64/16/16. Emit measured mse_validation and training_loss per step; evaluate test only for reporting. Collect files within 5 MB; workload <=60 seconds; session <=600 seconds.",
+        "state": "COMPLETED",
+        "account": "jhin_access_token.txt",
+        "parent_run_id": null,
+        "metric": {
+          "name": "mse_validation",
+          "direction": "minimize",
+          "final_value": 0.01990025951573262,
+          "best_value": 0.01990025951573262,
+          "source": "ssh_telemetry"
+        },
+        "protocol": {
+          "mode": "training_research",
+          "data": [
+            [
+              "9d1741f29aba450c97296410b8fa77c9",
+              1,
+              "ce2750c74b5b3cacb39e342a803db7a91c380cfadac0b6c712c7b19ef75b4d6c"
+            ]
+          ],
+          "split": {
+            "seed": 42,
+            "test_indices": [
+              80,
+              95
+            ],
+            "train_indices": [
+              0,
+              63
+            ],
+            "validation_indices": [
+              64,
+              79
+            ]
+          },
+          "metric": {
+            "direction": "minimize",
+            "name": "mse_validation",
+            "selection": "final step 30"
+          }
+        },
+        "points": [
+          {
+            "elapsed_seconds": 0.00027794400000402675,
+            "metrics": {
+              "mse_validation": 1.004176113045343,
+              "training_loss": 1.8268300618335045
+            },
+            "step": 1,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.00042842599998493824,
+            "metrics": {
+              "mse_validation": 0.7735374453500186,
+              "training_loss": 1.4107801063838885
+            },
+            "step": 2,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0005191390000049978,
+            "metrics": {
+              "mse_validation": 0.619884699270862,
+              "training_loss": 1.1166717959232324
+            },
+            "step": 3,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0005964860000062799,
+            "metrics": {
+              "mse_validation": 0.5137868696199859,
+              "training_loss": 0.9037639107889722
+            },
+            "step": 4,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0006720279999967715,
+            "metrics": {
+              "mse_validation": 0.43722795666853476,
+              "training_loss": 0.7456461908276271
+            },
+            "step": 5,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.000746654000010949,
+            "metrics": {
+              "mse_validation": 0.37924373937756023,
+              "training_loss": 0.6251076158041062
+            },
+            "step": 6,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0008211730000198258,
+            "metrics": {
+              "mse_validation": 0.33319959216963263,
+              "training_loss": 0.5308531544799834
+            },
+            "step": 7,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0008958660000075724,
+            "metrics": {
+              "mse_validation": 0.2950997849575306,
+              "training_loss": 0.45540187607708404
+            },
+            "step": 8,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0009707390000244231,
+            "metrics": {
+              "mse_validation": 0.2625431409313794,
+              "training_loss": 0.3937402240280391
+            },
+            "step": 9,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0010597510000138755,
+            "metrics": {
+              "mse_validation": 0.23408222468962092,
+              "training_loss": 0.3424581442985476
+            },
+            "step": 10,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0011345130000108838,
+            "metrics": {
+              "mse_validation": 0.20883333064454662,
+              "training_loss": 0.2991940700269153
+            },
+            "step": 11,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0012081579999971837,
+            "metrics": {
+              "mse_validation": 0.18624149421565045,
+              "training_loss": 0.2622775680331398
+            },
+            "step": 12,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0012815150000164977,
+            "metrics": {
+              "mse_validation": 0.16594067879580734,
+              "training_loss": 0.230498575792069
+            },
+            "step": 13,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0013631179999720189,
+            "metrics": {
+              "mse_validation": 0.14767190607265884,
+              "training_loss": 0.20295779200733843
+            },
+            "step": 14,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0014363419999767757,
+            "metrics": {
+              "mse_validation": 0.13123629047518767,
+              "training_loss": 0.1789691630292874
+            },
+            "step": 15,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.00150877099997615,
+            "metrics": {
+              "mse_validation": 0.11646881566941286,
+              "training_loss": 0.15799587383311678
+            },
+            "step": 16,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0015810419999979786,
+            "metrics": {
+              "mse_validation": 0.10322421995532195,
+              "training_loss": 0.13960794146152966
+            },
+            "step": 17,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0016533620000132032,
+            "metrics": {
+              "mse_validation": 0.09136978322443304,
+              "training_loss": 0.12345378479292633
+            },
+            "step": 18,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0017256329999781883,
+            "metrics": {
+              "mse_validation": 0.08078191724755716,
+              "training_loss": 0.109240878588519
+            },
+            "step": 19,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0018033829999808404,
+            "metrics": {
+              "mse_validation": 0.07134474913045044,
+              "training_loss": 0.09672234864590021
+            },
+            "step": 20,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001876300999981595,
+            "metrics": {
+              "mse_validation": 0.06294966639091916,
+              "training_loss": 0.08568748414975211
+            },
+            "step": 21,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001948305999974309,
+            "metrics": {
+              "mse_validation": 0.05549525654238901,
+              "training_loss": 0.07595486014713397
+            },
+            "step": 22,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0027714760000208116,
+            "metrics": {
+              "mse_validation": 0.048887346221750144,
+              "training_loss": 0.06736722263323244
+            },
+            "step": 23,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0030778760000202965,
+            "metrics": {
+              "mse_validation": 0.0430390005241681,
+              "training_loss": 0.05978758375573051
+            },
+            "step": 24,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0032697859999757384,
+            "metrics": {
+              "mse_validation": 0.03787042910302845,
+              "training_loss": 0.05309616439573749
+            },
+            "step": 25,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.003451165999990735,
+            "metrics": {
+              "mse_validation": 0.0333087904619254,
+              "training_loss": 0.04718794373649031
+            },
+            "step": 26,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0036369100000115395,
+            "metrics": {
+              "mse_validation": 0.02928790714985998,
+              "training_loss": 0.04197065459954569
+            },
+            "step": 27,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0038230789999715853,
+            "metrics": {
+              "mse_validation": 0.025747912744037146,
+              "training_loss": 0.03736311479333396
+            },
+            "step": 28,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.004007387000001472,
+            "metrics": {
+              "mse_validation": 0.022634852756938852,
+              "training_loss": 0.03329381838360025
+            },
+            "step": 29,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0042100580000123955,
+            "metrics": {
+              "mse_validation": 0.01990025951573262,
+              "training_loss": 0.02969973299726012
+            },
+            "step": 30,
+            "total_steps": 30
+          }
+        ]
+      },
+      {
+        "run_id": "55be1ad9b20a4da39139281a48361dd4",
+        "title": "MVP3 variant A · lr 0.05",
+        "purpose": "Mục đích mới: Approved MVP3 variant A: repeat baseline on the exact selected dataset, unchanged 30 steps, seed 42, initialization and 64/16/16 split. Change only learning rate to 0.05. Measure mse_validation and training_loss; same <=60-second CPU workload, <=5 MB output and <=600-second session. No new network or research outputs.\n\nThay đổi so với run gốc: Only learning rate: 0.1 -> 0.05; reusable code and protocol unchanged.",
+        "state": "COMPLETED",
+        "account": "25520221_access_token.txt",
+        "parent_run_id": "20d810675c5740df86bda8c90da5a81e",
+        "metric": {
+          "name": "mse_validation",
+          "direction": "minimize",
+          "final_value": 0.13359086016887964,
+          "best_value": 0.13359086016887964,
+          "source": "ssh_telemetry"
+        },
+        "protocol": {
+          "mode": "training_research",
+          "data": [
+            [
+              "9d1741f29aba450c97296410b8fa77c9",
+              1,
+              "ce2750c74b5b3cacb39e342a803db7a91c380cfadac0b6c712c7b19ef75b4d6c"
+            ]
+          ],
+          "split": {
+            "seed": 42,
+            "test_indices": [
+              80,
+              95
+            ],
+            "train_indices": [
+              0,
+              63
+            ],
+            "validation_indices": [
+              64,
+              79
+            ]
+          },
+          "metric": {
+            "direction": "minimize",
+            "name": "mse_validation",
+            "selection": "final step 30"
+          }
+        },
+        "points": [
+          {
+            "elapsed_seconds": 0.00026485900002626295,
+            "metrics": {
+              "mse_validation": 1.1708681918338104,
+              "training_loss": 2.113249546434214
+            },
+            "step": 1,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0004110049999326293,
+            "metrics": {
+              "mse_validation": 1.017498601637423,
+              "training_loss": 1.8498268398565276
+            },
+            "step": 2,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0004995760000383598,
+            "metrics": {
+              "mse_validation": 0.8923266848470346,
+              "training_loss": 1.62839687380905
+            },
+            "step": 3,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0005771569999524218,
+            "metrics": {
+              "mse_validation": 0.7896286644374642,
+              "training_loss": 1.441440155616729
+            },
+            "step": 4,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0006521269999666401,
+            "metrics": {
+              "mse_validation": 0.7048454154727826,
+              "training_loss": 1.282842173115427
+            },
+            "step": 5,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0007273539999914647,
+            "metrics": {
+              "mse_validation": 0.6343493173069148,
+              "training_loss": 1.147627190665648
+            },
+            "step": 6,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0008021290000215231,
+            "metrics": {
+              "mse_validation": 0.5752570774516217,
+              "training_loss": 1.0317427064020792
+            },
+            "step": 7,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0008754379999800221,
+            "metrics": {
+              "mse_validation": 0.5252795618606894,
+              "training_loss": 0.931884916083733
+            },
+            "step": 8,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0009658249999802138,
+            "metrics": {
+              "mse_validation": 0.4826014016780378,
+              "training_loss": 0.8453573696065845
+            },
+            "step": 9,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001039700999967863,
+            "metrics": {
+              "mse_validation": 0.44578454759298247,
+              "training_loss": 0.769956495954228
+            },
+            "step": 10,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0011119979999421048,
+            "metrics": {
+              "mse_validation": 0.413691073989164,
+              "training_loss": 0.7038788780203383
+            },
+            "step": 11,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001192699999933211,
+            "metrics": {
+              "mse_validation": 0.3854214479288981,
+              "training_loss": 0.6456461345053308
+            },
+            "step": 12,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0012664309999763645,
+            "metrics": {
+              "mse_validation": 0.36026521460921046,
+              "training_loss": 0.5940440558053596
+            },
+            "step": 13,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.00134008299994548,
+            "metrics": {
+              "mse_validation": 0.337661645150734,
+              "training_loss": 0.5480732799522798
+            },
+            "step": 14,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001412008999977843,
+            "metrics": {
+              "mse_validation": 0.3171683718286924,
+              "training_loss": 0.5069093119408024
+            },
+            "step": 15,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0014840349999758473,
+            "metrics": {
+              "mse_validation": 0.29843642226435124,
+              "training_loss": 0.46987010843105886
+            },
+            "step": 16,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0015562969999791676,
+            "metrics": {
+              "mse_validation": 0.28119037555487403,
+              "training_loss": 0.43638978864730726
+            },
+            "step": 17,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0016279530000247178,
+            "metrics": {
+              "mse_validation": 0.26521261428371423,
+              "training_loss": 0.4059973065266307
+            },
+            "step": 18,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001700991999996404,
+            "metrics": {
+              "mse_validation": 0.2503308484997475,
+              "training_loss": 0.37829914112294105
+            },
+            "step": 19,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0017731309999362566,
+            "metrics": {
+              "mse_validation": 0.23640825051374248,
+              "training_loss": 0.3529652419103545
+            },
+            "step": 20,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0018446770000082324,
+            "metrics": {
+              "mse_validation": 0.22333567035350183,
+              "training_loss": 0.3297176110240173
+            },
+            "step": 21,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0019315649999498419,
+            "metrics": {
+              "mse_validation": 0.2110255070956413,
+              "training_loss": 0.30832102215526536
+            },
+            "step": 22,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0020047970000405257,
+            "metrics": {
+              "mse_validation": 0.1994068960190764,
+              "training_loss": 0.28857547106604287
+            },
+            "step": 23,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0020766929999354033,
+            "metrics": {
+              "mse_validation": 0.18842193961183876,
+              "training_loss": 0.2703100297815674
+            },
+            "step": 24,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.00214860099993075,
+            "metrics": {
+              "mse_validation": 0.17802276514426568,
+              "training_loss": 0.25337783892157517
+            },
+            "step": 25,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0022283399999878384,
+            "metrics": {
+              "mse_validation": 0.16816923540837236,
+              "training_loss": 0.23765202314039563
+            },
+            "step": 26,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.002301401999943664,
+            "metrics": {
+              "mse_validation": 0.15882717442106775,
+              "training_loss": 0.22302235553169175
+            },
+            "step": 27,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0023735149999311034,
+            "metrics": {
+              "mse_validation": 0.14996699809595782,
+              "training_loss": 0.20939252994980778
+            },
+            "step": 28,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0024448419999316684,
+            "metrics": {
+              "mse_validation": 0.14156266247382787,
+              "training_loss": 0.19667792699124712
+            },
+            "step": 29,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.002518221999935122,
+            "metrics": {
+              "mse_validation": 0.13359086016887964,
+              "training_loss": 0.18480378106869366
+            },
+            "step": 30,
+            "total_steps": 30
+          }
+        ]
+      },
+      {
+        "run_id": "dcf76c25b61340fb836109b89ebe4363",
+        "title": "MVP3 variant B · lr 0.2",
+        "purpose": "Mục đích mới: Approved MVP3 variant B: repeat baseline on the exact selected dataset, unchanged 30 steps, seed 42, initialization and 64/16/16 split. Change only learning rate to 0.2. Measure mse_validation and training_loss; same <=60-second CPU workload, <=5 MB output and <=600-second session. No new network or research outputs.\n\nThay đổi so với run gốc: Only learning rate: 0.1 -> 0.2; reusable code and protocol unchanged.",
+        "state": "COMPLETED",
+        "account": "jhin_access_token.txt",
+        "parent_run_id": "20d810675c5740df86bda8c90da5a81e",
+        "metric": {
+          "name": "mse_validation",
+          "direction": "minimize",
+          "final_value": 0.0018004327585372992,
+          "best_value": 0.0018004327585372992,
+          "source": "ssh_telemetry"
+        },
+        "protocol": {
+          "mode": "training_research",
+          "data": [
+            [
+              "9d1741f29aba450c97296410b8fa77c9",
+              1,
+              "ce2750c74b5b3cacb39e342a803db7a91c380cfadac0b6c712c7b19ef75b4d6c"
+            ]
+          ],
+          "split": {
+            "seed": 42,
+            "test_indices": [
+              80,
+              95
+            ],
+            "train_indices": [
+              0,
+              63
+            ],
+            "validation_indices": [
+              64,
+              79
+            ]
+          },
+          "metric": {
+            "direction": "minimize",
+            "name": "mse_validation",
+            "selection": "final step 30"
+          }
+        },
+        "points": [
+          {
+            "elapsed_seconds": 0.0002810890000546351,
+            "metrics": {
+              "mse_validation": 0.736953497941881,
+              "training_loss": 1.3387387824191705
+            },
+            "step": 1,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0004533730000275682,
+            "metrics": {
+              "mse_validation": 0.49148019572403107,
+              "training_loss": 0.8429142075384845
+            },
+            "step": 2,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0005494470001394802,
+            "metrics": {
+              "mse_validation": 0.36941035992386584,
+              "training_loss": 0.5835119277567313
+            },
+            "step": 3,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0006305480001174146,
+            "metrics": {
+              "mse_validation": 0.2905270112157934,
+              "training_loss": 0.42728742675567255
+            },
+            "step": 4,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0007676360000914428,
+            "metrics": {
+              "mse_validation": 0.23054740373387808,
+              "training_loss": 0.322334478582397
+            },
+            "step": 5,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0008501490001435741,
+            "metrics": {
+              "mse_validation": 0.18220876532094757,
+              "training_loss": 0.2468248818204336
+            },
+            "step": 6,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0009301900001901231,
+            "metrics": {
+              "mse_validation": 0.14296400724735825,
+              "training_loss": 0.19043522755698356
+            },
+            "step": 7,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001006910000114658,
+            "metrics": {
+              "mse_validation": 0.11138790799816148,
+              "training_loss": 0.14752919030817227
+            },
+            "step": 8,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0010827080000126443,
+            "metrics": {
+              "mse_validation": 0.08628183646489843,
+              "training_loss": 0.11458759690960939
+            },
+            "step": 9,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0011584580001908762,
+            "metrics": {
+              "mse_validation": 0.06653142281760839,
+              "training_loss": 0.08918884314519526
+            },
+            "step": 10,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0012369210000997555,
+            "metrics": {
+              "mse_validation": 0.05112781029779277,
+              "training_loss": 0.06956699903297024
+            },
+            "step": 11,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0013137600001300598,
+            "metrics": {
+              "mse_validation": 0.039196544881248935,
+              "training_loss": 0.05439416705555057
+            },
+            "step": 12,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0013911530002133077,
+            "metrics": {
+              "mse_validation": 0.03000617260885525,
+              "training_loss": 0.04265658425818575
+            },
+            "step": 13,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001476593999996112,
+            "metrics": {
+              "mse_validation": 0.022960382467093123,
+              "training_loss": 0.033574689365553155
+            },
+            "step": 14,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0015522850001161714,
+            "metrics": {
+              "mse_validation": 0.01758169164565853,
+              "training_loss": 0.026546976798410005
+            },
+            "step": 15,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0016271210001832515,
+            "metrics": {
+              "mse_validation": 0.013492509221746595,
+              "training_loss": 0.02110859248645666
+            },
+            "step": 16,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0018354860001181805,
+            "metrics": {
+              "mse_validation": 0.010396834979697522,
+              "training_loss": 0.016900024884225845
+            },
+            "step": 17,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.001922713000112708,
+            "metrics": {
+              "mse_validation": 0.008064065823700804,
+              "training_loss": 0.013643138120073305
+            },
+            "step": 18,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0019982120002168813,
+            "metrics": {
+              "mse_validation": 0.006315359918834944,
+              "training_loss": 0.011122718605256965
+            },
+            "step": 19,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0020729830000618676,
+            "metrics": {
+              "mse_validation": 0.005012494714400588,
+              "training_loss": 0.009172228050867839
+            },
+            "step": 20,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.002146637000123519,
+            "metrics": {
+              "mse_validation": 0.0040489348446525455,
+              "training_loss": 0.007662790117796055
+            },
+            "step": 21,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0022219120000954717,
+            "metrics": {
+              "mse_validation": 0.0033427603693542496,
+              "training_loss": 0.006494671760782338
+            },
+            "step": 22,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0022979640000357904,
+            "metrics": {
+              "mse_validation": 0.002831114357230628,
+              "training_loss": 0.00559069238617857
+            },
+            "step": 23,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0023729940000976057,
+            "metrics": {
+              "mse_validation": 0.0024658680695033804,
+              "training_loss": 0.004891123906983978
+            },
+            "step": 24,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.002451545000212718,
+            "metrics": {
+              "mse_validation": 0.0022102500792536713,
+              "training_loss": 0.00434974421291465
+            },
+            "step": 25,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0025261740001951694,
+            "metrics": {
+              "mse_validation": 0.0020362323679288964,
+              "training_loss": 0.003930783114091515
+            },
+            "step": 26,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0026010790002146678,
+            "metrics": {
+              "mse_validation": 0.0019225076457820565,
+              "training_loss": 0.0036065589036147227
+            },
+            "step": 27,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.0026765390000491607,
+            "metrics": {
+              "mse_validation": 0.0018529267134434748,
+              "training_loss": 0.0033556493576344364
+            },
+            "step": 28,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.004857791000176803,
+            "metrics": {
+              "mse_validation": 0.0018152928504082961,
+              "training_loss": 0.003161476318272003
+            },
+            "step": 29,
+            "total_steps": 30
+          },
+          {
+            "elapsed_seconds": 0.005320410000194897,
+            "metrics": {
+              "mse_validation": 0.0018004327585372992,
+              "training_loss": 0.0030112103365575148
+            },
+            "step": 30,
+            "total_steps": 30
+          }
+        ]
+      }
+    ],
+    "same_protocol": true,
+    "warnings": [],
+    "ranked_run_ids": [
+      "dcf76c25b61340fb836109b89ebe4363",
+      "20d810675c5740df86bda8c90da5a81e",
+      "55be1ad9b20a4da39139281a48361dd4"
+    ]
+  },
+  "measurement_notes": [
+    "API counters describe payloads/account windows, excluding headers/TLS, SSH and browser/login.",
+    "Notebook-status instrumentation was added during baseline acceptance; baseline API total is a partial measurement. Variant counters include native status reads."
+  ]
+}

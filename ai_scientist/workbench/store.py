@@ -842,7 +842,7 @@ class ProjectStore:
                 result.append(item)
             return result
 
-    def approve_proposal(self, project_id, proposal_id, version, context_sha256, idle_unknown_ids=()):
+    def approve_proposal(self, project_id, proposal_id, version, context_sha256, idle_unknown_ids=(), allow_working=False):
         from .models import WorkingProposal
         candidate = next((item for item in self.proposals(project_id) if item['id'] == proposal_id), None)
         with self.connection(project_id) as connection:
@@ -877,6 +877,7 @@ class ProjectStore:
                 raise StoreConflict("Proposal cites unselected source IDs")
             candidates = connection.execute("SELECT * FROM runs WHERE deleted_at IS NULL AND state NOT IN ('COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED','COLLECTING')").fetchall()
             blocking = next((row for row in candidates if not self._is_unstarted_run(connection, row)
+                             and not (allow_working and self._is_working_intent(connection, row))
                              and not (row['state'] == 'UNKNOWN' and row['id'] in idle_unknown_ids)), None)
             if blocking:
                 raise StoreConflict(f"Run {blocking['id'][:8]} ({blocking['state']}) đang chặn lượt mới. Run đã kết thúc trên Kaggle không chặn duyệt proposal.")
@@ -992,7 +993,8 @@ class ProjectStore:
                     shutil.rmtree(root)
             except OSError as exc:
                 raise StoreConflict('Chưa xóa hết file run. Đóng file đang mở rồi thử xóa lại.') from exc
-            for table in ('logs', 'implementation_attempts', 'run_retries', 'working_runs', 'monitor_state'):
+            for table in ('logs', 'implementation_attempts', 'run_retries', 'working_telemetry',
+                          'working_collector_stats', 'working_runs', 'monitor_state'):
                 if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     connection.execute(f'DELETE FROM {table} WHERE run_id=?', (run_id,))
             connection.execute('DELETE FROM variant_ideas WHERE parent_run_id=?', (run_id,))
@@ -1111,7 +1113,7 @@ class ProjectStore:
             with self.connection(project['id']) as connection:
                 connection.execute("UPDATE runs SET state='UNKNOWN',error='Submission interrupted by restart; reconcile using read-only history, never push again' WHERE state='SUBMITTING'")
 
-    def reserve_retry(self, project_id, parent_run_id, request_id, idle_unknown_ids=()):
+    def reserve_retry(self, project_id, parent_run_id, request_id, idle_unknown_ids=(), allow_working=False):
         """A deliberate new execution shares approval, never the old remote identity."""
         if not re.fullmatch(r'[0-9a-f]{32}', request_id):
             raise ValueError('Invalid retry request ID')
@@ -1134,6 +1136,7 @@ class ProjectStore:
                 raise StoreConflict('Chỉ tạo lượt mới sau khi lượt cũ kết thúc hoặc Kaggle xác nhận account đang rảnh')
             candidates = connection.execute("SELECT * FROM runs WHERE deleted_at IS NULL AND state NOT IN ('FAILED','CANCELLED','REMOTE_FAILED','REMOTE_SUCCEEDED','COLLECTING','COMPLETED')").fetchall()
             if any(not self._is_unstarted_run(connection, row)
+                   and not (allow_working and self._is_working_intent(connection, row))
                    and (row['state'] != 'UNKNOWN' or row['id'] not in idle_unknown_ids) for row in candidates):
                 raise StoreConflict('Một run khác đang hoạt động; hoàn tất run đó trước khi tạo lượt mới')
             run_id = uuid.uuid4().hex
@@ -1150,6 +1153,19 @@ class ProjectStore:
             if row['parent_run_id'] != parent_run_id:
                 raise StoreConflict('Retry request belongs to a different run')
             return row['run_id']
+
+    @staticmethod
+    def _is_working_intent(connection, run):
+        if run['state'] not in {'QUEUED', 'STARTING', 'WORKING', 'STOPPING'}:
+            return False
+        if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='working_runs' AND type='table'").fetchone():
+            return False
+        return bool(connection.execute('SELECT 1 FROM working_runs WHERE run_id=? AND stop_confirmed=0', (run['id'],)).fetchone())
+
+    def is_working_intent(self, project_id, run_id):
+        with self.connection(project_id) as connection:
+            run = connection.execute('SELECT id,state FROM runs WHERE id=?', (run_id,)).fetchone()
+            return bool(run and self._is_working_intent(connection, run))
 
     def retry_feedback(self, project_id, run_id):
         with self.connection(project_id) as connection:

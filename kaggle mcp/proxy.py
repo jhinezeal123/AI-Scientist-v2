@@ -9,6 +9,7 @@
 import http.server, urllib.request, urllib.parse, urllib.error, http.client, ssl, threading, sys, time, os, re
 
 import account_store
+from provider_metrics import record as record_metrics
 
 UPSTREAM = os.environ.get('KAGGLE_PROXY_UPSTREAM', 'https://www.kaggle.com')
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8013
@@ -100,12 +101,15 @@ class _UpstreamPool:
         for attempt in range(attempts):
             # Avoid stale idle connections for the single allowed save attempt.
             conn, reused = (self._new(), False) if save else self.acquire()
+            started, response_bytes, failed = time.perf_counter(), 0, True
             try:
                 conn.request(method, path, body=body, headers=headers)
                 resp = conn.getresponse()
                 data = resp.read()
+                response_bytes = len(data)
                 rheaders = resp.getheaders()
                 status = resp.status
+                failed = status >= 400
                 self.release(conn, healthy=True)
                 return status, rheaders, data, reused
             except (http.client.RemoteDisconnected, http.client.BadStatusLine,
@@ -118,6 +122,10 @@ class _UpstreamPool:
             except Exception:
                 self.release(conn, healthy=False)
                 raise
+            finally:
+                auth = headers.get('Authorization', '')
+                selected = next((tk[0] for tk in tokens if auth == 'Bearer ' + tk[1]), 'external')
+                record_metrics(selected, len(body or b''), response_bytes, started, failed)
 
     def _log_upstream(self, msg):
         print('[%s] [pool] %s' % (time.strftime('%H:%M:%S'), msg), flush=True)

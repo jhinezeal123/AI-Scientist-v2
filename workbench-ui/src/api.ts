@@ -31,7 +31,9 @@ export type Idea = {id: string; title: string; text: string; state: string; erro
   conversation: ({role:'user';text:string;reply_to:string}|{role:'assistant';proposal_id:string;version:number;body:PlanBody})[]};
 export const ideaTitle=(idea:Idea)=>idea.title || 'Chưa đặt tiêu đề';
 export type Working = {phase:string;accelerator:string;ttl_seconds:number;started_at:string;agent_called:number;
-  stop_confirmed:boolean;notebook_ref?:string;summary?:{succeeded:boolean;summary:string;limitations:string[];output_files:string[]}|null};
+  account?:string;stop_confirmed:boolean;notebook_ref?:string;summary?:{succeeded:boolean;summary:string;limitations:string[];output_files:string[]}|null};
+export type KaggleAccount = {account:string;alias:string;username:string;configured:boolean;default:boolean;
+  readiness:'verified_idle'|'unverified'|'busy'|'needs_login'|'unavailable';observed_at:string|null;active_session_count:number|null};
 export type RunOutput = {directory:string|null;status:'completed'|'partial'|'pending';summary:string;summary_sha256:string|null;limitations:string[];
   stop_confirmed:boolean;files:{path:string;bytes:number;sha256:string}[]};
 export type Context = {context_sha256: string; snapshot: {project_id: string;
@@ -44,6 +46,8 @@ export type History = {proposals: {id: string; version: number; state: string; c
     variant?:Pick<Variant,'parent_run_id'|'purpose'|'change_summary'>|null;
     source_refs?:{id:string;title:string;kind:string;version:number;content_sha256:string}[];
     code_sha256?:string|null; artifacts?:string[];execution_mode?:'ssh'|'legacy';working?:Working|null;
+    account?:string|null;session_id?:string|number|null;
+    protocol?:{split:string|Record<string,unknown>|null;metric:string|Record<string,unknown>|null;context_sha256:string};
     result_metric?: {name:string;direction:string;final_value:number;best_value:number};report_available?:boolean}[]};
 export type Proposal = {id:string;idea_id:string;version:number;state:string;body:PlanBody;
   context_sha256:string;context_snapshot:Context['snapshot'];approved_at:string|null};

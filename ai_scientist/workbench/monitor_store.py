@@ -11,7 +11,7 @@ gap INTEGER NOT NULL DEFAULT 0, terminal INTEGER NOT NULL DEFAULT 0,
 observation_json TEXT, error TEXT, telemetry_error TEXT, primary_metric TEXT, direction TEXT)'''
 
 
-def telemetry(records, metric):
+def telemetry(records, metric, max_steps=100):
     points=[];error=None
     for record in records:
         for line in record['data'].splitlines():
@@ -19,7 +19,7 @@ def telemetry(records, metric):
             try:
                 item=json.loads(line[len('AILAB_METRIC '):])
                 step=item['step'];elapsed=item['elapsed_seconds'];total=item['total_steps'];values=item['metrics']
-                if (type(step) is not int or type(total) is not int or not 1<=step<=total<=100
+                if (type(step) is not int or type(total) is not int or not 1<=step<=total<=max_steps
                         or type(elapsed) not in (int,float) or not math.isfinite(elapsed) or elapsed<0
                         or not isinstance(values,dict) or metric not in values or len(values)>32
                         or any(not isinstance(k,str) or len(k)>256 or type(v) not in (int,float) or not math.isfinite(v) for k,v in values.items())):

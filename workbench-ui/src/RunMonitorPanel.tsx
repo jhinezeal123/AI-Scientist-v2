@@ -6,7 +6,10 @@ type MetricPoint={step:number;elapsed_seconds:number;total_steps:number;metrics:
 type Delta=LogMetadata & {run_state:string;next_cursor:string;
   has_more:boolean;reset:boolean;gap:boolean;terminal:boolean;
   error:string|null;telemetry_error:string|null;points:MetricPoint[];primary_metric:string|null;direction:string|null;
+  eta_seconds:number|null;
   observation:{identity:{status:string};observed_at:string;source:string;complete:boolean}|null};
+type CollectorStats={upstream_frames:number;upstream_log_bytes:number;client_reads:number;client_bytes:number;
+  client_mean_latency_ms:number|null;provider:{requests:number;request_bytes:number;response_bytes:number;mean_latency_ms:number|null}|null};
 
 function metricValue(value:number) {
   return Math.abs(value)>=1e6 || (value!==0 && Math.abs(value)<0.0001)
@@ -40,16 +43,19 @@ function MetricCurve({points,metric}:{points:MetricPoint[];metric:string}) {
 
 export default function RunMonitorPanel({projectId,runId,onObserved,working=false}:{projectId:string;runId:string;onObserved:(state:string)=>void;working?:boolean}) {
   const [data,setData]=useState<Delta|null>(null);
+  const [stats,setStats]=useState<CollectorStats|null>(null);
   const [error,setError]=useState('');
   const [selectedMetric,setSelectedMetric]=useState('');
   useEffect(() => {
     let cancelled=false;let timer:number;
-    setData(null);setError('');setSelectedMetric('');
+    setData(null);setStats(null);setError('');setSelectedMetric('');
     async function poll() {
       try {
         const page=await api<Delta>(`/projects/${projectId}/runs/${runId}/log-window?limit=0`);
         if (cancelled)return;
         setData(page);setError('');
+        if(working)void api<CollectorStats|null>(`/projects/${projectId}/runs/${runId}/collector-stats`)
+          .then(value=>{if(!cancelled)setStats(value);}).catch(()=>{});
         onObserved(page.run_state);
         if (!page.terminal)timer=window.setTimeout(poll,2000);
       } catch(e) {
@@ -58,7 +64,7 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
     }
     void poll();
     return () => {cancelled=true;window.clearTimeout(timer);};
-  },[projectId,runId,onObserved]);
+  },[projectId,runId,onObserved,working]);
   const points=data?.points || [];
   const metrics=Array.from(new Set(points.flatMap(point=>Object.keys(point.metrics)
     .filter(name=>Number.isFinite(point.metrics[name])))));
@@ -69,12 +75,16 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
   return <div className="context monitor-panel"><div className="panel-head"><h3>{working ? 'Log Working' : 'Theo dõi Kaggle'}</h3>
     <span className="state-tag">{data?.terminal ? 'Đã kết thúc' : working ? 'Đang theo dõi' : data?.observation ? 'Theo dõi nền' : 'Đang chờ quan sát'}</span></div>
     {data?.observation && <p className="muted">{data.observation.identity.status} · Quan sát lúc {new Date(data.observation.observed_at).toLocaleTimeString('vi-VN')}</p>}
+    {working && stats && <p className="muted">Collector: {stats.upstream_frames} frame SSH / {stats.upstream_log_bytes.toLocaleString()} byte log; GUI {stats.client_reads} lần đọc / {stats.client_bytes.toLocaleString()} byte · trung bình {stats.client_mean_latency_ms?.toFixed(1)??'—'} ms.</p>}
+    {working && stats?.provider && <p className="muted">API Kaggle: {stats.provider.requests} request · {stats.provider.request_bytes.toLocaleString()} byte gửi / {stats.provider.response_bytes.toLocaleString()} byte nhận · {stats.provider.mean_latency_ms?.toFixed(1)??'—'} ms/request (payload API).</p>}
     {(error || data?.error) && <p className="alert error" role="alert">{error || data?.error}</p>}
     {data?.gap && <p className="alert error">Nguồn log bị cắt hoặc đổi. Đã lưu generation mới; đang chờ đối soát log terminal.</p>}
     {data?.telemetry_error && <p className="alert error" role="alert">{data.telemetry_error}</p>}
-    {!working && latest && <section className="training-metrics" aria-label="Loss và metric training">
+    {working && !latest && !data?.terminal && <p className="muted">Curve/ETA: chưa đủ dữ liệu metric theo step từ phiên thật.</p>}
+    {latest && <section className="training-metrics" aria-label="Loss và metric training">
       <div className="panel-head"><h3>Loss và metric</h3>
         <span className="muted">Step {latest.step}/{latest.total_steps} · {samples.length} mẫu</span></div>
+      {!data?.terminal && <p className="muted">ETA: {data?.eta_seconds==null ? 'chưa đủ dữ liệu' : `${Math.ceil(data.eta_seconds/60)} phút (theo tốc độ step gần nhất)`}</p>}
       <label>Metric hiển thị<select value={metric} onChange={event=>setSelectedMetric(event.target.value)}>
         {metrics.map(name=><option key={name} value={name}>{name}</option>)}
       </select></label>

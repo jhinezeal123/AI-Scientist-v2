@@ -178,11 +178,11 @@ def test_unstarted_approvals_do_not_block_but_remote_or_active_runs_still_do(tmp
         with store.connection(other) as connection:
             connection.execute('UPDATE runs SET identity_json=NULL WHERE id=?', (other_run['id'],))
         assert (await service.start(project, second['id']))['state'] == 'STARTING'
-        with pytest.raises(StoreConflict):
-            await service.start(project, original)
+        assert (await service.start(project, original))['state'] == 'QUEUED'
+        assert (await service.stop(project, original))['state'] == 'CANCELLED'
         await service.tasks[project, second['id']]
         assert service.record(project, second['id'])['stop_confirmed']
-        assert store.run(project, original)['state'] == 'APPROVED'
+        assert store.run(project, original)['state'] == 'CANCELLED'
         assert store.run(other, other_run['id'])['state'] == 'APPROVED'
         await worker.close(1)
     asyncio.run(scenario())
@@ -323,3 +323,110 @@ def test_working_http_routes_ownership_and_artifact_allowlist(tmp_path, monkeypa
         assert client.get(path + '/artifacts/working-agent/terminal-access.json').status_code == 404
         assert client.get(path + '/logs').json()['terminal']
         assert client.post(path + '/stop').status_code == 202
+
+
+def test_working_log_collector_keeps_cursor_and_measured_eta(tmp_path):
+    store, project, run, worker, planner, service, *_ = fixture(tmp_path)
+    metric = store.approved_snapshot(project, run)['body']['metric']['name']
+    service.records.reserve(project, run, 'cpu', 1800, 'fixture-account')
+    first = json.dumps({'step': 1, 'total_steps': 4, 'elapsed_seconds': 10,
+                        'metrics': {metric: .5, 'training_loss': 1.0}})
+    second = json.dumps({'step': 2, 'total_steps': 4, 'elapsed_seconds': 20,
+                         'metrics': {metric: .6, 'training_loss': .8}})
+    service.records.append_log(project, run, 'AILAB_METRIC ' + first[:25])
+    service.records.append_log(project, run, 'Collector vẫn chạy\n', 'backend')
+    service.records.append_log(project, run, first[25:] + '\nAILAB_METRIC ' + second + '\n')
+    subscriber_a = service.records.logs(project, run)
+    subscriber_b = service.records.logs(project, run)
+    assert subscriber_a['entries'] == subscriber_b['entries']
+    assert [point['step'] for point in subscriber_a['points']] == [1, 2]
+    assert subscriber_a['eta_seconds'] == 20
+    assert service.records.logs(project, run, subscriber_a['next_cursor'])['entries'] == []
+    service.records.client_read(project, run, subscriber_a, __import__('time').perf_counter())
+    stats = service.records.collector_stats(project, run)
+    assert stats['upstream_frames'] == 2 and stats['client_reads'] == 1
+    assert stats['upstream_log_bytes'] > 0 and stats['client_bytes'] > 0
+    # Remote measurements stay separate from cached subscriber reads and freeze at stop.
+    baseline = dict(epoch='one', requests=1, request_bytes=10, response_bytes=20, latency_ms=5, errors=0)
+    current = dict(epoch='one', requests=3, request_bytes=40, response_bytes=70, latency_ms=25, errors=0)
+    service.records.snapshot_provider(project, run, baseline)
+    assert service.records.collector_stats(project, run, current)['provider']['requests'] == 2
+    service.records.snapshot_provider(project, run, current, end=True)
+    assert service.records.collector_stats(project, run, {**current, 'requests': 5})['provider']['requests'] == 2
+    assert not service.records.result_metric(project, run)  # Partial steps are not a final result.
+    asyncio.run(worker.close(1))
+
+
+def test_account_pin_survives_default_change_and_restart(tmp_path):
+    store, project, run, worker, planner, service, *_ = fixture(tmp_path)
+    service.records.reserve(project, run, 'cpu', 1800, 'second.txt', queued=True)
+    reloaded = WorkingStore(store)
+    service.config.kaggle_account_alias = 'new-default.txt'
+    service.records = reloaded
+    assert service.detail(project, run)['account'] == 'second.txt'
+    assert service.detail(project, run)['working']['account'] == 'second.txt'
+    asyncio.run(worker.close(1))
+
+
+def test_queued_run_waits_for_slot_and_cancel_never_submits(tmp_path):
+    async def scenario():
+        runtime = Runtime(pause=True)
+        store, project, first, worker, planner, service, _, bootstrap, _ = fixture(tmp_path, runtime=runtime)
+        approved = store.approved_snapshot(project, first)
+        idea = store.save_idea(project, 'Queued variant')
+        context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
+        proposal = store.save_proposal(project, idea['id'], approved['body'], context)
+        assert (await service.start(project, first))['state'] == 'STARTING'
+        await wait_for(lambda: runtime.entered.is_set())
+        second = (await planner.approve(project, proposal, 1, context['context_sha256']))['id']
+        assert (await service.start(project, second))['state'] == 'QUEUED'
+        assert not any(call[1].get('request_id') == second for call in bootstrap.calls)
+        assert (await service.stop(project, second))['state'] == 'CANCELLED'
+        await service.stop(project, first)
+        await service.tasks[project, first]
+        assert not any(call[1].get('request_id') == second for call in bootstrap.calls)
+        assert service.record(project, second)['stop_confirmed']
+        await service.close(1)
+        await planner.close()
+        await worker.close(1)
+    asyncio.run(scenario())
+
+
+def test_queue_drains_once_after_previous_stop(tmp_path):
+    async def scenario():
+        runtime = Runtime(pause=True)
+        store, project, first, worker, planner, service, _, bootstrap, _ = fixture(tmp_path, runtime=runtime)
+        approved = store.approved_snapshot(project, first)
+        idea = store.save_idea(project, 'Next approved run')
+        context = store.context_snapshot(project, idea['id'], [source['id'] for source in approved['snapshot']['resources']])
+        proposal = store.save_proposal(project, idea['id'], approved['body'], context)
+        second = (await planner.approve(project, proposal, 1, context['context_sha256']))['id']
+        await service.start(project, first)
+        await wait_for(lambda: runtime.entered.is_set())
+        await service.start(project, second)
+        await service.stop(project, first)
+        await service.tasks[project, first]
+        await wait_for(lambda: any(call[1].get('request_id') == second for call in bootstrap.calls))
+        assert sum(call[1].get('request_id') == second for call in bootstrap.calls) == 1
+        await service.stop(project, second)
+        await service.tasks[project, second]
+        await service.close(1)
+        await planner.close()
+        await worker.close(1)
+    asyncio.run(scenario())
+
+
+def test_queue_unknown_worker_blocks_visibly_without_submission(tmp_path):
+    async def scenario():
+        store, project, run, worker, planner, service, _, bootstrap, _ = fixture(tmp_path)
+        service.records.reserve(project, run, 'cpu', 1800, 'fixture-account', queued=True)
+        worker.state['status'] = 'unknown'
+        service._ensure_queue_loop()
+        await service.queue_task
+        assert service.record(project, run)['phase'] == 'blocked'
+        assert store.run(project, run)['state'] == 'QUEUED'
+        assert 'worker' in store.run(project, run)['error']
+        assert not bootstrap.calls
+        await service.stop(project, run)
+        await service.close(1); await planner.close(); await worker.close(1)
+    asyncio.run(scenario())

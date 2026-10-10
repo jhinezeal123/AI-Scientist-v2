@@ -2,6 +2,7 @@
 from typing import Literal
 import asyncio
 import json
+import time
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import Field, field_validator
 
@@ -103,7 +104,23 @@ class VariantInput(StrictModel):
 class WorkingInput(StrictModel):
     accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
     ttl_seconds: int = Field(default=1800, ge=60, le=43200)
+    account: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_-]+(?:\.txt)?$')
     search: dict | None = None
+
+
+class CompareInput(StrictModel):
+    run_ids: list[str] = Field(min_length=2, max_length=8)
+
+
+class BatchItem(StrictModel):
+    run_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    account: str = Field(pattern=r'^[a-zA-Z0-9_-]+(?:\.txt)?$')
+    accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
+    ttl_seconds: int = Field(default=1800, ge=60, le=43200)
+
+
+class BatchInput(StrictModel):
+    runs: list[BatchItem] = Field(min_length=2, max_length=8)
 
 
 def library_router(store, workspace_root):
@@ -126,7 +143,7 @@ def library_router(store, workspace_root):
             raise HTTPException(404, str(exc.args[0])) from exc
         except StoreConflict as exc:
             raise HTTPException(409, str(exc)) from exc
-        except ValueError as exc:
+        except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(422, str(exc)) from exc
         except (RuntimeError, TimeoutError) as exc:
             raise HTTPException(503, 'MCP readiness unavailable; no new push authorized') from exc
@@ -134,6 +151,14 @@ def library_router(store, workspace_root):
     @router.get("/projects")
     def projects():
         return call(store.list_projects)
+
+    @router.get('/kaggle/accounts')
+    def kaggle_accounts(request: Request):
+        return call(request.app.state.working.account_list)
+
+    @router.post('/kaggle/accounts/{account}/readiness')
+    async def kaggle_account_readiness(account: str, request: Request):
+        return await async_call(request.app.state.working.account_readiness, account)
 
     @router.post("/projects", status_code=201)
     def create_project(body: ProjectInput):
@@ -339,6 +364,16 @@ def library_router(store, workspace_root):
         working = getattr(request.app.state, 'working', None)
         return call(working.history if working else store.history, project_id, include_deleted=include_deleted)
 
+    @router.post('/projects/{project_id}/runs/compare')
+    def compare_runs(project_id: str, body: CompareInput, request: Request):
+        from .compare import compare_runs as build_comparison
+        return call(build_comparison, request.app.state.working, project_id, body.run_ids)
+
+    @router.post('/projects/{project_id}/runs/batch', status_code=202)
+    async def batch_runs(project_id: str, body: BatchInput, request: Request):
+        return await async_call(request.app.state.working.start_batch, project_id,
+                                [item.model_dump() for item in body.runs])
+
     @router.post('/projects/{project_id}/runs/{run_id}/implement', status_code=202)
     async def implement(project_id: str, run_id: str, request: Request):
         call(store.run, project_id, run_id)
@@ -346,11 +381,15 @@ def library_router(store, workspace_root):
 
     @router.post('/projects/{project_id}/runs/{run_id}/working', status_code=202)
     async def working(project_id: str, run_id: str, body: WorkingInput, request: Request):
-        return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds, body.search)
+        return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds, body.search, body.account)
 
     @router.post('/projects/{project_id}/runs/{run_id}/stop', status_code=202)
     async def stop_working(project_id: str, run_id: str, request: Request):
         return await async_call(request.app.state.working.stop, project_id, run_id)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/queue/resume')
+    async def resume_queued(project_id: str, run_id: str, request: Request):
+        return await async_call(request.app.state.working.resume_queued, project_id, run_id)
 
     @router.get('/projects/{project_id}/runs/{run_id}')
     def run_detail(project_id: str, run_id: str, request: Request):
@@ -368,9 +407,17 @@ def library_router(store, workspace_root):
 
     @router.get('/projects/{project_id}/runs/{run_id}/logs')
     def run_logs(project_id: str, run_id: str, request: Request, cursor: str | None = None, limit: int = 100):
-        if call(request.app.state.working.record, project_id, run_id):
-            return call(request.app.state.working.records.logs, project_id, run_id, cursor, limit)
+        working = request.app.state.working
+        if call(working.record, project_id, run_id):
+            started = time.perf_counter()
+            payload = call(working.records.logs, project_id, run_id, cursor, limit)
+            call(working.records.client_read, project_id, run_id, payload, started)
+            return payload
         return call(request.app.state.logs.delta, project_id, run_id, cursor, limit)
+
+    @router.get('/projects/{project_id}/runs/{run_id}/collector-stats')
+    def collector_stats(project_id: str, run_id: str, request: Request):
+        return call(request.app.state.working.collector_stats, project_id, run_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/output/library', status_code=201)
     def copy_output(project_id: str, run_id: str, body: OutputCopyInput, request: Request):
@@ -379,12 +426,16 @@ def library_router(store, workspace_root):
     @router.get('/projects/{project_id}/runs/{run_id}/log-window')
     def log_window(project_id: str, run_id: str, request: Request, offset: int = 0,
                    limit: int = 80, generation: int | None = None):
+        started = time.perf_counter()
         record = call(request.app.state.working.record, project_id, run_id)
         reader = request.app.state.working.records.logs if record else request.app.state.logs.delta
         status = call(reader, project_id, run_id, None, 1)
         status['entries'] = []
         window = call(read_log_window, store, project_id, run_id, status['generation'], offset, limit, generation)
-        return {**status, **window}
+        payload = {**status, **window}
+        if record:
+            call(request.app.state.working.records.client_read, project_id, run_id, payload, started)
+        return payload
 
     @router.post('/projects/{project_id}/runs/{run_id}/submit', status_code=202)
     async def submit(project_id: str, run_id: str, request: Request):

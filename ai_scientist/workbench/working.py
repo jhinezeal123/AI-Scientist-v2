@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
 import shlex
 import sys
@@ -14,6 +15,7 @@ from .working_store import WorkingStore, TERMINAL
 from .system_prompt import load_prompt
 from .modes import snapshot_settings
 from .named_paths import display_path
+from .accounts import AccountCatalog
 
 ACCELERATORS = {'cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'}
 ACTIVE = {'STARTING', 'WORKING', 'STOPPING'}
@@ -45,7 +47,10 @@ class WorkingService:
         self.store = planner.store
         self.records = WorkingStore(self.store)
         self.donor = donor or DonorSession(config)
+        self.accounts = (AccountCatalog(config.donor_root, config.kaggle_account_alias)
+                         if getattr(config, 'donor_root', None) else None)
         self.tasks, self.terminals, self.stop_requests = {}, {}, set()
+        self.queue_task = None
         self.closed = False
         self.stop_seconds = stop_seconds
         self.poll_seconds = poll_seconds
@@ -53,13 +58,36 @@ class WorkingService:
     def record(self, project_id, run_id):
         return self.records.get(project_id, run_id)
 
+    def _donor(self, account):
+        if not account or account == self.config.kaggle_account_alias:
+            return self.donor
+        return self.donor.for_account(account)
+
+    def _run_donor(self, key):
+        record = self.record(*key)
+        return self._donor((record.get('account') or (record.get('descriptor') or {}).get('account')) if record else None)
+
+    def account_list(self):
+        return self.accounts.list() if self.accounts else []
+
+    async def account_readiness(self, account):
+        if not self.accounts:
+            raise ValueError('Bundled Kaggle account catalog is unavailable')
+        self.accounts.require(account)
+        try:
+            observation = await asyncio.wait_for(asyncio.to_thread(self._donor(account).account_readiness), 70)
+        except (RuntimeError, TimeoutError) as exc:
+            self.accounts.unavailable(account)
+            raise StoreConflict('Chưa xác minh được account Kaggle; kiểm tra phiên đăng nhập trong profile đóng gói') from exc
+        return self.accounts.record_observation(account, observation)
+
     async def check_idle(self):
         """Check known notebooks; unreadable old saves need verified account idleness."""
-        observations, unresolved_refs = [], []
+        observations, unresolved_refs, unresolved_accounts = [], [], {}
         for project in await asyncio.to_thread(self.store.list_projects):
             history = await asyncio.to_thread(self.store.history, project['id'])
             for item in history['runs']:
-                if item['state'] in ACTIVE:
+                if item['state'] in ACTIVE | {'IMPLEMENTING', 'SUBMITTING', 'SUBMITTED', 'REMOTE_QUEUED', 'REMOTE_RUNNING'}:
                     raise StoreConflict('Working vẫn hoạt động hoặc chưa xác nhận Kaggle đã dừng')
                 if item['state'] != 'UNKNOWN':
                     continue
@@ -71,48 +99,72 @@ class WorkingService:
                 if not identity.get('kernel_ref'):
                     raise StoreConflict('Run UNKNOWN cũ thiếu notebook reference để đối soát')
                 try:
-                    receipt = await asyncio.to_thread(self.donor.inspect, identity['kernel_ref'])
+                    receipt = await asyncio.to_thread(self._donor(identity.get('account')).inspect, identity['kernel_ref'])
                 except Exception:
                     unresolved_refs.append(identity['kernel_ref'])
+                    account = identity.get('account') or self.config.kaggle_account_alias
+                    unresolved_accounts.setdefault(account, []).append(identity['kernel_ref'])
                     continue
                 if receipt.get('stopped') is not True:
                     raise StoreConflict('Notebook UNKNOWN cũ vẫn đang chạy trên Kaggle')
                 observations.append(receipt)
         account_observation = None
+        account_observations = {}
         if unresolved_refs:
             # Old ambiguous saves may have no readable notebook. Check all active
             # sessions, including older versions, without altering or replaying it.
-            try:
-                account_observation = await asyncio.wait_for(asyncio.to_thread(self.donor.account_idle), 70)
-            except Exception as exc:
-                raise StoreConflict('Chưa xác minh được phiên UNKNOWN cũ hoặc trạng thái toàn account') from exc
-            owners = {ref.split('/', 1)[0] for ref in unresolved_refs}
-            if (account_observation.get('account') != self.config.kaggle_account_alias
-                    or owners != {account_observation.get('username')}
-                    or (self.config.kaggle_username and account_observation.get('username') != self.config.kaggle_username)
-                    or account_observation.get('idle') is not True
-                    or type(account_observation.get('active_session_count')) is not int
-                    or account_observation['active_session_count'] != 0
-                    or not account_observation.get('observed_at')):
-                raise StoreConflict('Account Kaggle chưa xác nhận không có phiên hoạt động; chưa mở phiên mới')
+            for account, refs in unresolved_accounts.items():
+                selected = self.accounts.require(account) if self.accounts else None
+                try:
+                    probe = self._donor(account).account_readiness if self.accounts else self._donor(account).account_idle
+                    observed = await asyncio.wait_for(asyncio.to_thread(probe), 70)
+                except Exception as exc:
+                    raise StoreConflict('Chưa xác minh được phiên UNKNOWN cũ hoặc trạng thái toàn account') from exc
+                owners = {ref.split('/', 1)[0] for ref in refs}
+                expected_username = selected['username'] if selected else self.config.kaggle_username
+                if (observed.get('account') != account or owners != {observed.get('username')}
+                        or (expected_username and observed.get('username') != expected_username)
+                        or observed.get('idle') is not True
+                        or type(observed.get('active_session_count')) is not int
+                        or observed['active_session_count'] != 0
+                        or not observed.get('observed_at')):
+                    raise StoreConflict('Account Kaggle chưa xác nhận không có phiên hoạt động; chưa mở phiên mới')
+                account_observations[account] = observed
+            if len(account_observations) == 1:
+                account_observation = next(iter(account_observations.values()))
         return {'idle': True, 'account': self.config.kaggle_account_alias,
                 'known_notebooks': observations, 'unresolved_notebooks': unresolved_refs,
-                'account_observation': account_observation, 'checked_at': datetime.now(timezone.utc).isoformat()}
+                'account_observation': account_observation, 'account_observations': account_observations,
+                'checked_at': datetime.now(timezone.utc).isoformat()}
 
-    async def start(self, project_id, run_id, accelerator=None, ttl_seconds=None, search=None):
+    async def start(self, project_id, run_id, accelerator=None, ttl_seconds=None, search=None, account=None):
         accelerator = accelerator or getattr(self.config, 'kaggle_accelerator', 'cpu')
         ttl = ttl_seconds or getattr(self.config, 'kaggle_session_seconds', 1800)
-        if accelerator not in ACCELERATORS or type(ttl) is not int or ttl < 60:
+        account = account or self.config.kaggle_account_alias
+        if accelerator not in ACCELERATORS or type(ttl) is not int or not 60 <= ttl <= 43200:
             raise ValueError('Chọn CPU, T4 x2 hoặc TPU và thời gian phiên ít nhất 60 giây')
         async with self.planner.lock:
-            if self.closed or self.planner.closed or any(not task.done() for task in self.tasks.values()):
-                raise StoreConflict('Working đang hoạt động; hoàn tất trước khi mở lượt mới')
-            if self.planner.task is not None and not self.planner.task.done():
-                raise StoreConflict('Agent đang xử lý yêu cầu khác')
-            if self.planner.worker.future is not None and not self.planner.worker.future.done():
-                raise StoreConflict('Agent worker đang bận')
+            if self.accounts:
+                self.accounts.require(account)
+            if self.closed or self.planner.closed:
+                raise StoreConflict('Backend đang dừng')
+            if await asyncio.to_thread(self.record, project_id, run_id):
+                raise StoreConflict('Working đã được yêu cầu cho Run này; kết nối lại, không gửi notebook mới')
             if self.planner.worker.closed or self.planner.worker.state.get('status') == 'unknown':
                 raise StoreConflict('Agent worker chưa xác nhận kết thúc lượt trước')
+            busy = (any(not task.done() for task in self.tasks.values())
+                    or self.planner.task is not None and not self.planner.task.done()
+                    or self.planner.worker.future is not None and not self.planner.worker.future.done())
+            pending = 0
+            for project in await asyncio.to_thread(self.store.list_projects):
+                for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
+                    if item['state'] == 'QUEUED':
+                        record = await asyncio.to_thread(self.record, project['id'], item['id'])
+                        if record and record['phase'] == 'queued':
+                            pending += 1
+            if pending >= 16:
+                raise StoreConflict('Hàng chờ đã đủ 16 run; hoàn tất/hủy một run trước khi thêm')
+            busy = busy or pending > 0
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
             mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
             # Every user-started Working action is one run. Stage budgets from
@@ -129,15 +181,17 @@ class WorkingService:
             research = approved['body'].get('research') or {}
             if mode != 'etc' and (any(research.get(name) for name in ('summary', 'report', 'plots', 'review')) or research.get('writeup', 'none') != 'none'):
                 load_prompt('search.query', workdir=self.view.root(project_id, run_id) / 'query-agent')
-            for project in await asyncio.to_thread(self.store.list_projects):
-                unstarted = await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])
-                for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
-                    if item['id'] == run_id:
-                        continue
-                    allowed = {'FAILED', 'COMPLETED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'UNKNOWN'}
-                    if item['state'] not in allowed and item['id'] not in unstarted:
-                        raise StoreConflict('Một Run khác đang hoạt động')
-            await self.check_idle()
+            if not busy:
+                for project in await asyncio.to_thread(self.store.list_projects):
+                    unstarted = await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])
+                    for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
+                        if item['id'] == run_id:
+                            continue
+                        allowed = {'FAILED', 'COMPLETED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'UNKNOWN', 'QUEUED'}
+                        if item['state'] not in allowed and item['id'] not in unstarted:
+                            raise StoreConflict('Một Run khác đang hoạt động')
+                await self.check_idle()
+                await self._verify_selected(account)
             if mode == 'etc':
                 from .outputs import prepare_output
                 await asyncio.to_thread(prepare_output, self.store, project_id, run_id, approved)
@@ -148,23 +202,133 @@ class WorkingService:
             root.mkdir(parents=True, exist_ok=True)
             workdir = root / 'working-agent'
             workdir.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(self.records.reserve, project_id, run_id, accelerator, ttl)
+            await asyncio.to_thread(self.records.reserve, project_id, run_id, accelerator, ttl, account, busy)
             key = (project_id, run_id)
+            if busy:
+                self._ensure_queue_loop()
+                return {'run_id': run_id, 'state': 'QUEUED', 'reason': 'Agent/Kaggle slot đang bận; chờ lượt.'}
             self.tasks[key] = asyncio.create_task(self._work(key, approved, accelerator, ttl))
             return {'run_id': run_id, 'state': 'STARTING'}
 
+    async def _verify_selected(self, account):
+        if not self.accounts:
+            return
+        observed = await self.account_readiness(account)
+        if observed['readiness'] != 'verified_idle':
+            reason = {'needs_login': 'Cookie đã hết hạn; cần đăng nhập lại account trong bundle.',
+                      'busy': 'Account đang có phiên Kaggle hoạt động.'}.get(observed['readiness'], 'Chưa xác minh được account Kaggle.')
+            raise StoreConflict(reason)
+
+    def _ensure_queue_loop(self):
+        if self.queue_task is None or self.queue_task.done():
+            self.queue_task = asyncio.create_task(self._queue_loop())
+
+    async def _queue_loop(self):
+        while not self.closed:
+            try:
+                async with self.planner.lock:
+                    worker = self.planner.worker
+                    if worker.closed or worker.state.get('status') == 'unknown':
+                        for project in self.store.list_projects():
+                            for item in self.store.history(project['id'])['runs']:
+                                if item['state'] == 'QUEUED':
+                                    record = self.record(project['id'], item['id'])
+                                    if record and record['phase'] == 'queued':
+                                        self.records.update(project['id'], item['id'], state='QUEUED', phase='blocked',
+                                            error='Agent worker chưa sẵn sàng hoặc chưa xác nhận lượt trước kết thúc; kiểm tra backend rồi tiếp tục hàng chờ.')
+                        return
+                    occupied = (any(not task.done() for task in self.tasks.values())
+                                or self.planner.task is not None and not self.planner.task.done()
+                                or worker.future is not None and not worker.future.done())
+                    if not occupied and not worker.closed and worker.state.get('status') != 'unknown':
+                        pending = []
+                        for project in await asyncio.to_thread(self.store.list_projects):
+                            for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
+                                if item['state'] == 'QUEUED':
+                                    record = await asyncio.to_thread(self.record, project['id'], item['id'])
+                                    if record and record['phase'] == 'queued':
+                                        pending.append((record['started_at'], project['id'], item['id'], record))
+                        if pending:
+                            _, project_id, run_id, record = min(pending)
+                            key = (project_id, run_id)
+                            try:
+                                await self.check_idle()
+                                await self._verify_selected(record.get('account') or self.config.kaggle_account_alias)
+                                approved = await asyncio.to_thread(self.store.approved_snapshot, *key)
+                                await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
+                                await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
+                                mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
+                                load_prompt('working.etc' if mode == 'etc' else 'working.agent',
+                                            workdir=self.view.root(*key) / 'working-agent')
+                                if mode != 'etc':
+                                    load_prompt('working.instructions')
+                                self.records.update(*key, state='STARTING', phase='starting')
+                                self.tasks[key] = asyncio.create_task(self._work(key, approved, record['accelerator'], record['ttl_seconds']))
+                            except (StoreConflict, ValueError, FileNotFoundError, RuntimeError, TimeoutError) as exc:
+                                self.records.update(*key, state='QUEUED', phase='blocked',
+                                                    error=str(exc) if isinstance(exc, (StoreConflict, ValueError, FileNotFoundError)) else
+                                                    f'Hàng chờ bị chặn ({type(exc).__name__}); kiểm tra account/run rồi tiếp tục thủ công.')
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.getLogger(__name__).exception('Queue scheduler stopped; queued intent remains durable')
+                for project in self.store.list_projects():
+                    for item in self.store.history(project['id'])['runs']:
+                        if item['state'] == 'QUEUED':
+                            self.records.update(project['id'], item['id'], state='QUEUED', phase='blocked',
+                                                error='Bộ điều phối hàng chờ bị gián đoạn; tiếp tục thủ công sau khi kiểm tra backend.')
+                return  # Never retry an unknown scheduler fault in a tight loop.
+            await asyncio.sleep(2)
+
+    async def resume_queued(self, project_id, run_id):
+        async with self.planner.lock:
+            record = self.record(project_id, run_id)
+            if not record or self.store.run(project_id, run_id)['state'] != 'QUEUED' or record['phase'] != 'blocked':
+                raise StoreConflict('Chỉ tiếp tục được item hàng chờ đang bị chặn')
+            self.records.update(project_id, run_id, state='QUEUED', phase='queued')
+            self._ensure_queue_loop()
+            return {'run_id': run_id, 'state': 'QUEUED'}
+
+    async def start_batch(self, project_id, items):
+        if not 2 <= len(items) <= 8 or len({item['run_id'] for item in items}) != len(items):
+            raise ValueError('Batch requires 2–8 distinct approved runs')
+        for item in items:
+            if self.accounts:
+                self.accounts.require(item['account'])
+            run = await asyncio.to_thread(self.store.run, project_id, item['run_id'])
+            if run['state'] not in {'APPROVED', 'PREFLIGHT', 'FAILED'} or await asyncio.to_thread(self.record, project_id, item['run_id']):
+                raise StoreConflict('Mọi run trong batch phải có proposal duyệt và chưa mở Working')
+            await asyncio.to_thread(self.store.approved_snapshot, project_id, item['run_id'])
+        results = []
+        for item in items:
+            try:
+                result = await self.start(project_id, item['run_id'], item['accelerator'], item['ttl_seconds'], None, item['account'])
+                results.append(result)
+            except (StoreConflict, ValueError, FileNotFoundError, RuntimeError, TimeoutError) as exc:
+                results.append({'run_id': item['run_id'], 'state': 'REJECTED',
+                                'reason': str(exc) if isinstance(exc, (StoreConflict, ValueError, FileNotFoundError)) else
+                                f'{type(exc).__name__}: không đưa vào hàng chờ; xem readiness/scope.'})
+        return {'runs': results}
+
     async def _connect(self, key, approved, accelerator, ttl):
         project_id, run_id = key
+        record = self.record(*key)
+        account = record.get('account') or self.config.kaggle_account_alias
+        username = (self.accounts.require(account)['username'] if self.accounts
+                    else self.config.kaggle_username)
+        donor = self._donor(account)
         competitions, datasets = sources(approved)
-        arguments = {'account': self.config.kaggle_account_alias, 'request_id': run_id,
+        arguments = {'account': account, 'request_id': run_id,
                      'accelerator': accelerator, 'ttl_seconds': ttl, 'wait_seconds': 60,
                      'competition_sources': competitions, 'dataset_sources': datasets}
         deadline = time.monotonic() + min(300, ttl)
         while True:
-            result = await asyncio.wait_for(asyncio.to_thread(self.donor.start, arguments), 280)
+            result = await asyncio.wait_for(asyncio.to_thread(donor.start, arguments), 280)
             if result.get('session_id') != run_id:
                 raise ValueError('Kaggle SSH session identity mismatch')
-            if self.config.kaggle_username and not result.get('notebook_ref', '').startswith(self.config.kaggle_username + '/'):
+            if result.get('account') and result['account'] != account:
+                raise ValueError('Kaggle account identity mismatch')
+            if username and not result.get('notebook_ref', '').startswith(username + '/'):
                 raise ValueError('Kaggle notebook owner mismatch')
             await asyncio.to_thread(self.records.update, project_id, run_id, descriptor=result)
             if result.get('submission_status') == 'NOT_SUBMITTED':
@@ -173,7 +337,7 @@ class WorkingService:
                 return result
             if time.monotonic() >= deadline:
                 raise TimeoutError('Kaggle chưa mở được SSH trong thời gian chờ')
-            arguments = {'account': self.config.kaggle_account_alias, 'session_id': run_id,
+            arguments = {'account': account, 'session_id': run_id,
                          'wait_seconds': 60}
 
     def _request(self, key, approved, descriptor, workdir):
@@ -186,6 +350,13 @@ class WorkingService:
         data = {'approved': agent_approved, 'remote_directory': descriptor['remote_directory'],
                 'terminal_command': f'& "{helper}" .\\terminal.py' if sys.platform == 'win32' else shlex.quote(helper) + ' ./terminal.py',
                 'instructions': [] if mode == 'etc' else load_prompt('working.instructions').split('\n\n')}
+        if mode != 'etc' and approved['body'].get('metric'):
+            data['instructions'].append(
+                'Khi công việc có vòng training/evaluation với tổng step biết trước, in từng mẫu đo thật thành một dòng stdout: '
+                'AILAB_METRIC {"step":1,"total_steps":10,"elapsed_seconds":2.5,"metrics":{"<approved metric name>":0.8}}. '
+                'Dùng đúng tên metric đã duyệt; có thể thêm training_loss. Step tăng dần, elapsed_seconds là thời gian thực, '
+                'mẫu cuối dùng step=total_steps. Không dựng số liệu hoặc ETA; nếu không có vòng đo thì bỏ qua telemetry.'
+            )
         if approved['snapshot'].get('variant'):
             data['instructions'].append(
                 'Đây là Working của một biến thể đã được duyệt. Đọc baseline/manifest.json và các file baseline có available=true được liệt kê; '
@@ -229,6 +400,8 @@ class WorkingService:
         collection_attempted = False
         commands = []
         try:
+            if self.accounts:
+                self.records.snapshot_provider(*key, self.accounts.provider_stats(self.record(*key)['account']))
             self.records.append_log(*key, 'Đang mở phiên Kaggle và kết nối SSH…\n', 'backend')
             descriptor = await self._connect(key, approved, accelerator, ttl)
             no_submit = descriptor.get('submission_status') == 'NOT_SUBMITTED'
@@ -237,7 +410,7 @@ class WorkingService:
             if key in self.stop_requests:
                 outcome = 'CANCELLED'
                 return
-            terminal = await asyncio.to_thread(self.donor.open, run_id,
+            terminal = await asyncio.to_thread(self._run_donor(key).open, run_id,
                 lambda text: self.records.append_log(*key, text))
             self.terminals[key] = terminal
             from .ssh_terminal import transfer_library_file
@@ -364,7 +537,7 @@ class WorkingService:
                 except Exception:
                     pass
             # Recovery/cancellation may need a fresh connection to stop an occupied shell.
-            await asyncio.to_thread(self.donor.call, 'stop', key[1])
+            await asyncio.to_thread(self._run_donor(key).call, 'stop', key[1])
         except Exception:
             self.records.append_log(*key, 'Chưa gửi được STOP; đang kiểm tra Kaggle. Phiên vẫn có thời hạn tự dừng.\n', 'backend')
 
@@ -373,7 +546,7 @@ class WorkingService:
         waiting = False
         while receipt is None and not self.closed:
             try:
-                observation = await asyncio.to_thread(self.donor.call, 'status', key[1])
+                observation = await asyncio.to_thread(self._run_donor(key).call, 'status', key[1])
                 if observation.get('stopped') is True:
                     receipt = observation
                     break
@@ -390,6 +563,8 @@ class WorkingService:
             return
         record = self.record(*key)
         root = self.view.root(*key)
+        if self.accounts:
+            self.records.snapshot_provider(*key, self.accounts.provider_stats(record['account']), end=True)
         approved = self.store.approved_snapshot(*key)
         project = self.store.project(key[0])
         variant = approved['snapshot'].get('variant')
@@ -458,6 +633,14 @@ class WorkingService:
         record = self.record(*key)
         if record is None:
             raise StoreConflict('Run này chưa mở Working')
+        if record['phase'] in {'queued', 'blocked'}:
+            async with self.planner.lock:
+                record = self.record(*key)
+                if record['phase'] in {'queued', 'blocked'}:
+                    receipt = {'session_id': run_id, 'notebook_ref': None, 'status': 'not_submitted',
+                               'stopped': True, 'source': 'local_queue_cancel'}
+                    self.records.finish(*key, receipt, 'CANCELLED')
+                    return {'run_id': run_id, 'state': 'CANCELLED'}
         if record['stop_confirmed']:
             return {'run_id': run_id, 'state': self.store.run(*key)['state']}
         self.stop_requests.add(key)
@@ -485,14 +668,21 @@ class WorkingService:
         for project in self.store.list_projects():
             for run in self.store.history(project['id'])['runs']:
                 record = self.record(project['id'], run['id'])
-                if record and not record['stop_confirmed']:
+                if record and not record['stop_confirmed'] and record['phase'] not in {'queued', 'blocked'}:
                     key = (project['id'], run['id'])
                     self.tasks[key] = asyncio.create_task(self._recover_stop(key))
+        self._ensure_queue_loop()
 
     def detail(self, project_id, run_id):
         detail = self.view.detail(project_id, run_id)
         record = self.record(project_id, run_id)
         detail['execution_mode'] = 'ssh' if record or not detail['identity'] else 'legacy'
+        detail['account'] = ((record.get('account') or self.config.kaggle_account_alias) if record
+                             else (detail['identity'] or {}).get('account'))
+        detail['session_id'] = record['session_id'] if record else (detail['identity'] or {}).get('session_id')
+        approved = self.store.approved_snapshot(project_id, run_id)
+        detail['protocol'] = {'split': approved['body'].get('split'), 'metric': approved['body'].get('metric'),
+                              'context_sha256': approved['context_sha256']}
         from .experiments import search_artifacts
         root = self.view.root(project_id, run_id)
         detail['artifacts'] = sorted(set(detail['artifacts']) | set(search_artifacts(root)))
@@ -516,8 +706,10 @@ class WorkingService:
                                 'stages': stages,
                                 'tree_path': 'logs/0-run/unified_tree_viz.html' if (root / 'logs/0-run/unified_tree_viz.html').is_file() else None}
         if record:
+            detail['result_metric'] = self.records.result_metric(project_id, run_id) or detail.get('result_metric')
             descriptor = record['descriptor'] or {}
             detail['working'] = {key: record[key] for key in ('phase', 'accelerator', 'ttl_seconds', 'started_at', 'agent_called', 'stop_confirmed')}
+            detail['working']['account'] = record.get('account') or self.config.kaggle_account_alias
             detail['working']['notebook_ref'] = descriptor.get('notebook_ref')
             detail['working']['summary'] = record['summary']
             detail['can_retry'] = record['stop_confirmed'] and not detail['deleted_at']
@@ -545,9 +737,17 @@ class WorkingService:
         for run in history['runs']:
             detail = self.detail(project_id, run['id'])
             run.update(execution_mode=detail['execution_mode'], working=detail.get('working'),
+                       account=detail.get('account'), session_id=detail.get('session_id'),
+                       result_metric=detail.get('result_metric'),
+                       protocol=detail['protocol'],
                        artifacts=detail['artifacts'], report_available=detail['report_path'] == 'report.md',
                        output_available=bool(detail.get('output', {}).get('summary') or detail.get('output', {}).get('files')))
         return history
+
+    def collector_stats(self, project_id, run_id):
+        record = self.record(project_id, run_id)
+        current = self.accounts.provider_stats(record['account']) if self.accounts and record else None
+        return self.records.collector_stats(project_id, run_id, current)
 
     def copy_output(self, project_id, run_id, **selection):
         from .named_paths import PATH_LOCK
@@ -573,11 +773,12 @@ class WorkingService:
                 for item in self.store.history(project['id'])['runs']:
                     if item['state'] == 'UNKNOWN':
                         unknown_ids.append(item['id'])
-                    elif item['state'] not in TERMINAL | {'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING'} and item['id'] not in unstarted:
+                    elif (item['state'] not in TERMINAL | {'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING'}
+                          and item['id'] not in unstarted and not self.store.is_working_intent(project['id'], item['id'])):
                         raise StoreConflict('Một Run khác đang hoạt động; hoàn tất trước khi tạo lượt mới')
             if unknown_ids:
                 await self.check_idle()
-            run, created = self.store.reserve_retry(project_id, parent_run_id, request_id, tuple(unknown_ids))
+            run, created = self.store.reserve_retry(project_id, parent_run_id, request_id, tuple(unknown_ids), True)
             if created:
                 approved = self.store.approved_snapshot(project_id, run['id'])
                 if snapshot_settings(approved['snapshot'])[0] == 'etc':
@@ -610,7 +811,7 @@ class WorkingService:
         kernel_ref = identity.get('kernel_ref')
         if not kernel_ref:
             raise StoreConflict('Run cũ chưa có notebook Kaggle để đối soát')
-        receipt = await asyncio.to_thread(self.donor.inspect, kernel_ref)
+        receipt = await asyncio.to_thread(self._donor(identity.get('account')).inspect, kernel_ref)
         status = str(receipt.get('status', '')).lower()
         if receipt.get('notebook_ref') != kernel_ref:
             raise StoreConflict('Kaggle trả trạng thái của notebook khác')
@@ -627,6 +828,9 @@ class WorkingService:
 
     async def close(self, timeout):
         self.closed = True
+        if self.queue_task:
+            self.queue_task.cancel()
+            await asyncio.gather(self.queue_task, return_exceptions=True)
         for key, task in list(self.tasks.items()):
             if not task.done():
                 self.stop_requests.add(key)

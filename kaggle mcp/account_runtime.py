@@ -36,10 +36,10 @@ def _probe_cookie_liveness(account):
     return status == 200 and isinstance(body, dict)
 
 
-def account_idle(account):
+def account_idle(account, recover=True):
     from cookie_client import _client_for
     _assert_pinned_sdk()
-    selected = _ensure_cookie(_account(account), headless=True)
+    selected = _ensure_cookie(_account(account), headless=True) if recover else _account(account)
     if not selected['username'] or web_session.identify_user(selected['cookie_file']) != selected['username']:
         raise RuntimeError('Cookie identity differs from selected account')
     status, data = _client_for(account).call('kernels.KernelsService/ListKernelSessions', {})
@@ -52,3 +52,14 @@ def account_idle(account):
     return {'account': selected['account'], 'username': selected['username'],
             'active_session_count': count, 'idle': count == 0 and not sessions,
             'observed_at': datetime.now(timezone.utc).isoformat()}
+
+
+def account_readiness(account):
+    """Observe readiness without opening a login window or refreshing a browser."""
+    selected = _account(account)
+    if web_session.cookie_status(selected['cookie_file'])['expired']:
+        return {'account': selected['account'], 'username': selected['username'],
+                'readiness': 'needs_login', 'idle': False, 'active_session_count': None,
+                'observed_at': datetime.now(timezone.utc).isoformat()}
+    observation = account_idle(account, recover=False)
+    return {**observation, 'readiness': 'verified_idle' if observation['idle'] else 'busy'}
