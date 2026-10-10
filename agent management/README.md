@@ -9,6 +9,10 @@ and starts no team. Creating a team or coding task never authorizes research.
 
 ## GUI setup
 
+Use **Python 3.12+**, matching the Workbench runtime documented since MVP0
+(existing storage checks use pathlib's junction API). The upstream scientist CLI's
+Python 3.11 instructions are a separate runtime guide.
+
 1. Start Workbench on loopback with a randomly generated
    `AI_SCIENTIST_AGENT_CONTROL_TOKEN` in the backend's private environment.
 2. Open **Settings → Multi-agent**, beside **Kaggle proxy**. Connect with the
