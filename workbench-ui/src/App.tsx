@@ -1,11 +1,12 @@
 import {FormEvent, useEffect, useRef, useState} from 'react';
-import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal, RunMode, ResearchPlan, modeLabel} from './api';
+import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal, Benchmark, RunMode, ResearchPlan, modeLabel} from './api';
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import SourceCards from './SourceCards';
 import ProjectDeletion from './ProjectDeletion';
+import BenchmarkFields, {emptyBenchmark} from './BenchmarkFields';
 import ModeFields from './ModeFields';
 import ResearchOptions, {emptyResearch} from './ResearchOptions';
 import {statusText} from './sourceStatus';
@@ -35,6 +36,9 @@ export default function App() {
   const [mode,setMode] = useState<RunMode>(()=>readProjectSession(projectId).mode);
   const [editingMode,setEditingMode] = useState<RunMode>('training_research');
   const [desiredOutput,setDesiredOutput] = useState('');
+  const [benchmarks,setBenchmarks]=useState<Benchmark[]>([]);
+  const [benchmarkId,setBenchmarkId]=useState('');
+  const [benchmarkDefinition,setBenchmarkDefinition]=useState(emptyBenchmark);
   const [editingIdea,setEditingIdea] = useState<Idea|null>(null);
   const [research,setResearch]=useState<ResearchPlan>(emptyResearch);
   const [runTags,setRunTags]=useState<string[]>([]);
@@ -76,7 +80,7 @@ export default function App() {
     }
     firstRestore.current=false;
     setTab(saved.tab);setRunId(saved.runId);setSelected(saved.sourceIds);setIdeaId(saved.ideaId);setSessionProject(projectId);
-    setMode(saved.mode);setDesiredOutput('');
+    setMode(saved.mode);setDesiredOutput('');setBenchmarkId('');setBenchmarkDefinition(emptyBenchmark());setBenchmarks([]);
     setBranch(null);setBranchChanges('');setResearch(emptyResearch());setRunTags([]);
     setContext(null);setEditing(null);setForm(blank);setReplacing(null);
     setIdeaText(''); setTitle(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
@@ -106,9 +110,9 @@ export default function App() {
     let cancelled = false;
     setLoading(true);
     loadProjectData(projectId)
-      .then(([r, i, h, p]) => {
+      .then(([r, i, h, p, b]) => {
         if (cancelled) return;
-        setResources(r); setIdeas(i); setHistory(h); setProposals(p);
+        setResources(r); setIdeas(i); setHistory(h); setProposals(p);setBenchmarks(b);
         setConnectionError('');
         setSelected(current=>current.filter(id=>r.some(source=>source.id===id && !source.deletion_pending)));
         setIdeaId(current => i.some(idea => idea.id === current && !idea.deleted_at) ? current : '');
@@ -134,8 +138,13 @@ export default function App() {
     const timer=window.setInterval(() => {
       if (inFlight)return;
       inFlight=true;
-      api<History>(`/projects/${projectId}/history?include_deleted=true`).then(latest => {
-        if (!cancelled)setHistory(old => JSON.stringify(old)===JSON.stringify(latest) ? old : latest);
+      Promise.all([
+        api<History>(`/projects/${projectId}/history?include_deleted=true`),
+        api<Benchmark[]>(`/projects/${projectId}/benchmarks`),
+      ]).then(([latest,catalog]) => {
+        if (cancelled)return;
+        setHistory(old => JSON.stringify(old)===JSON.stringify(latest) ? old : latest);
+        setBenchmarks(old => JSON.stringify(old)===JSON.stringify(catalog) ? old : catalog);
       }).catch(e => {if (!cancelled && connectionFailure(e))setConnectionError('Mất kết nối backend. Đang chờ kết nối lại để đọc dữ liệu đã lưu.');})
         .finally(() => {inFlight=false;});
     },2000);
@@ -184,7 +193,8 @@ export default function App() {
   const project = projects.find(p => p.id === projectId);
   const unavailable=loading || !!connectionError;
   const selectedIdea=ideas.find(idea=>idea.id===ideaId);
-  const outputMissing=selectedIdea?.mode==='etc' && !selectedIdea.desired_output.trim();
+  const outputMissing=(selectedIdea?.mode==='etc' && !selectedIdea.desired_output.trim())
+    || (selectedIdea?.mode==='training_research' && !selectedIdea.benchmark_id);
   const formMode=branch ? branch.mode : editingIdea ? editingMode : mode;
   const parentSources=selectedIdea?.variant?.baseline.parent.sources || [];
   const changedParentSources=parentSources.filter(parent=>{
@@ -217,7 +227,8 @@ export default function App() {
       created=await api<Idea>(`/projects/${projectId}/runs/${id}/variants`,'POST',{
         request_id:requestId,title:variantTitle,purpose,change_summary:changeSummary,
         mode:variantMode,desired_output:variantOutput,
-        research:variantMode==='etc' ? null : research,tags:variantMode==='etc' ? [] : runTags,
+        research:variantMode==='training_research' ? research : null,tags:variantMode==='training_research' ? runTags : [],
+        benchmark_id:variantMode==='training_research' ? benchmarkId||null : null,
       });
       const sources=created.variant?.baseline.parent.sources || [];
       setSelected(sources.map(source=>source.id).filter(sourceId=>resources.some(source=>source.id===sourceId && !source.deletion_pending)));
@@ -238,7 +249,7 @@ export default function App() {
     const parent=history.runs.find(run=>run.id===id);
     setBranch({parentId:id,title:parent?.title || 'Run '+id.slice(0,8),mode:branchMode,requestId:crypto.randomUUID().replaceAll('-','')});
     setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput('');setBranchChanges('');
-    setResearch(emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');
+    setResearch(emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');setBenchmarkId(parent?.benchmark?.id||'');
     setSelected((parent?.source_refs || []).map(source=>source.id).filter(id=>resources.some(source=>source.id===id && !source.deletion_pending)));
   }
   return <div className="app">
@@ -250,8 +261,8 @@ export default function App() {
       </select></label>
       {project && <ProjectDeletion key={project.id} project={project} busy={busy} disabled={busy || unavailable || planning || implementing} onDelete={deleteProject}/>}</div>
       {project && <div className="mode-picker"><label>Mode cho idea mới<select aria-label="Mode cho idea mới" value={mode} disabled={busy}
-        onChange={event=>setMode(event.target.value as RunMode)}><option value="training_research">Training/Research</option><option value="etc">Etc</option></select></label>
-        <small>Hai mode dùng chung Library. Idea và run đã lưu giữ mode riêng.</small></div>}
+        onChange={event=>setMode(event.target.value as RunMode)}><option value="training_research">Training/Research</option><option value="etc">Etc</option><option value="benchmark">Tạo benchmark mới</option></select></label>
+        <small>Ba loại idea dùng chung Library. Idea và run đã lưu giữ mode riêng.</small></div>}
       <form className="new-project" onSubmit={createProject}><label>Tên project mới<input value={projectName} required maxLength={120} onChange={e => setProjectName(e.target.value)}/></label>
         <button disabled={busy || unavailable || !projectName.trim()}>Tạo project</button></form>
       <nav aria-label="Workbench">{(['Library', 'Idea', 'Run'] as const).map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
@@ -308,23 +319,28 @@ export default function App() {
             void action(async () => {
             const path = `/projects/${projectId}/ideas` + (editingIdea ? `/${editingIdea.id}` : '');
             const idea = await api<Idea>(path, editingIdea ? 'PUT' : 'POST', {title,text: ideaText,mode:formMode,desired_output:desiredOutput,
-              research:formMode==='etc' ? null : research,tags:formMode==='etc' ? [] : runTags,
+              research:formMode==='training_research' ? research : null,tags:formMode==='training_research' ? runTags : [],
+              benchmark_id:formMode==='training_research' ? benchmarkId||null : null,
+              benchmark_definition:formMode==='benchmark' ? benchmarkDefinition : null,
               ...(editingIdea ? {expected_text:editingIdea.text,expected_title:editingIdea.title,expected_mode:editingIdea.mode,expected_desired_output:editingIdea.desired_output,
-                expected_research:editingIdea.research || null,expected_tags:editingIdea.tags || []} : {})});
+                expected_research:editingIdea.research || null,expected_tags:editingIdea.tags || [],
+                expected_benchmark_id:editingIdea.benchmark_id||null,expected_benchmark_definition:editingIdea.benchmark_definition||null} : {})});
             setIdeaId(idea.id); setIdeaText(''); setTitle(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea.');
             setDesiredOutput('');
             setResearch(emptyResearch());setRunTags([]);
           });
           }}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
-          <ModeFields mode={formMode} desiredOutput={desiredOutput} disabled={busy || unavailable}
+          <ModeFields mode={formMode} desiredOutput={desiredOutput} disabled={busy || unavailable} allowBenchmark={!branch}
             onMode={value=>{if(branch)setBranch({...branch,mode:value,requestId:crypto.randomUUID().replaceAll('-','')});else if(editingIdea)setEditingMode(value);else setMode(value);}} onOutput={setDesiredOutput}/>
+          <BenchmarkFields mode={formMode} benchmarks={benchmarks} benchmarkId={benchmarkId} definition={benchmarkDefinition}
+            disabled={busy || unavailable} onSelect={setBenchmarkId} onDefinition={setBenchmarkDefinition}/>
           <label>Nội dung idea<textarea rows={8} required maxLength={20000} value={ideaText} readOnly={!!editingIdea?.variant} onChange={e => setIdeaText(e.target.value)}/></label>
           {branch && <label>Thay đổi so với run cha<textarea rows={3} required maxLength={20000} value={branchChanges} onChange={e=>setBranchChanges(e.target.value)}/></label>}
-          {branch && formMode!=='etc' && <fieldset className="run-tag-options"><legend>Tag ghi nhớ</legend>
+          {branch && formMode==='training_research' && <fieldset className="run-tag-options"><legend>Tag ghi nhớ</legend>
             <div className="actions">{['research','tuning','ablation'].map(tag=><label className="check" key={tag}>
               <input type="checkbox" checked={runTags.includes(tag)} onChange={e=>setRunTags(old=>e.target.checked ? [...old,tag] : old.filter(value=>value!==tag))}/><span>{tag}</span></label>)}</div>
             <small className="muted">Chỉ để ghi nhớ; không thay đổi cách agent thực hiện.</small></fieldset>}
-          {formMode!=='etc' && <ResearchOptions value={research} onChange={setResearch} disabled={busy || unavailable}/>}
+          {formMode==='training_research' && <ResearchOptions value={research} onChange={setResearch} disabled={busy || unavailable}/>}
           <div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim() || (!!branch && !branchChanges.trim())}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>
             {(editingIdea || branch) && <button type="button" onClick={()=>{setEditingIdea(null);setBranch(null);setBranchChanges('');setIdeaText('');setTitle('');setDesiredOutput('');setResearch(emptyResearch());setRunTags([]);}}>Hủy</button>}</div></form>
           <IdeaCards key={projectId} ideas={ideas} selectedId={ideaId} busy={busy || unavailable} onSelect={selectIdea}
@@ -336,7 +352,7 @@ export default function App() {
             onRestore={async id=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${id}/restore`,'POST');setRevision(n=>n+1);setNotice('Đã khôi phục idea.');
             });}}
-            onEdit={idea=>{setBranch(null);setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);setEditingMode(idea.mode);setDesiredOutput(idea.desired_output);setResearch(idea.research || emptyResearch());setRunTags(idea.tags || []);}}
+            onEdit={idea=>{setBranch(null);setEditingIdea(idea);setIdeaText(idea.text);setTitle(idea.title);setEditingMode(idea.mode);setDesiredOutput(idea.desired_output);setBenchmarkId(idea.benchmark_id||'');setBenchmarkDefinition(idea.benchmark_definition||emptyBenchmark());setResearch(idea.research || emptyResearch());setRunTags(idea.tags || []);}}
             onRename={async (idea,newTitle)=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${idea.id}/title`,'PATCH',{title:newTitle,expected_title:idea.title});
               setRevision(n=>n+1);setNotice('Đã lưu tiêu đề idea.');
@@ -356,7 +372,7 @@ export default function App() {
             {resources.filter(resource=>!resource.deletion_pending).map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);setReviewedVariantSources('');}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
             <button disabled={busy || unavailable || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
             {selectedIdea && <p className="muted">Idea đang chọn: {modeLabel(selectedIdea.mode,selectedIdea.mode_legacy)}.</p>}
-            {outputMissing && <p role="status" className="alert">Etc cần đầu ra mong muốn. Bấm Sửa idea để nhập trước khi lập proposal.</p>}
+            {outputMissing && <p role="status" className="alert">{selectedIdea?.mode==='training_research' ? 'Training/Research cần chọn benchmark đã hoàn tất.' : 'Etc cần đầu ra mong muốn.'} Bấm Sửa idea để nhập trước khi lập proposal.</p>}
             <button className="primary" disabled={busy || unavailable || planning || outputMissing || variantSourceReviewRequired || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
               await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
             })}>Lập proposal bằng Codex</button>

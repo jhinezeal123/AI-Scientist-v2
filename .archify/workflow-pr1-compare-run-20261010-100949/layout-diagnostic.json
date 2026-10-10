@@ -1,0 +1,713 @@
+{
+  "contract": "readable-v2",
+  "viewBox": [
+    1262,
+    1496
+  ],
+  "requiredViewBox": [
+    1262,
+    1496
+  ],
+  "columns": [
+    138,
+    374.8,
+    650.4000000000001,
+    936.0000000000001,
+    1056,
+    1176
+  ],
+  "nodes": [
+    {
+      "id": "selection",
+      "lane": "selection_lane",
+      "col": 0,
+      "x": 48,
+      "y": 86,
+      "width": 180,
+      "height": 76
+    },
+    {
+      "id": "compare_api",
+      "lane": "request",
+      "col": 0,
+      "x": 48,
+      "y": 220,
+      "width": 180,
+      "height": 76
+    },
+    {
+      "id": "saved_rows",
+      "lane": "request",
+      "col": 1,
+      "x": 274.8,
+      "y": 220,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "protocol_check",
+      "lane": "protocol",
+      "col": 1,
+      "x": 274.8,
+      "y": 354,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "budget_check",
+      "lane": "protocol",
+      "col": 2,
+      "x": 550.4000000000001,
+      "y": 354,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "optional_tracking",
+      "lane": "source",
+      "col": 2,
+      "x": 550.4000000000001,
+      "y": 488,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "sync_wrapper",
+      "lane": "source",
+      "col": 3,
+      "x": 824.0000000000001,
+      "y": 488,
+      "width": 224,
+      "height": 76
+    },
+    {
+      "id": "mapped_run",
+      "lane": "mapping",
+      "col": 3,
+      "x": 824.0000000000001,
+      "y": 622,
+      "width": 224,
+      "height": 76
+    },
+    {
+      "id": "metric_delta",
+      "lane": "writing",
+      "col": 2,
+      "x": 550.4000000000001,
+      "y": 756,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "write_batch",
+      "lane": "writing",
+      "col": 3,
+      "x": 824.0000000000001,
+      "y": 756,
+      "width": 224,
+      "height": 76
+    },
+    {
+      "id": "read_verify",
+      "lane": "reading",
+      "col": 3,
+      "x": 824.0000000000001,
+      "y": 890,
+      "width": 224,
+      "height": 76
+    },
+    {
+      "id": "local_rows",
+      "lane": "resolution",
+      "col": 0,
+      "x": 48,
+      "y": 1024,
+      "width": 180,
+      "height": 76
+    },
+    {
+      "id": "tracking_fallback",
+      "lane": "resolution",
+      "col": 1,
+      "x": 274.8,
+      "y": 1024,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "apply_rows",
+      "lane": "resolution",
+      "col": 3,
+      "x": 824.0000000000001,
+      "y": 1024,
+      "width": 224,
+      "height": 76
+    },
+    {
+      "id": "no_ranking",
+      "lane": "ranking",
+      "col": 1,
+      "x": 274.8,
+      "y": 1158,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "rank_gate",
+      "lane": "ranking",
+      "col": 2,
+      "x": 540.4000000000001,
+      "y": 1158,
+      "width": 220,
+      "height": 76
+    },
+    {
+      "id": "sort_results",
+      "lane": "ranking",
+      "col": 3,
+      "x": 836.0000000000001,
+      "y": 1158,
+      "width": 200,
+      "height": 76
+    },
+    {
+      "id": "api_result",
+      "lane": "response",
+      "col": 2,
+      "x": 546.4000000000001,
+      "y": 1292,
+      "width": 208,
+      "height": 76
+    },
+    {
+      "id": "render_comparison",
+      "lane": "response",
+      "col": 3,
+      "x": 824.0000000000001,
+      "y": 1292,
+      "width": 224,
+      "height": 76
+    }
+  ],
+  "edges": [
+    {
+      "id": "all_synced",
+      "from": "read_verify",
+      "to": "apply_rows",
+      "points": [
+        [
+          936.0000000000001,
+          966
+        ],
+        [
+          936.0000000000001,
+          1024
+        ]
+      ]
+    },
+    {
+      "id": "check_budget",
+      "from": "protocol_check",
+      "to": "budget_check",
+      "points": [
+        [
+          474.8,
+          392
+        ],
+        [
+          550.4000000000001,
+          392
+        ]
+      ]
+    },
+    {
+      "id": "check_protocol",
+      "from": "saved_rows",
+      "to": "protocol_check",
+      "points": [
+        [
+          374.8,
+          296
+        ],
+        [
+          374.8,
+          354
+        ]
+      ]
+    },
+    {
+      "id": "decide_tracking",
+      "from": "budget_check",
+      "to": "optional_tracking",
+      "points": [
+        [
+          650.4000000000001,
+          430
+        ],
+        [
+          650.4000000000001,
+          488
+        ]
+      ]
+    },
+    {
+      "id": "eligible_rank",
+      "from": "rank_gate",
+      "to": "sort_results",
+      "points": [
+        [
+          760.4000000000001,
+          1196
+        ],
+        [
+          836.0000000000001,
+          1196
+        ]
+      ]
+    },
+    {
+      "id": "fallback_ranking_gate",
+      "from": "tracking_fallback",
+      "to": "rank_gate",
+      "points": [
+        [
+          474.8,
+          1069
+        ],
+        [
+          643.4000000000001,
+          1069
+        ],
+        [
+          643.4000000000001,
+          1158
+        ]
+      ]
+    },
+    {
+      "id": "ineligible_rank",
+      "from": "rank_gate",
+      "to": "no_ranking",
+      "points": [
+        [
+          540.4000000000001,
+          1196
+        ],
+        [
+          474.8,
+          1196
+        ]
+      ]
+    },
+    {
+      "id": "local_ranking_gate",
+      "from": "local_rows",
+      "to": "rank_gate",
+      "points": [
+        [
+          48,
+          1069
+        ],
+        [
+          32,
+          1069
+        ],
+        [
+          32,
+          1254
+        ],
+        [
+          650.4000000000001,
+          1254
+        ],
+        [
+          650.4000000000001,
+          1234
+        ]
+      ]
+    },
+    {
+      "id": "mlflow_ranking_gate",
+      "from": "apply_rows",
+      "to": "rank_gate",
+      "points": [
+        [
+          824.0000000000001,
+          1062
+        ],
+        [
+          657.4000000000001,
+          1062
+        ],
+        [
+          657.4000000000001,
+          1158
+        ]
+      ]
+    },
+    {
+      "id": "prepare_delta",
+      "from": "mapped_run",
+      "to": "metric_delta",
+      "points": [
+        [
+          824.0000000000001,
+          660
+        ],
+        [
+          650.4000000000001,
+          660
+        ],
+        [
+          650.4000000000001,
+          756
+        ]
+      ]
+    },
+    {
+      "id": "ranked_response",
+      "from": "sort_results",
+      "to": "api_result",
+      "points": [
+        [
+          836.0000000000001,
+          1208
+        ],
+        [
+          795.2,
+          1208
+        ],
+        [
+          795.2,
+          1323
+        ],
+        [
+          754.4000000000001,
+          1323
+        ]
+      ]
+    },
+    {
+      "id": "read_approved",
+      "from": "compare_api",
+      "to": "saved_rows",
+      "points": [
+        [
+          228,
+          258
+        ],
+        [
+          274.8,
+          258
+        ]
+      ]
+    },
+    {
+      "id": "resolve_identity",
+      "from": "sync_wrapper",
+      "to": "mapped_run",
+      "points": [
+        [
+          936.0000000000001,
+          564
+        ],
+        [
+          936.0000000000001,
+          622
+        ]
+      ]
+    },
+    {
+      "id": "send_request",
+      "from": "selection",
+      "to": "compare_api",
+      "points": [
+        [
+          48,
+          124
+        ],
+        [
+          32,
+          124
+        ],
+        [
+          32,
+          258
+        ],
+        [
+          48,
+          258
+        ]
+      ]
+    },
+    {
+      "id": "show_comparison",
+      "from": "api_result",
+      "to": "render_comparison",
+      "points": [
+        [
+          650.4000000000001,
+          1368
+        ],
+        [
+          650.4000000000001,
+          1384
+        ],
+        [
+          936.0000000000001,
+          1384
+        ],
+        [
+          936.0000000000001,
+          1368
+        ]
+      ]
+    },
+    {
+      "id": "sync_exception",
+      "from": "sync_wrapper",
+      "to": "tracking_fallback",
+      "points": [
+        [
+          1048,
+          526
+        ],
+        [
+          1246,
+          526
+        ],
+        [
+          1246,
+          1008
+        ],
+        [
+          374.8,
+          1008
+        ],
+        [
+          374.8,
+          1024
+        ]
+      ]
+    },
+    {
+      "id": "tracking_disabled",
+      "from": "optional_tracking",
+      "to": "local_rows",
+      "points": [
+        [
+          550.4000000000001,
+          526
+        ],
+        [
+          20,
+          526
+        ],
+        [
+          20,
+          1055
+        ],
+        [
+          48,
+          1055
+        ]
+      ]
+    },
+    {
+      "id": "tracking_enabled",
+      "from": "optional_tracking",
+      "to": "sync_wrapper",
+      "points": [
+        [
+          750.4000000000001,
+          526
+        ],
+        [
+          824.0000000000001,
+          526
+        ]
+      ]
+    },
+    {
+      "id": "unranked_response",
+      "from": "no_ranking",
+      "to": "api_result",
+      "points": [
+        [
+          474.8,
+          1208
+        ],
+        [
+          490.8,
+          1208
+        ],
+        [
+          490.8,
+          1248
+        ],
+        [
+          650.4000000000001,
+          1248
+        ],
+        [
+          650.4000000000001,
+          1292
+        ]
+      ]
+    },
+    {
+      "id": "verify_persistence",
+      "from": "write_batch",
+      "to": "read_verify",
+      "points": [
+        [
+          936.0000000000001,
+          832
+        ],
+        [
+          936.0000000000001,
+          890
+        ]
+      ]
+    },
+    {
+      "id": "write_fresh_data",
+      "from": "metric_delta",
+      "to": "write_batch",
+      "points": [
+        [
+          750.4000000000001,
+          794
+        ],
+        [
+          824.0000000000001,
+          794
+        ]
+      ]
+    }
+  ],
+  "labels": [
+    {
+      "edge": "all_synced",
+      "label": "Tất cả thành công",
+      "x": 936.0000000000001,
+      "y": 995,
+      "width": 91.6,
+      "height": 14
+    },
+    {
+      "edge": "check_budget",
+      "label": "Vẫn tiếp tục",
+      "x": 512.6,
+      "y": 382,
+      "width": 67.6,
+      "height": 14
+    },
+    {
+      "edge": "eligible_rank",
+      "label": "Đủ điều kiện",
+      "x": 798.2,
+      "y": 1186,
+      "width": 67.6,
+      "height": 14
+    },
+    {
+      "edge": "fallback_ranking_gate",
+      "label": "Nguồn local",
+      "x": 559.1,
+      "y": 1059,
+      "width": 62.8,
+      "height": 14
+    },
+    {
+      "edge": "ineligible_rank",
+      "label": "Không đủ",
+      "x": 507.6,
+      "y": 1186,
+      "width": 48.4,
+      "height": 14
+    },
+    {
+      "edge": "local_ranking_gate",
+      "label": "Nguồn local",
+      "x": 341.20000000000005,
+      "y": 1244,
+      "width": 62.8,
+      "height": 14
+    },
+    {
+      "edge": "mlflow_ranking_gate",
+      "label": "Nguồn MLflow",
+      "x": 740.7,
+      "y": 1052,
+      "width": 67.6,
+      "height": 14
+    },
+    {
+      "edge": "read_approved",
+      "label": "Hợp lệ",
+      "x": 251.4,
+      "y": 248,
+      "width": 38.8,
+      "height": 14
+    },
+    {
+      "edge": "sync_exception",
+      "label": "Có exception",
+      "x": 810.4,
+      "y": 998,
+      "width": 67.6,
+      "height": 14
+    },
+    {
+      "edge": "tracking_disabled",
+      "label": "Không có URI",
+      "x": 285.20000000000005,
+      "y": 516,
+      "width": 67.6,
+      "height": 14
+    },
+    {
+      "edge": "tracking_enabled",
+      "label": "Có URI",
+      "x": 787.2,
+      "y": 516,
+      "width": 38.8,
+      "height": 14
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "composition/proper-crossing",
+      "severity": "warning",
+      "message": "[composition/proper-crossing] standard workflow edges[0] id \"all_synced\" \"read_verify\" -> \"apply_rows\" crosses edges[15] id \"sync_exception\" \"sync_wrapper\" -> \"tracking_fallback\" at [936, 1008] (segments 0 and 2) — adjust route/via, bias, or channel coordinates so the edges use separate lane corridors.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 0,
+        "id": "all_synced",
+        "from": "read_verify",
+        "to": "apply_rows"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 15,
+          "id": "sync_exception",
+          "from": "sync_wrapper",
+          "to": "tracking_fallback"
+        },
+        "point": [
+          935.9999999999999,
+          1007.9999999999998
+        ],
+        "segmentIndex": 0,
+        "otherSegmentIndex": 2
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so the edges use separate lane corridors"
+      ]
+    }
+  ]
+}

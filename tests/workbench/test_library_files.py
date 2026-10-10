@@ -93,8 +93,8 @@ def test_delete_cannot_hide_unresolved_session_and_api_is_project_scoped(tmp_pat
         records.finish(project, run_id, {'stopped':True,'session_id':run_id}, 'FAILED')
         assert client.delete(path).status_code == 200
         assert client.get(f'/api/projects/{project}/history').json()['runs'] == []
-        assert client.post(path+'/restore').status_code == 200
-        assert len(client.get(f'/api/projects/{project}/history').json()['runs']) == 1
+        assert client.post(path+'/restore').status_code == 404
+        assert client.get(f'/api/projects/{project}/history').json()['runs'] == []
         source = store.resources(project)[0]
         url = f"/api/projects/{project}/library/{source['id']}/versions/{source['version']}"
         response = client.get(url)

@@ -1,11 +1,12 @@
 import {RunMode} from './api';
 
-export default function ModeFields({mode,desiredOutput,disabled,onMode,onOutput}:{
+export default function ModeFields({mode,desiredOutput,disabled,onMode,onOutput,allowBenchmark=true}:{
   mode:RunMode;desiredOutput:string;disabled:boolean;onMode:(mode:RunMode)=>void;onOutput:(value:string)=>void;
+  allowBenchmark?:boolean;
 }) {
   return <>
     <label>Mode của idea<select value={mode} disabled={disabled} onChange={event=>onMode(event.target.value as RunMode)}>
-      <option value="training_research">Training/Research</option><option value="etc">Etc</option>
+      <option value="training_research">Training/Research</option><option value="etc">Etc</option>{allowBenchmark && <option value="benchmark">Tạo benchmark mới</option>}
     </select></label>
     {mode==='etc' && <>
       <label>Đầu ra mong muốn<textarea rows={4} maxLength={20000} value={desiredOutput} disabled={disabled}

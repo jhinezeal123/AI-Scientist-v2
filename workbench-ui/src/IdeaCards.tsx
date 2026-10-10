@@ -52,6 +52,8 @@ export default function IdeaCards({ideas,selectedId,busy,onSelect,onEdit,onRenam
       <TitleEditor key={`${selected.id}:${selected.title}`} idea={selected} busy={busy} onRename={onRename}/>
       <p className="source-meta">{labels[selected.state] || selected.state} · {new Date(selected.created_at).toLocaleString('vi-VN')}</p>
       <p className="mode-tag" data-mode={selected.mode}>{modeLabel(selected.mode,selected.mode_legacy)}</p>
+      {selected.benchmark_id && <p className="muted">Benchmark: {selected.benchmark_id.slice(0,8)}</p>}
+      {selected.benchmark_definition && <div className="context"><h3>Định nghĩa benchmark</h3><p>{selected.benchmark_definition.metric.name} · {selected.benchmark_definition.metric.direction}</p><pre>{selected.benchmark_definition.metric.definition}</pre><h4>Test</h4><pre>{selected.benchmark_definition.test_split}</pre><h4>Train (tùy chọn)</h4><pre>{selected.benchmark_definition.train_split||'Không có tập train'}</pre><p>Dataset sẽ được tạo public.</p></div>}
       {selected.mode==='etc' && <><h3>Đầu ra mong muốn</h3><pre>{selected.desired_output || 'Chưa nhập'}</pre></>}
       {selected.variant && <p className="muted">Biến thể từ Run {selected.variant.parent_run_id.slice(0,8)} · {selected.variant.purpose}</p>}
       <pre>{selected.text}</pre><code className="source-id">{selected.id}</code>

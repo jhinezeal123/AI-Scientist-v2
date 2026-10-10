@@ -120,12 +120,12 @@ class WorkingStore:
             mode, _ = snapshot_settings(snapshot)
             research = json.loads(approved['body_json']).get('research') or {}
             report_requested = research.get('report', snapshot['idea'].get('run_model') != 'single')
-            if mode == 'etc' and report_path is not None:
+            if mode in {'etc', 'benchmark'} and report_path is not None:
                 raise StoreConflict('Etc saves Output instead of a research report')
             if outcome == 'COMPLETED' and (not record['summary_json'] or not record['manifest_json']
-                    or (mode != 'etc' and report_requested and report_path != 'report.md')):
+                    or (mode == 'training_research' and report_requested and report_path != 'report.md')):
                 raise StoreConflict('Working outputs or selected report are not durable')
-            if outcome == 'COMPLETED' and mode == 'etc' and json.loads(record['manifest_json']).get('complete') is not True:
+            if outcome == 'COMPLETED' and mode in {'etc', 'benchmark'} and json.loads(record['manifest_json']).get('complete') is not True:
                 raise StoreConflict('Etc output collection is incomplete')
             if outcome == 'COMPLETED' and json.loads(record['summary_json']).get('succeeded') is not True:
                 raise StoreConflict('The agent did not report successful work')

@@ -241,5 +241,7 @@ class LibraryFiles:
             target.write_bytes(data)
 
     def agent_snapshot(self, snapshot):
-        return {**snapshot, 'idea': {key: value for key, value in snapshot['idea'].items() if key != 'tags'},
-                'resources': [self.reference(source) for source in snapshot['resources']]}
+        result = {**snapshot, 'resources': [self.reference(source) for source in snapshot['resources']]}
+        if 'idea' in snapshot:
+            result['idea'] = {key: value for key, value in snapshot['idea'].items() if key != 'tags'}
+        return result

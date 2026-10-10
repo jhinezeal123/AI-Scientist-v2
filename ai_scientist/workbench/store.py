@@ -218,7 +218,11 @@ class ProjectStore:
             connection.execute('ALTER TABLE ideas ADD COLUMN research_json TEXT')
         if 'tags_json' not in columns:
             connection.execute("ALTER TABLE ideas ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'")
-        connection.execute('UPDATE project_meta SET schema_version=9 WHERE schema_version<9')
+        if 'benchmark_id' not in columns:
+            connection.execute('ALTER TABLE ideas ADD COLUMN benchmark_id TEXT')
+        if 'benchmark_definition_json' not in columns:
+            connection.execute('ALTER TABLE ideas ADD COLUMN benchmark_definition_json TEXT')
+        connection.execute('UPDATE project_meta SET schema_version=10 WHERE schema_version<10')
 
     def library(self, project_id):
         return LibraryFiles(self.directory(project_id), lambda resource, version:self.ingestion(project_id, resource, version),
@@ -468,6 +472,8 @@ class ProjectStore:
             for row in connection.execute("SELECT * FROM ideas" + ('' if include_deleted else ' WHERE deleted_at IS NULL') + " ORDER BY rowid DESC"):
                 item = dict(row)
                 item["conversation"] = json.loads(item.pop("conversation_json"))
+                item['benchmark_definition'] = json.loads(item.pop('benchmark_definition_json')) if item.get('benchmark_definition_json') else None
+                item.pop('benchmark_definition_json', None)
                 item['mode_legacy'] = item['mode'] is None
                 item['mode'], item['desired_output'] = request_settings(item['mode'], item['desired_output'])
                 item['research'] = json.loads(item.pop('research_json')) if item['research_json'] else None
@@ -482,7 +488,7 @@ class ProjectStore:
                 result.append(item)
             return result
 
-    def save_idea(self, project_id, text, title=None, mode='training_research', desired_output='', research=None, tags=None):
+    def save_idea(self, project_id, text, title=None, mode='training_research', desired_output='', research=None, tags=None, benchmark_id=None, benchmark_definition=None):
         if not text.strip():
             raise ValueError("Idea must contain text")
         idea_id = uuid.uuid4().hex
@@ -490,9 +496,13 @@ class ProjectStore:
         mode, desired_output = request_settings(mode, desired_output)
         from .run_graph import run_settings
         research, tags = run_settings(mode, research, tags)
+        from .benchmarks import validate_selection
+        benchmark_id, benchmark_definition = validate_selection(self, project_id, mode, benchmark_id, benchmark_definition)
         with self.connection(project_id) as connection:
             connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title,mode,desired_output) VALUES(?,?,?,'DRAFT',NULL,?,?,?,?)",
                                (idea_id, text, "[]", datetime.now(timezone.utc).isoformat(), title, mode, desired_output))
+            connection.execute('UPDATE ideas SET benchmark_id=?,benchmark_definition_json=? WHERE id=?',
+                               (benchmark_id, canonical(benchmark_definition) if benchmark_definition else None, idea_id))
             connection.execute('UPDATE ideas SET research_json=?,tags_json=? WHERE id=?',
                                (canonical(research) if research is not None else None, canonical(tags), idea_id))
         return next(item for item in self.ideas(project_id) if item["id"] == idea_id)
@@ -519,7 +529,7 @@ class ProjectStore:
         return dict(row)
 
     def create_variant_idea(self, project_id, parent_run_id, request_id, title, purpose, change_summary,
-                            captured_baseline, baseline_texts, mode=None, desired_output=None, research=None, tags=None):
+                            captured_baseline, baseline_texts, mode=None, desired_output=None, research=None, tags=None, benchmark_id=None):
         """Create one DRAFT variant idea and pin its bounded baseline in the project database."""
         title = idea_title(title)
         purpose, change_summary = purpose.strip(), change_summary.strip()
@@ -529,6 +539,8 @@ class ProjectStore:
             raise ValueError('Invalid variant request ID')
         request = {'parent_run_id': parent_run_id, 'title': title,
                    'purpose': purpose, 'change_summary': change_summary}
+        if benchmark_id is not None:
+            request['benchmark_id'] = benchmark_id
         # Preserve idempotency of requests created before mode fields existed.
         if mode is not None or desired_output is not None:
             request.update(mode=mode, desired_output=desired_output)
@@ -602,6 +614,8 @@ class ProjectStore:
             idea_text = f'Mục đích mới: {purpose}\n\nThay đổi so với run gốc: {change_summary}'
             connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title,mode,desired_output) VALUES(?,?,?,'DRAFT',NULL,?,?,?,?)",
                                (idea_id, idea_text, '[]', created_at, title, mode, desired_output))
+            connection.execute('UPDATE ideas SET benchmark_id=? WHERE id=?',
+                               ((benchmark_id or parent_snapshot['idea'].get('benchmark_id')) if mode == 'training_research' else None, idea_id))
             connection.execute('UPDATE ideas SET research_json=?,tags_json=? WHERE id=?',
                                (canonical(research) if research is not None else None, canonical(tags), idea_id))
             connection.execute('INSERT INTO variant_ideas VALUES(?,?,?,?,?,?,?,?,?,?)',
@@ -653,7 +667,7 @@ class ProjectStore:
         if len(resource_ids) != len(set(resource_ids)):
             raise ValueError("Selected source IDs must be distinct")
         with self.connection(project_id) as connection:
-            idea = connection.execute("SELECT id,text,conversation_json,mode,desired_output,research_json,tags_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
+            idea = connection.execute("SELECT id,text,conversation_json,mode,desired_output,research_json,tags_json,benchmark_id,benchmark_definition_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if idea is None:
                 raise KeyError("Idea not found in this project")
             mode, desired_output = request_settings(idea['mode'], idea['desired_output'])
@@ -669,6 +683,11 @@ class ProjectStore:
                         "research": json.loads(idea['research_json']) if idea['research_json'] else None,
                         "conversation": json.loads(idea["conversation_json"])},
                        "resources": sorted(resources, key=lambda item: item["id"])}
+            context['idea']['benchmark_id'] = idea['benchmark_id']
+            context['idea']['benchmark_definition'] = json.loads(idea['benchmark_definition_json']) if idea['benchmark_definition_json'] else None
+            if idea['benchmark_id']:
+                from .benchmarks import BenchmarkCatalog
+                context['idea']['benchmark'] = BenchmarkCatalog(self).require(project_id, idea['benchmark_id'])
             variant = connection.execute('SELECT variant_json FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone()
             if variant:
                 context['variant'] = json.loads(variant['variant_json'])
@@ -706,13 +725,16 @@ class ProjectStore:
 
     @staticmethod
     def _check_context(connection, snapshot):
-        idea = connection.execute("SELECT text,conversation_json,mode,desired_output,research_json,tags_json FROM ideas WHERE id=? AND deleted_at IS NULL", (snapshot["idea"]["id"],)).fetchone()
+        idea = connection.execute("SELECT text,conversation_json,mode,desired_output,research_json,tags_json,benchmark_id,benchmark_definition_json FROM ideas WHERE id=? AND deleted_at IS NULL", (snapshot["idea"]["id"],)).fetchone()
         # Assistant proposal messages do not change the human request context.
         human = lambda messages: [message for message in messages if message.get("role") == "user"]
         if idea is None or idea["text"] != snapshot["idea"]["text"] or human(json.loads(idea["conversation_json"])) != human(snapshot["idea"]["conversation"]):
             raise StoreConflict("Idea or answers changed; create a new proposal")
         if request_settings(idea['mode'], idea['desired_output']) != snapshot_settings(snapshot):
             raise StoreConflict('Mode hoặc đầu ra đã đổi; lập proposal mới trước khi duyệt')
+        if (snapshot['idea'].get('benchmark_id') != idea['benchmark_id']
+                or snapshot['idea'].get('benchmark_definition') != (json.loads(idea['benchmark_definition_json']) if idea['benchmark_definition_json'] else None)):
+            raise StoreConflict('Benchmark đã đổi; lập proposal mới trước khi duyệt')
         if snapshot['idea'].get('run_model') == 'single':
             if (snapshot['idea'].get('research') != (json.loads(idea['research_json']) if idea['research_json'] else None)
                     or snapshot['idea'].get('tags', []) != json.loads(idea['tags_json'])):
@@ -778,13 +800,14 @@ class ProjectStore:
 
     def update_idea(self, project_id, idea_id, text, expected_text, title=None, expected_title=None,
                     mode=None, desired_output=None, expected_mode=None, expected_desired_output=None,
-                    research=None, tags=None, expected_research=None, expected_tags=None):
+                    research=None, tags=None, expected_research=None, expected_tags=None,
+                    benchmark_id=None, benchmark_definition=None, expected_benchmark_id=None, expected_benchmark_definition=None):
         if not text.strip():
             raise ValueError("Idea must contain text")
         title = idea_title(title) if title is not None else None
         with self.connection(project_id) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT text,state,title,mode,desired_output,research_json,tags_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
+            row = connection.execute("SELECT text,state,title,mode,desired_output,research_json,tags_json,benchmark_id,benchmark_definition_json FROM ideas WHERE id=? AND deleted_at IS NULL", (idea_id,)).fetchone()
             if row is None:
                 raise KeyError("Idea not found in this project")
             if text != row['text'] and connection.execute('SELECT 1 FROM variant_ideas WHERE idea_id=?', (idea_id,)).fetchone():
@@ -796,6 +819,11 @@ class ProjectStore:
             old_settings = request_settings(row['mode'], row['desired_output'])
             new_settings = request_settings(mode if mode is not None else old_settings[0],
                                             desired_output if desired_output is not None else old_settings[1])
+            old_definition = json.loads(row['benchmark_definition_json']) if row['benchmark_definition_json'] else None
+            from .benchmarks import validate_selection
+            new_benchmark_id, new_definition = validate_selection(self, project_id, new_settings[0], benchmark_id, benchmark_definition)
+            if (row['benchmark_id'] != expected_benchmark_id or old_definition != expected_benchmark_definition):
+                raise StoreConflict('Benchmark đã thay đổi; tải lại idea trước khi lưu')
             old_research = json.loads(row['research_json']) if row['research_json'] else None
             old_tags = json.loads(row['tags_json'])
             from .run_graph import run_settings
@@ -808,11 +836,14 @@ class ProjectStore:
                 if expected_mode is None or expected_desired_output is None or old_settings != request_settings(expected_mode, expected_desired_output):
                     raise StoreConflict('Mode hoặc đầu ra đã thay đổi; tải lại idea trước khi lưu')
             if (title is None or text != row['text'] or new_settings != old_settings
-                    or new_research != old_research or new_tags != old_tags):
+                    or new_research != old_research or new_tags != old_tags
+                    or new_benchmark_id != row['benchmark_id'] or new_definition != old_definition):
                 connection.execute("UPDATE ideas SET text=?,mode=?,desired_output=?,conversation_json='[]',state='DRAFT',error=NULL WHERE id=?",
                                    (text, *new_settings, idea_id))
                 connection.execute('UPDATE ideas SET research_json=?,tags_json=? WHERE id=?',
                                    (canonical(new_research) if new_research is not None else None, canonical(new_tags), idea_id))
+                connection.execute('UPDATE ideas SET benchmark_id=?,benchmark_definition_json=? WHERE id=?',
+                                   (new_benchmark_id, canonical(new_definition) if new_definition else None, idea_id))
                 connection.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (idea_id,))
             if title is not None:
                 connection.execute('UPDATE ideas SET title=? WHERE id=?', (title, idea_id))
@@ -872,6 +903,10 @@ class ProjectStore:
             self.library(project_id).agent_snapshot(json.loads(proposal['context_snapshot_json']))
             body = WorkingProposal.model_validate_json(proposal["body_json"])
             snapshot = json.loads(proposal["context_snapshot_json"])
+            benchmark = snapshot['idea'].get('benchmark')
+            definition = benchmark['definition'] if benchmark else snapshot['idea'].get('benchmark_definition')
+            if definition and (body.metric != definition['metric'] or body.split != {'test': definition['test_split'], 'train': definition['train_split']}):
+                raise StoreConflict('Proposal metric/split phải khớp benchmark đã chọn.')
             sources = {source["id"]: source for source in snapshot["resources"]}
             if any(ref not in sources for ref in body.data_refs):
                 raise StoreConflict("Proposal cites unselected source IDs")
@@ -908,6 +943,11 @@ class ProjectStore:
 
     @staticmethod
     def _can_delete_run(connection, run, *, require_leaf=True):
+        if require_leaf and connection.execute("SELECT 1 FROM ideas WHERE benchmark_id=? AND deleted_at IS NULL", (run['id'],)).fetchone():
+            return False
+        if require_leaf and connection.execute("SELECT 1 FROM proposals p JOIN runs r ON r.proposal_id=p.id "
+                              "WHERE json_extract(p.context_snapshot_json,'$.idea.benchmark_id')=? AND r.deleted_at IS NULL", (run['id'],)).fetchone():
+            return False
         if require_leaf and connection.execute('SELECT 1 FROM run_retries WHERE parent_run_id=?', (run['id'],)).fetchone():
             return False
         if require_leaf and connection.execute('SELECT 1 FROM variant_ideas v JOIN proposals p ON p.idea_id=v.idea_id '
@@ -972,7 +1012,7 @@ class ProjectStore:
             if row is None:
                 raise KeyError('Run not found in this project')
             if not self._can_delete_run(connection, row):
-                raise StoreConflict('Chỉ xóa node lá đã dừng, không có run con hoặc idea con đang chờ')
+                raise StoreConflict('Chỉ xóa node lá đã dừng, không có run con, idea con đang chờ hoặc run/idea còn dùng benchmark này')
             root = filesystem_path(self.run_root(project_id, run_id, self.workspace))
             resolved = root.resolve()
             workspace = filesystem_path(self.workspace).resolve()
@@ -994,7 +1034,7 @@ class ProjectStore:
             except OSError as exc:
                 raise StoreConflict('Chưa xóa hết file run. Đóng file đang mở rồi thử xóa lại.') from exc
             for table in ('logs', 'implementation_attempts', 'run_retries', 'working_telemetry',
-                          'working_collector_stats', 'working_runs', 'monitor_state'):
+                          'working_collector_stats', 'working_runs', 'monitor_state', 'benchmarks'):
                 if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     connection.execute(f'DELETE FROM {table} WHERE run_id=?', (run_id,))
             connection.execute('DELETE FROM variant_ideas WHERE parent_run_id=?', (run_id,))

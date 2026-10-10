@@ -152,6 +152,36 @@ def pick_token(pool=None):
         return None
     return min(avail, key=lambda tk: tk[2])  # token dùng ít nhất
 
+
+_token_lock = threading.Lock()
+_token_signature = None
+
+
+def refresh_tokens():
+    """Pick up account additions/removals and token rotation without restarting."""
+    global tokens, token_errors, _token_signature
+    with _token_lock:
+        paths = list(account_store.token_files())
+        signature = []
+        for name, path in paths:
+            try:
+                info = path.stat()
+                signature.append((name, info.st_mtime_ns, info.st_size))
+            except OSError:
+                signature.append((name, None, None))
+        if signature == _token_signature:
+            return
+        existing = {(row[0], row[1]): row for row in tokens}
+        loaded, errors = [], []
+        for name, path in paths:
+            try:
+                value = path.read_text(encoding='utf-8-sig').strip()
+                if value.startswith('KGAT_'):
+                    loaded.append(existing.get((name, value), [name, value, 0, 0.0]))
+            except OSError:
+                errors.append(name + ' (unreadable profile token)')
+        tokens, token_errors, _token_signature = loaded, errors, signature
+
 HOP = {'connection', 'transfer-encoding', 'keep-alive', 'accept-encoding', 'host', 'authorization', 'content-length', 'set-cookie', 'proxy-connection'}
 
 def _build_headers(client_headers, auth):
@@ -170,9 +200,10 @@ class H(http.server.BaseHTTPRequestHandler):
         print('[%s] %s' % (time.strftime('%H:%M:%S'), msg), flush=True)
 
     def _do(self):
+        refresh_tokens()
         if self.command == 'GET' and self.path == '/_kaggle_proxy_health':
             import json
-            body = json.dumps({'service': 'ai-scientist-kaggle-proxy', 'root': BASE}).encode()
+            body = json.dumps({'service': 'ai-scientist-kaggle-proxy', 'root': BASE, 'token_count': len(tokens)}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
@@ -268,11 +299,6 @@ class H(http.server.BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = _do
 
 def main():
-    if not tokens:
-        detail = ('; '.join(token_errors)
-                  if token_errors else 'không tìm thấy token KGAT_ nào')
-        print('kaggle-proxy không thể đọc token: %s' % detail, file=sys.stderr)
-        return 1
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), H)
     print('kaggle-proxy: http://127.0.0.1:%d  tokens=%d -> %s (upstream keep-alive pool)' % (PORT, len(tokens), UPSTREAM), flush=True)
     srv.serve_forever()

@@ -1,0 +1,645 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Compare run · PR #1 · e9ec0fd",
+    "output": ".archify/workflow-pr1-compare-run-20261010-100949/compare-run.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/jhinezeal123/AI-Scientist-v2.git",
+      "revision": "e9ec0fdf3d5d652354266fad5b0636a1622c96e6",
+      "provider": "github",
+      "link_mode": "web"
+    },
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "Giao diện"
+        },
+        "backend": {
+          "label": "Xử lý trong Workbench"
+        },
+        "security": {
+          "label": "Kiểm tra điều kiện"
+        },
+        "cloud": {
+          "label": "Tích hợp MLflow"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "selection_lane",
+      "label": "Mở Compare trong tab Run"
+    },
+    {
+      "id": "request",
+      "label": "01 · Chọn run và gửi yêu cầu"
+    },
+    {
+      "id": "protocol",
+      "label": "02 · Đối chiếu phép đo đã duyệt"
+    },
+    {
+      "id": "source",
+      "label": "03 · Chọn nguồn metric"
+    },
+    {
+      "id": "mlflow_detail",
+      "label": "04–06 · MLflow: tìm bản ghi → ghi → đọc lại"
+    },
+    {
+      "id": "resolution",
+      "label": "07 · Chốt nguồn dữ liệu cho phản hồi"
+    },
+    {
+      "id": "ranking",
+      "label": "08 · Quyết định có xếp hạng hay không"
+    },
+    {
+      "id": "response",
+      "label": "09 · Trả kết quả lên GUI"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "selection",
+      "lane": "selection_lane",
+      "col": 0,
+      "type": "frontend",
+      "label": "Chọn 2–8 run",
+      "sublabel": "Trong cùng project",
+      "width": 160,
+      "height": 76,
+      "sources": [
+        {
+          "path": "workbench-ui/src/RunComparison.tsx",
+          "line": 34,
+          "end_line": 49
+        }
+      ]
+    },
+    {
+      "id": "compare_api",
+      "lane": "request",
+      "col": 0,
+      "type": "security",
+      "label": "API compare",
+      "sublabel": "POST /runs/compare",
+      "width": 160,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/api.py",
+          "line": 367,
+          "end_line": 370
+        },
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 23,
+          "end_line": 25
+        }
+      ],
+      "tag": "Chỉ tiếp tục với ID riêng biệt"
+    },
+    {
+      "id": "saved_rows",
+      "lane": "request",
+      "col": 1,
+      "type": "backend",
+      "label": "Đọc dữ liệu đã lưu",
+      "sublabel": "Approval · metric · points",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 26,
+          "end_line": 47
+        }
+      ],
+      "tag": "Thêm lineage và budget"
+    },
+    {
+      "id": "protocol_check",
+      "lane": "protocol",
+      "col": 1,
+      "type": "security",
+      "label": "Đối chiếu protocol",
+      "sublabel": "Mode · data/hash · split · metric",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 49,
+          "end_line": 58
+        }
+      ],
+      "tag": "Thiếu hoặc khác → warnings"
+    },
+    {
+      "id": "budget_check",
+      "lane": "protocol",
+      "col": 2,
+      "type": "backend",
+      "label": "So sánh time budget",
+      "sublabel": "training / execution_seconds",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 60,
+          "end_line": 66
+        }
+      ],
+      "tag": "Cảnh báo công bằng; vẫn đi tiếp"
+    },
+    {
+      "id": "local_rows",
+      "lane": "resolution",
+      "col": 0,
+      "type": "backend",
+      "label": "Dùng metric Workbench",
+      "sublabel": "Giữ nguyên rows ban đầu",
+      "width": 160,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 68,
+          "end_line": 72
+        }
+      ]
+    },
+    {
+      "id": "optional_tracking",
+      "lane": "source",
+      "col": 2,
+      "type": "security",
+      "label": "Bật MLflow?",
+      "sublabel": "Có Tracking URI trong env?",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 68,
+          "end_line": 73
+        },
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 14,
+          "end_line": 21
+        }
+      ]
+    },
+    {
+      "id": "sync_wrapper",
+      "lane": "source",
+      "col": 3,
+      "type": "cloud",
+      "label": "Gọi sync MLflow",
+      "sublabel": "Khóa RLock trong một process",
+      "width": 224,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 71,
+          "end_line": 80
+        },
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 170,
+          "end_line": 173
+        }
+      ],
+      "tag": "Lỗi bất kỳ bước → fallback"
+    },
+    {
+      "id": "mapped_run",
+      "lane": "mlflow_detail",
+      "col": 3,
+      "type": "cloud",
+      "label": "Tìm hoặc tạo run",
+      "sublabel": "Experiment theo project / run ID",
+      "width": 224,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 24,
+          "end_line": 35
+        },
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 72,
+          "end_line": 104
+        }
+      ],
+      "tag": "Trùng bản ghi / lệch hash → lỗi",
+      "yOffset": -180
+    },
+    {
+      "id": "metric_delta",
+      "lane": "mlflow_detail",
+      "col": 3,
+      "type": "cloud",
+      "label": "Đối chiếu từng step",
+      "sublabel": "Step đã có phải cùng giá trị",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 38,
+          "end_line": 56
+        },
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 106,
+          "end_line": 120
+        }
+      ],
+      "tag": "Chỉ ghi metric còn thiếu",
+      "yOffset": -60
+    },
+    {
+      "id": "write_batch",
+      "lane": "mlflow_detail",
+      "col": 3,
+      "type": "cloud",
+      "label": "Ghi metrics / metadata",
+      "sublabel": "log_batch: metric, params, tags",
+      "width": 224,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 122,
+          "end_line": 137
+        }
+      ],
+      "tag": "Budget params chỉ khi run mới",
+      "yOffset": 60
+    },
+    {
+      "id": "read_verify",
+      "lane": "mlflow_detail",
+      "col": 3,
+      "type": "security",
+      "label": "Đọc lại từ MLflow",
+      "sublabel": "Run + toàn bộ metric history",
+      "width": 224,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 139,
+          "end_line": 159
+        }
+      ],
+      "tag": "Metric cuối phải khớp Workbench",
+      "yOffset": 180
+    },
+    {
+      "id": "tracking_fallback",
+      "lane": "resolution",
+      "col": 1,
+      "type": "backend",
+      "label": "Fallback về Workbench",
+      "sublabel": "Có tracking_warning; giữ rows",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 74,
+          "end_line": 80
+        },
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 158,
+          "end_line": 166
+        }
+      ],
+      "tag": "Không chạy lại Kaggle"
+    },
+    {
+      "id": "apply_rows",
+      "lane": "resolution",
+      "col": 3,
+      "type": "backend",
+      "label": "Áp dụng rows MLflow",
+      "sublabel": "Thay points / metric trong phản hồi",
+      "width": 224,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/mlflow_tracking.py",
+          "line": 158,
+          "end_line": 167
+        },
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 72,
+          "end_line": 73
+        }
+      ],
+      "tag": "Sau khi mọi run đồng bộ thành công"
+    },
+    {
+      "id": "rank_gate",
+      "lane": "ranking",
+      "col": 2,
+      "type": "security",
+      "label": "Được xếp hạng?",
+      "sublabel": "COMPLETED · đúng metric · hữu hạn",
+      "width": 220,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 8,
+          "end_line": 19
+        },
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 82,
+          "end_line": 94
+        }
+      ],
+      "tag": "Protocol khớp và không warnings"
+    },
+    {
+      "id": "no_ranking",
+      "lane": "ranking",
+      "col": 1,
+      "type": "backend",
+      "label": "Không xếp hạng",
+      "sublabel": "ranked_run_ids = []",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 83,
+          "end_line": 90
+        }
+      ],
+      "tag": "Vẫn trả rows và cảnh báo"
+    },
+    {
+      "id": "sort_results",
+      "lane": "ranking",
+      "col": 3,
+      "type": "backend",
+      "label": "Xếp hạng metric cuối",
+      "sublabel": "minimize ↑ / maximize ↓",
+      "width": 200,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 90,
+          "end_line": 94
+        }
+      ]
+    },
+    {
+      "id": "api_result",
+      "lane": "response",
+      "col": 2,
+      "type": "backend",
+      "label": "Trả JSON comparison",
+      "sublabel": "Rows · warnings · backend · rank",
+      "width": 208,
+      "height": 76,
+      "sources": [
+        {
+          "path": "ai_scientist/workbench/compare.py",
+          "line": 95,
+          "end_line": 99
+        }
+      ]
+    },
+    {
+      "id": "render_comparison",
+      "lane": "response",
+      "col": 3,
+      "type": "frontend",
+      "label": "Bảng + curve + cảnh báo",
+      "sublabel": "Hiện nguồn: MLflow / Workbench",
+      "width": 224,
+      "height": 76,
+      "sources": [
+        {
+          "path": "workbench-ui/src/RunComparison.tsx",
+          "line": 53,
+          "end_line": 70
+        },
+        {
+          "path": "workbench-ui/src/RunComparison.tsx",
+          "line": 37,
+          "end_line": 47
+        }
+      ],
+      "tag": "Refresh 2 giây nếu còn run hoạt động"
+    }
+  ],
+  "edges": [
+    {
+      "id": "send_request",
+      "from": "selection",
+      "to": "compare_api",
+      "variant": "default"
+    },
+    {
+      "id": "read_approved",
+      "from": "compare_api",
+      "to": "saved_rows",
+      "variant": "default",
+      "label": "Hợp lệ"
+    },
+    {
+      "id": "check_protocol",
+      "from": "saved_rows",
+      "to": "protocol_check",
+      "variant": "default"
+    },
+    {
+      "id": "check_budget",
+      "from": "protocol_check",
+      "to": "budget_check",
+      "variant": "default",
+      "label": "Vẫn tiếp tục"
+    },
+    {
+      "id": "decide_tracking",
+      "from": "budget_check",
+      "to": "optional_tracking",
+      "variant": "default"
+    },
+    {
+      "id": "tracking_disabled",
+      "from": "optional_tracking",
+      "to": "local_rows",
+      "variant": "dashed",
+      "label": "Không có URI",
+      "role": "branch"
+    },
+    {
+      "id": "tracking_enabled",
+      "from": "optional_tracking",
+      "to": "sync_wrapper",
+      "variant": "emphasis",
+      "label": "Có URI",
+      "role": "branch"
+    },
+    {
+      "id": "resolve_identity",
+      "from": "sync_wrapper",
+      "to": "mapped_run",
+      "variant": "default"
+    },
+    {
+      "id": "prepare_delta",
+      "from": "mapped_run",
+      "to": "metric_delta",
+      "variant": "default"
+    },
+    {
+      "id": "write_fresh_data",
+      "from": "metric_delta",
+      "to": "write_batch",
+      "variant": "default"
+    },
+    {
+      "id": "verify_persistence",
+      "from": "write_batch",
+      "to": "read_verify",
+      "variant": "default"
+    },
+    {
+      "id": "all_synced",
+      "from": "read_verify",
+      "to": "apply_rows",
+      "variant": "emphasis",
+      "label": "Tất cả thành công"
+    },
+    {
+      "id": "sync_exception",
+      "from": "sync_wrapper",
+      "to": "tracking_fallback",
+      "variant": "security",
+      "label": "Có exception",
+      "role": "error"
+    },
+    {
+      "id": "local_ranking_gate",
+      "from": "local_rows",
+      "to": "rank_gate",
+      "variant": "dashed",
+      "label": "Nguồn local"
+    },
+    {
+      "id": "fallback_ranking_gate",
+      "from": "tracking_fallback",
+      "to": "rank_gate",
+      "variant": "dashed",
+      "label": "Nguồn local"
+    },
+    {
+      "id": "mlflow_ranking_gate",
+      "from": "apply_rows",
+      "to": "rank_gate",
+      "variant": "emphasis",
+      "label": "Nguồn MLflow"
+    },
+    {
+      "id": "eligible_rank",
+      "from": "rank_gate",
+      "to": "sort_results",
+      "variant": "emphasis",
+      "label": "Đủ điều kiện",
+      "role": "branch"
+    },
+    {
+      "id": "ineligible_rank",
+      "from": "rank_gate",
+      "to": "no_ranking",
+      "variant": "security",
+      "label": "Không đủ",
+      "role": "branch"
+    },
+    {
+      "id": "ranked_response",
+      "from": "sort_results",
+      "to": "api_result",
+      "variant": "default"
+    },
+    {
+      "id": "unranked_response",
+      "from": "no_ranking",
+      "to": "api_result",
+      "variant": "default"
+    },
+    {
+      "id": "show_comparison",
+      "from": "api_result",
+      "to": "render_comparison",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Đúng thứ tự trong PR",
+      "items": [
+        "Warnings protocol chỉ khóa ranking; MLflow vẫn có thể được gọi cho các run khác protocol.",
+        "Khác budget chỉ tạo fairness_warnings. Run không cần cùng cha hoặc cùng account.",
+        "Luồng này so sánh run đã lưu; không submit notebook, retry hay thay đổi trạng thái Kaggle."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "MLflow là tích hợp tùy chọn",
+      "items": [
+        "Env: AI_SCIENTIST_MLFLOW_TRACKING_URI. Thiếu SDK, lỗi mạng hoặc lệch dữ liệu → fallback Workbench.",
+        "Đồng bộ diễn ra khi mở compare; không phải instrumentation trực tiếp trong notebook.",
+        "Chỉ sau khi toàn bộ vòng lặp thành công mới thay rows trả về; MLflow có thể đã nhận một phần dữ liệu trước lỗi."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Ba điểm review chưa được sửa trong e9ec0fd",
+      "items": [
+        "Đọc history: step ngoài Workbench vẫn có thể được đưa vào curve nếu metric cuối khớp.",
+        "Params chỉ ghi cho run mới: tạo run thành công nhưng log_batch lỗi thì lần sau thiếu metadata.",
+        "Chỉ ghi tag workbench_state; code chưa gọi set_terminated cho bản ghi MLflow."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Nguồn và cách đọc",
+      "items": [
+        "Sơ đồ bám PR #1, commit e9ec0fdf3d5d652354266fad5b0636a1622c96e6.",
+        "Bấm từng node để xem nguồn code. Nội dung sơ đồ tiếng Việt; các nút viewer dùng tiếng Anh.",
+        "Có thể đổi giao diện sáng/tối và xuất SVG hoặc ảnh từ nút Export."
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "mlflow_loop",
+      "label": "Đồng bộ từng run",
+      "lane": "mlflow_detail",
+      "fromCol": 3,
+      "toCol": 3,
+      "variant": "dashed"
+    }
+  ]
+}

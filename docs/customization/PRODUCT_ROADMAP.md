@@ -256,7 +256,8 @@ thành task phát triển, không coi fixture/metric tốt/LLM tự review là �
 
 **Nghiệm thu 2026-10-10:** baseline + hai ablation CPU đã hoàn tất trên hai account,
 queue/batch, 90 mẫu metric, compare cùng protocol và cursor sau restart đã kiểm chứng.
-Pool có 7 token đóng gói; 5 profile còn cần đăng nhập lại. Phạm vi phép đo và
+Pool có 7 token đóng gói; sau auto_login bổ sung cả 7 account verified_idle.
+Demo compute đã kiểm chứng trên hai account. Phạm vi phép đo và
 các ca recovery dùng fixture được ghi trong tracker, không suy ra KPI upstream.
 
 **Bài toán trong nhu cầu gốc được giải quyết:**
@@ -487,7 +488,7 @@ tab Run. Các bảng T09 dưới đây giữ bằng chứng của luồng notebo
 | CP0-D: bàn giao prototype | Đạt | Guide một lệnh/config/GUI/recovery đã cập nhật. 78backend +12donor wrapper/worker +5runtime fixtures và frontend build đạt. Restart sau golden path COMPLETED giữ28artifacts/report/context/log/counters coder1/submit1/report4; GUI History mở lại report đúng run, không replay. |
 | MVP 1 / CP1-A…C | Đạt P1-01…06, 2026-10-08 | Library PDF thật, source version/stale/approval, biến thể `f7a63749…` chạy đủ bốn stage Codex/Kaggle CPU, report/test CSV/stop và restart không replay; xem M1_04_ACCEPTANCE.md. |
 | MVP 2 | Đã bàn giao | Xem [MVP2_RELEASE.md](MVP2_RELEASE.md). |
-| MVP 3 / CP3-A…C | Đạt trong scope demo, 2026-10-10 | Ba run CPU qua hai account, batch/queue, 90 mẫu metric, compare và restart cursor; xem [IMPLEMENT_MVP3.md](IMPLEMENT_MVP3.md) để biết giới hạn phép đo/recovery và readiness của năm account còn lại. |
+| MVP 3 / CP3-A…C | Đạt trong scope demo, 2026-10-10 | Ba run CPU qua hai account, batch/queue, 90 mẫu metric, compare và restart cursor; cả 7 account verified_idle sau đăng nhập bổ sung; xem [IMPLEMENT_MVP3.md](IMPLEMENT_MVP3.md) để biết giới hạn phép đo/recovery. |
 | MVP 4–6 / CP-PERSONAL | Chưa nghiệm thu | Retrieval, đa harness, Ideathon và toàn bộ sản phẩm cá nhân còn ở các mốc sau. |
 | MVP 7 / CP-TEAM | Chưa bắt đầu | Phụ thuộc CP-PERSONAL |
 

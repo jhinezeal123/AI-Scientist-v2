@@ -144,7 +144,7 @@ class TreeSearchRun:
         self.check_running()
         request = self.service.planner.bindings.request_type(self.key[1], role, prompt, workdir,
             timeout_seconds=max(1, int(self.deadline - time.monotonic())), max_output_bytes=3_000_000)
-        result, payload = asyncio.run_coroutine_threadsafe(self.service.planner.worker.run(request), self.loop).result()
+        result, payload = asyncio.run_coroutine_threadsafe(self.service.run_worker(self.key).run(request), self.loop).result()
         usage = getattr(result, 'usage', {}) or {}
         measured = all(type(usage.get(key)) is int and usage[key] >= 0 for key in ('input_tokens', 'output_tokens'))
         if measured:

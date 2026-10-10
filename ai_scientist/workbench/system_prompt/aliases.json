@@ -7,5 +7,7 @@
   "search.node": "search_node.md",
   "search.node_instructions": "search_node_instructions.md",
   "search.query": "search_query.md",
-  "search.stage_goals": "search_stage_goals.json"
+  "search.stage_goals": "search_stage_goals.json",
+  "planner.benchmark": "planner_benchmark.md",
+  "working.benchmark": "working_benchmark.md"
 }

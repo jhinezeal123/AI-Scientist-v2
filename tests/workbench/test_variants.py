@@ -88,13 +88,15 @@ def test_variant_can_use_parent_without_saved_code_or_report(tmp_path):
         connection.execute("UPDATE runs SET state='FAILED' WHERE id=?", (run['id'],))
     view = RunView(store, tmp_path, lambda: False)
     baseline, texts = view.variant_baseline(project, run['id'])
-    assert texts == {}
-    assert all(not item['available'] for item in baseline['text_files'])
+    assert set(texts) == {'baseline/memory_journal.json'}
+    journal = json.loads(texts['baseline/memory_journal.json'])
+    assert journal['run_id'] == run['id']
+    assert all(not item['available'] for item in baseline['text_files'] if item['kind'] != 'memory_journal')
     idea = store.create_variant_idea(project, run['id'], '2' * 32, 'Fallback', 'new purpose',
                                      'change the output format', baseline, texts)
     context = store.context_snapshot(project, idea['id'], [store.resources(project)[0]['id']])['snapshot']
     staged = store.variant_stage_files(context)
-    assert set(staged) == {'baseline/manifest.json'}
+    assert set(staged) == {'baseline/manifest.json', 'baseline/memory_journal.json'}
     proposal_id = store.save_proposal(project, idea['id'], ready(context['resources'][0]['id']),
                                       store.context_snapshot(project, idea['id'], [context['resources'][0]['id']]))
     unapproved_run_id = '3' * 32

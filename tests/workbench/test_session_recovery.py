@@ -13,6 +13,8 @@ from ai_scientist.workbench.store import ProjectStore
 from ai_scientist.workbench.working_store import WorkingStore
 from test_planning import FakeRuntime, ready, request_type
 from test_working import Donor, Bootstrap
+from benchmark_fixture import BENCHMARK_ID
+from test_planning import known_benchmark
 
 
 def application(tmp_path, runtime, bootstrap, monkeypatch, donor=None):
@@ -47,7 +49,8 @@ def test_discussion_answer_approval_artifacts_survive_full_restarts(tmp_path, mo
         other = client.post('/api/projects', json={'name': 'Competition'}).json()['id']
         base = f'/api/projects/{project}'
         source = client.post(base + '/resources', json={'title': 'Paper source', 'content': 'Saved evidence'}).json()
-        idea = client.post(base + '/ideas', json={'title': 'Restart demo', 'text': 'Implement a baseline'}).json()
+        idea = client.post(base + '/ideas', json={'title': 'Restart demo', 'text': 'Implement a baseline',
+                                                'benchmark_id': BENCHMARK_ID}).json()
         plan = {'idea_id': idea['id'], 'resource_ids': [source['id']]}
         assert client.post(base + '/plan', json=plan).status_code == 202
         proposal = wait_until(lambda: client.get(base + '/proposals').json(), bool)[0]
@@ -101,7 +104,7 @@ def test_interrupted_planning_waits_for_an_explicit_request(tmp_path, monkeypatc
     store = ProjectStore(tmp_path / '.workbench/projects')
     project = store.create_project('Interrupted')['id']
     source = store.save_resource(project, {'title': 'Notes', 'content': 'Evidence'})
-    idea = store.save_idea(project, 'Continue from saved work', 'Interrupted proposal')
+    idea = store.save_idea(project, 'Continue from saved work', 'Interrupted proposal', benchmark_id=BENCHMARK_ID)
     store.reserve_plan(project, idea['id'])
     state = tmp_path / '.workbench/runtime-state.json'
     state.write_text(json.dumps({'status': 'running', 'request_id': 'old', 'role': 'mvp0_plan'}))

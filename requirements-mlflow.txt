@@ -1,2 +1,2 @@
-# Optional MLflow-backed comparison; not needed for Kaggle execution.
+# Required benchmark tracking dependency; also included in requirements-mvp0.txt.
 mlflow>=3.7,<4

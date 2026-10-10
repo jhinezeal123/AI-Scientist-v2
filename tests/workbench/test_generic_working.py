@@ -64,7 +64,7 @@ def test_idea_to_working_without_training_fields_or_legacy_gates(tmp_path, monke
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': 'Generic Working'}).json()['id']
         base = '/api/projects/' + project
-        idea = client.post(base + '/ideas', json={'text': 'Create a synthetic CSV', 'title': 'CSV'}).json()
+        idea = client.post(base + '/ideas', json={'text': 'Create a synthetic CSV', 'title': 'CSV', 'mode': 'etc', 'desired_output': 'CSV file'}).json()
         references = []
         if with_reference:
             reference = client.post(base + '/resources', json={'kind': 'dataset', 'title': 'Optional reference',

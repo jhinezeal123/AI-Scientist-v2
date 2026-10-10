@@ -230,12 +230,12 @@ def test_planner_can_read_uploaded_pages_on_demand(tmp_path):
     store = ProjectStore(tmp_path/'projects')
     project = store.create_project('Paper')['id']
     source = store.import_file(project, '', 'paper.pdf', pdf_bytes(['FACT_ON_PAGE_ONE', 'FACT_ON_PAGE_TWO']))
-    idea = store.save_idea(project, 'Read the selected paper')
+    idea = store.save_idea(project, 'Read the selected paper', mode='etc', desired_output='Tóm tắt tài liệu, dẫn trang')
     class Runtime:
         def run(self, request, progress, cancelled):
             context = json.loads(request.prompt.split('UNTRUSTED PROJECT CONTEXT:\n')[1])
             ref = context['resources'][0]
-            assert 'FACT_ON_PAGE' not in request.prompt and 'not that you have read it' in request.prompt
+            assert 'FACT_ON_PAGE' not in request.prompt and 'does not mean you have read it' in request.prompt
             manifest = json.loads((request.workdir/ref['attachment']['manifest_file_path']).read_text())
             root = (request.workdir/ref['file_path']).parent
             assert 'FACT_ON_PAGE_TWO' in (root/manifest['pages'][1]['path']).read_text()
@@ -251,20 +251,22 @@ def test_planner_can_read_uploaded_pages_on_demand(tmp_path):
     asyncio.run(check())
 
 
-def test_working_transfers_imported_original_and_pages_to_same_terminal(tmp_path):
+def test_working_transfers_imported_original_and_pages_to_same_terminal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     async def check():
         store, project, old_run, worker, planner, service, runtime, _, donor = fixture(tmp_path)
         with store.connection(project) as connection:
             connection.execute("UPDATE runs SET state='CANCELLED' WHERE id=?", (old_run,))
         original = pdf_bytes(['WORKING_SELECTED_PAGE'])
         source = store.import_file(project, '', 'paper.pdf', original)
-        idea = store.save_idea(project, 'Read imported paper')
+        idea = store.save_idea(project, 'Read imported paper', mode='etc', desired_output='Tóm tắt tài liệu, dẫn trang')
         context = store.context_snapshot(project, idea['id'], [source['id']])
         proposal = store.save_proposal(project, idea['id'], paper_plan(source['id']), context)
         run = store.approve_proposal(project, proposal, 1, context['context_sha256'])
         await service.start(project, run['id'])
         await service.tasks[project, run['id']]
-        assert service.detail(project, run['id'])['state'] == 'COMPLETED'
+        detail = service.detail(project, run['id'])
+        assert detail['state'] == 'COMPLETED', service.record(project, run['id'])
         assert len(runtime.calls) == len(donor.opens) == 1
         terminal = donor.opens[0][1]
         ref = source['attachment']

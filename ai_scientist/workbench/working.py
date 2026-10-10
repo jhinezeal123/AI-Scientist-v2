@@ -1,4 +1,4 @@
-"""One user-started Working action: connect, implement, execute, collect, stop."""
+"""Parallel user-started runs with pinned accounts and bounded session capacity."""
 import asyncio
 from datetime import datetime, timezone
 import hashlib
@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import shlex
 import sys
+import threading
 import time
 
 from .ssh_terminal import AgentTerminalBridge, DonorSession, collect_files
@@ -16,9 +17,12 @@ from .system_prompt import load_prompt
 from .modes import snapshot_settings
 from .named_paths import display_path
 from .accounts import AccountCatalog
+from .worker import RuntimeWorker
 
 ACCELERATORS = {'cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'}
 ACTIVE = {'STARTING', 'WORKING', 'STOPPING'}
+MAX_ACCOUNT_SESSIONS = 2
+CAPACITY_WAIT = 'Account đã đủ 2 session hoặc chỗ đang được giữ; tự chạy khi có chỗ trống.'
 
 
 def sources(approved):
@@ -50,13 +54,69 @@ class WorkingService:
         self.accounts = (AccountCatalog(config.donor_root, config.kaggle_account_alias)
                          if getattr(config, 'donor_root', None) else None)
         self.tasks, self.terminals, self.stop_requests = {}, {}, set()
+        self.workers = {}
         self.queue_task = None
         self.closed = False
+        self.cookie_lock = asyncio.Lock()
+        self.cookie_cancelled = threading.Event()
         self.stop_seconds = stop_seconds
         self.poll_seconds = poll_seconds
 
     def record(self, project_id, run_id):
         return self.records.get(project_id, run_id)
+
+    def run_worker(self, key):
+        """Each run owns its process, persisted state and cancellation signal."""
+        if key not in self.workers:
+            template = self.planner.worker
+            self.workers[key] = RuntimeWorker(template.runtime,
+                self.view.root(*key) / 'working-agent' / 'runtime-state.json',
+                uncertain_error=template.uncertain_error)
+        return self.workers[key]
+
+    def _pending(self):
+        pending = []
+        for project in self.store.list_projects():
+            for item in self.store.history(project['id'])['runs']:
+                if item['state'] == 'QUEUED':
+                    record = self.record(project['id'], item['id'])
+                    if record and record['phase'] == 'queued':
+                        pending.append((record['started_at'], project['id'], item['id'], record))
+        return sorted(pending)
+
+    def _account_occupancy(self, account, observed=None, *, exclude=None):
+        """Provider sessions + unmatched local reservations, across projects.
+
+        Call under planner.lock before reserving/dispatching. A reservation is
+        held until a matching stop receipt, including unknown outcomes/restarts.
+        Provider references only remove double counting; an unreadable reference
+        or an unlisted provider version still occupies capacity conservatively.
+        """
+        remote = (observed or {}).get('active_session_count', 0)
+        if type(remote) is not int or remote < 0:
+            raise StoreConflict('Chưa xác minh được số session của account Kaggle.')
+        sessions = (observed or {}).get('active_sessions', [])
+        if not isinstance(sessions, list) or len(sessions) > remote:
+            raise StoreConflict('Chưa xác minh được danh sách session của account Kaggle.')
+        visible = [row.get('ref') for row in sessions
+                   if isinstance(row, dict) and row.get('ref')]
+        unmatched = 0
+        for project in self.store.list_projects():
+            for item in self.store.history(project['id'], include_deleted=True)['runs']:
+                key = (project['id'], item['id'])
+                if key == exclude:
+                    continue
+                record = self.record(*key)
+                if (not record or record['stop_confirmed']
+                        or record['phase'] in {'queued', 'blocked', 'renewing_cookie'}
+                        or (record.get('account') or self.config.kaggle_account_alias) != account):
+                    continue
+                ref = (record.get('descriptor') or {}).get('notebook_ref')
+                if ref and ref in visible:
+                    visible.remove(ref)
+                else:
+                    unmatched += 1
+        return remote + unmatched
 
     def _donor(self, account):
         if not account or account == self.config.kaggle_account_alias:
@@ -81,12 +141,33 @@ class WorkingService:
             raise StoreConflict('Chưa xác minh được account Kaggle; kiểm tra phiên đăng nhập trong profile đóng gói') from exc
         return self.accounts.record_observation(account, observation)
 
-    async def check_idle(self):
+    async def check_account_cookie(self, account):
+        """Share one bounded login flow between Run and Settings."""
+        self.accounts.require(account)
+        async with self.cookie_lock:
+            if self.closed:
+                raise StoreConflict('Backend đang dừng')
+            try:
+                result = await asyncio.to_thread(self._donor(account).account_admin,
+                    'cookie-check', None, self.cookie_cancelled)
+            except (RuntimeError, TimeoutError):
+                raise StoreConflict('Chưa hoàn tất tự đăng nhập account; kiểm tra kết nối hoặc đăng nhập thủ công') from None
+            if result.get('error') or result.get('account') != account:
+                raise StoreConflict('Chưa xác minh được cookie của account đã chọn')
+            return result
+
+    async def check_idle(self, *, allow_working=False):
         """Check known notebooks; unreadable old saves need verified account idleness."""
         observations, unresolved_refs, unresolved_accounts = [], [], {}
         for project in await asyncio.to_thread(self.store.list_projects):
             history = await asyncio.to_thread(self.store.history, project['id'])
+            unstarted = (await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])) if allow_working else set()
             for item in history['runs']:
+                if allow_working and await asyncio.to_thread(self.record, project['id'], item['id']):
+                    continue  # Working reservations are gated per account below.
+                if (allow_working and item['id'] not in unstarted and item['state'] not in
+                        {'FAILED', 'COMPLETED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'UNKNOWN', 'QUEUED'}):
+                    raise StoreConflict('Một Run cũ đang hoạt động hoặc chưa đối soát trạng thái Kaggle')
                 if item['state'] in ACTIVE | {'IMPLEMENTING', 'SUBMITTING', 'SUBMITTED', 'REMOTE_QUEUED', 'REMOTE_RUNNING'}:
                     raise StoreConflict('Working vẫn hoạt động hoặc chưa xác nhận Kaggle đã dừng')
                 if item['state'] != 'UNKNOWN':
@@ -152,47 +233,39 @@ class WorkingService:
                 raise StoreConflict('Working đã được yêu cầu cho Run này; kết nối lại, không gửi notebook mới')
             if self.planner.worker.closed or self.planner.worker.state.get('status') == 'unknown':
                 raise StoreConflict('Agent worker chưa xác nhận kết thúc lượt trước')
-            busy = (any(not task.done() for task in self.tasks.values())
-                    or self.planner.task is not None and not self.planner.task.done()
-                    or self.planner.worker.future is not None and not self.planner.worker.future.done())
-            pending = 0
-            for project in await asyncio.to_thread(self.store.list_projects):
-                for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
-                    if item['state'] == 'QUEUED':
-                        record = await asyncio.to_thread(self.record, project['id'], item['id'])
-                        if record and record['phase'] == 'queued':
-                            pending += 1
-            if pending >= 16:
+            pending = await asyncio.to_thread(self._pending)
+            if len(pending) >= 16:
                 raise StoreConflict('Hàng chờ đã đủ 16 run; hoàn tất/hủy một run trước khi thêm')
-            busy = busy or pending > 0
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
             mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
+            benchmark = approved['snapshot']['idea'].get('benchmark')
+            if mode == 'training_research' and benchmark:
+                from .benchmark_tracking import ensure_tracking
+                await asyncio.to_thread(ensure_tracking, self, project_id, benchmark)
             # Every user-started Working action is one run. Stage budgets from
             # old clients never create extra experiments or child runs.
             await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
             # Fail closed on a changed pinned baseline before starting a Kaggle SSH session.
             await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
             # Validate editable prompt files before opening a paid Kaggle session.
-            if mode == 'etc':
-                load_prompt('working.etc', workdir=self.view.root(project_id, run_id) / 'working-agent')
+            if mode in {'etc', 'benchmark'}:
+                load_prompt('working.' + mode, workdir=self.view.root(project_id, run_id) / 'working-agent')
             else:
                 load_prompt('working.instructions')
                 load_prompt('working.agent', workdir=self.view.root(project_id, run_id) / 'working-agent')
             research = approved['body'].get('research') or {}
-            if mode != 'etc' and (any(research.get(name) for name in ('summary', 'report', 'plots', 'review')) or research.get('writeup', 'none') != 'none'):
+            if mode == 'training_research' and (any(research.get(name) for name in ('summary', 'report', 'plots', 'review')) or research.get('writeup', 'none') != 'none'):
                 load_prompt('search.query', workdir=self.view.root(project_id, run_id) / 'query-agent')
-            if not busy:
-                for project in await asyncio.to_thread(self.store.list_projects):
-                    unstarted = await asyncio.to_thread(self.store.unstarted_run_ids, project['id'])
-                    for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
-                        if item['id'] == run_id:
-                            continue
-                        allowed = {'FAILED', 'COMPLETED', 'CANCELLED', 'REMOTE_FAILED', 'REMOTE_SUCCEEDED', 'COLLECTING', 'UNKNOWN', 'QUEUED'}
-                        if item['state'] not in allowed and item['id'] not in unstarted:
-                            raise StoreConflict('Một Run khác đang hoạt động')
-                await self.check_idle()
-                await self._verify_selected(account)
-            if mode == 'etc':
+            observed = await self._verify_selected(account)
+            if mode == 'benchmark':
+                naming = await asyncio.to_thread(self._donor(account).check_benchmark_name,
+                    {'run_id': run_id, 'title': approved['body']['objective']})
+                if naming.get('status') != 'available':
+                    raise StoreConflict(naming.get('error') or 'Tên dataset Kaggle chưa hợp lệ; chưa mở phiên chạy.')
+            await self.check_idle(allow_working=True)
+            busy = (self._account_occupancy(account, observed) >= MAX_ACCOUNT_SESSIONS
+                    or any((entry[3].get('account') or self.config.kaggle_account_alias) == account for entry in pending))
+            if mode in {'etc', 'benchmark'}:
                 from .outputs import prepare_output
                 await asyncio.to_thread(prepare_output, self.store, project_id, run_id, approved)
             else:
@@ -205,19 +278,38 @@ class WorkingService:
             await asyncio.to_thread(self.records.reserve, project_id, run_id, accelerator, ttl, account, busy)
             key = (project_id, run_id)
             if busy:
+                self.records.update(*key, state='QUEUED', error=CAPACITY_WAIT)
                 self._ensure_queue_loop()
-                return {'run_id': run_id, 'state': 'QUEUED', 'reason': 'Agent/Kaggle slot đang bận; chờ lượt.'}
+                return {'run_id': run_id, 'state': 'QUEUED', 'reason': CAPACITY_WAIT}
             self.tasks[key] = asyncio.create_task(self._work(key, approved, accelerator, ttl))
             return {'run_id': run_id, 'state': 'STARTING'}
 
-    async def _verify_selected(self, account):
+    async def _verify_selected(self, account, key=None):
         if not self.accounts:
             return
         observed = await self.account_readiness(account)
-        if observed['readiness'] != 'verified_idle':
-            reason = {'needs_login': 'Cookie đã hết hạn; cần đăng nhập lại account trong bundle.',
-                      'busy': 'Account đang có phiên Kaggle hoạt động.'}.get(observed['readiness'], 'Chưa xác minh được account Kaggle.')
+        if observed['readiness'] == 'needs_login':
+            if key:
+                if self.store.run(*key)['state'] == 'QUEUED':
+                    self.records.update(*key, phase='renewing_cookie')
+                self.records.append_log(*key, 'Cookie hết hạn/không hợp lệ. Đang tự đăng nhập account đã chọn…\n', 'backend')
+            result = await self.check_account_cookie(account)
+            if result.get('status') not in {'valid', 'renewed'}:
+                reason = {'no_credentials': 'Account thiếu username/mật khẩu; bổ sung thông tin đăng nhập trong Kaggle proxy.',
+                          'needs_manual_verification': 'Kaggle yêu cầu xác minh thủ công; hoàn tất đăng nhập rồi thử lại.',
+                          'blocked': 'Kaggle chặn đăng nhập; kiểm tra mật khẩu hoặc chờ hết khóa tạm.'}.get(
+                              result.get('status'), 'Tự đăng nhập chưa thành công; chưa mở phiên Kaggle.')
+                raise StoreConflict(reason)
+            observed = await self.account_readiness(account)
+        if observed['readiness'] not in {'verified_idle', 'busy'}:
+            reason = {'needs_login': 'Cookie đã hết hạn; cần đăng nhập lại account trong bundle.'}.get(
+                observed['readiness'], 'Chưa xác minh được account Kaggle.')
             raise StoreConflict(reason)
+        if not observed.get('observed_at'):
+            raise StoreConflict('Chưa xác minh được thời điểm kiểm tra account Kaggle.')
+        # Raw observation carries session references; public account metadata
+        # remains small and contains no credentials.
+        return self.accounts.observations[account]
 
     def _ensure_queue_loop(self):
         if self.queue_task is None or self.queue_task.done():
@@ -237,30 +329,30 @@ class WorkingService:
                                         self.records.update(project['id'], item['id'], state='QUEUED', phase='blocked',
                                             error='Agent worker chưa sẵn sàng hoặc chưa xác nhận lượt trước kết thúc; kiểm tra backend rồi tiếp tục hàng chờ.')
                         return
-                    occupied = (any(not task.done() for task in self.tasks.values())
-                                or self.planner.task is not None and not self.planner.task.done()
-                                or worker.future is not None and not worker.future.done())
-                    if not occupied and not worker.closed and worker.state.get('status') != 'unknown':
-                        pending = []
-                        for project in await asyncio.to_thread(self.store.list_projects):
-                            for item in (await asyncio.to_thread(self.store.history, project['id']))['runs']:
-                                if item['state'] == 'QUEUED':
-                                    record = await asyncio.to_thread(self.record, project['id'], item['id'])
-                                    if record and record['phase'] == 'queued':
-                                        pending.append((record['started_at'], project['id'], item['id'], record))
-                        if pending:
-                            _, project_id, run_id, record = min(pending)
+                    pending = await asyncio.to_thread(self._pending)
+                    full_accounts = set()
+                    for _, project_id, run_id, record in pending:
+                        account = record.get('account') or self.config.kaggle_account_alias
+                        if account not in full_accounts:
                             key = (project_id, run_id)
                             try:
-                                await self.check_idle()
-                                await self._verify_selected(record.get('account') or self.config.kaggle_account_alias)
+                                observed = await self._verify_selected(account, key)
+                                if key in self.stop_requests:
+                                    self.records.finish(*key, {'session_id': run_id, 'notebook_ref': None,
+                                        'status': 'not_submitted', 'stopped': True, 'source': 'local_queue_cancel'}, 'CANCELLED')
+                                    continue
+                                if self._account_occupancy(account, observed) >= MAX_ACCOUNT_SESSIONS:
+                                    self.records.update(*key, state='QUEUED', phase='queued', error=CAPACITY_WAIT)
+                                    full_accounts.add(account)
+                                    continue
+                                await self.check_idle(allow_working=True)
                                 approved = await asyncio.to_thread(self.store.approved_snapshot, *key)
                                 await asyncio.to_thread(self.store.library(project_id).agent_snapshot, approved['snapshot'])
                                 await asyncio.to_thread(self.store.variant_stage_files, approved['snapshot'])
                                 mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
-                                load_prompt('working.etc' if mode == 'etc' else 'working.agent',
+                                load_prompt('working.' + mode if mode in {'etc', 'benchmark'} else 'working.agent',
                                             workdir=self.view.root(*key) / 'working-agent')
-                                if mode != 'etc':
+                                if mode == 'training_research':
                                     load_prompt('working.instructions')
                                 self.records.update(*key, state='STARTING', phase='starting')
                                 self.tasks[key] = asyncio.create_task(self._work(key, approved, record['accelerator'], record['ttl_seconds']))
@@ -349,12 +441,12 @@ class WorkingService:
         agent_approved = {**approved, 'snapshot': library.agent_snapshot(approved['snapshot'])}
         data = {'approved': agent_approved, 'remote_directory': descriptor['remote_directory'],
                 'terminal_command': f'& "{helper}" .\\terminal.py' if sys.platform == 'win32' else shlex.quote(helper) + ' ./terminal.py',
-                'instructions': [] if mode == 'etc' else load_prompt('working.instructions').split('\n\n')}
-        if mode != 'etc' and approved['body'].get('metric'):
+                'instructions': [] if mode in {'etc', 'benchmark'} else load_prompt('working.instructions').split('\n\n')}
+        if mode == 'training_research' and approved['body'].get('metric'):
             data['instructions'].append(
                 'Khi công việc có vòng training/evaluation với tổng step biết trước, in từng mẫu đo thật thành một dòng stdout: '
                 'AILAB_METRIC {"step":1,"total_steps":10,"elapsed_seconds":2.5,"metrics":{"<approved metric name>":0.8}}. '
-                'Dùng đúng tên metric đã duyệt; có thể thêm training_loss. Step tăng dần, elapsed_seconds là thời gian thực, '
+                'Dùng đúng tên metric đã duyệt; có thể thêm training_loss. Step tăng dần; elapsed_seconds là thời gian thực tích lũy từ lúc bắt đầu workload, tăng theo step, không phải thời lượng riêng từng bước. '
                 'mẫu cuối dùng step=total_steps. Không dựng số liệu hoặc ETA; nếu không có vòng đo thì bỏ qua telemetry.'
             )
         if approved['snapshot'].get('variant'):
@@ -368,6 +460,17 @@ class WorkingService:
                 'Artifact chỉ được liệt kê bằng title/link; khi cần dùng terminal.py fetch "artifact://..." '
                 'để tải vào baseline/artifacts/, rồi đọc qua terminal. Không đưa nội dung toàn bộ artifact vào context.'
             )
+        benchmark = approved['snapshot']['idea'].get('benchmark')
+        if benchmark:
+            data['benchmark'] = benchmark
+            data['instructions'].append(
+                'Benchmark là phép đo cố định. Dùng kagglehub.dataset_download với handle ' +
+                benchmark['dataset']['handle'] + '/versions/' + str(benchmark['dataset']['version']) +
+                '. Xác minh từng file theo SHA256 trong benchmark.dataset.files (bỏ prefix output/benchmark/). '
+                'Đọc benchmark.json và chạy đúng evaluate.py theo evaluator_interface; không sửa test hoặc metric. '
+                'Không yêu cầu train nếu purpose là inference/memory/cache. Không dùng test để fit model. '
+                'Với phép đo một lần, phát một AILAB_METRIC có step=total_steps=1. '
+                'Với nhiều lần đo, dùng steps thực, không cần cùng số steps với run khác.')
         data['instructions'].append('Đây là đúng một run. Tự sửa lỗi trong phiên này; không tạo node debug hoặc tự chạy các stage. '
                                     'Các đầu ra summary/report/plots/PDF/review đã chọn do backend xử lý sau thực thi.')
         feedback = self.view.root(*key) / 'retry-feedback.json'
@@ -378,7 +481,7 @@ class WorkingService:
             data['previous_source_file'] = 'source/workload.py'
         (workdir / 'working-request.json').write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         return self.planner.bindings.request_type(key[1], 'mvp0_working',
-            load_prompt('working.etc' if mode == 'etc' else 'working.agent', workdir=workdir), workdir,
+            load_prompt('working.' + mode if mode in {'etc', 'benchmark'} else 'working.agent', workdir=workdir), workdir,
             timeout_seconds=min(getattr(self.config, 'working_seconds', 900), max(1, descriptor['ttl_seconds'] - 60)),
             max_output_bytes=3_000_000)
 
@@ -391,9 +494,29 @@ class WorkingService:
         return manifest
 
     async def _work(self, key, approved, accelerator, ttl):
+        # Recheck immediately before the first provider submission. Capacity may
+        # have changed since the API accepted the batch, including external jobs.
+        async with self.planner.lock:
+            record = self.record(*key)
+            account = record.get('account') or self.config.kaggle_account_alias
+            try:
+                observed = await self._verify_selected(account, key)
+                if key in self.stop_requests:
+                    self.records.finish(*key, {'session_id': key[1], 'notebook_ref': None,
+                        'stopped': True, 'status': 'not_submitted', 'source': 'local_queue_cancel'}, 'CANCELLED')
+                    return
+                if self._account_occupancy(account, observed, exclude=key) >= MAX_ACCOUNT_SESSIONS:
+                    self.records.update(*key, state='QUEUED', phase='queued', error=CAPACITY_WAIT)
+                    self._ensure_queue_loop()
+                    return
+            except (StoreConflict, ValueError, RuntimeError, TimeoutError) as exc:
+                self.records.update(*key, state='QUEUED', phase='blocked',
+                    error=str(exc) if isinstance(exc, (StoreConflict, ValueError)) else
+                    'Chưa xác minh được account trước khi mở phiên Kaggle; kiểm tra rồi tiếp tục hàng chờ.')
+                return
         project_id, run_id = key
         root = self.view.root(*key)
-        is_etc = snapshot_settings(approved['snapshot'])[0] == 'etc'
+        is_etc = snapshot_settings(approved['snapshot'])[0] in {'etc', 'benchmark'}
         terminal, gateway = None, None
         outcome = 'FAILED'
         no_submit = False
@@ -441,7 +564,7 @@ class WorkingService:
                                               on_command=save_command, fetch_artifact=fetch_artifact)
             request = self._request(key, approved, descriptor, workdir)
             deadline = time.monotonic() + request.timeout_seconds
-            result, payload = await self.planner.worker.run(request)
+            result, payload = await self.run_worker(key).run(request)
             await asyncio.to_thread(gateway.close)
             gateway = None
             if key in self.stop_requests:
@@ -455,6 +578,24 @@ class WorkingService:
                 raise ValueError('Agent result does not match verified SSH commands/files')
             (root / 'working-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
             self.records.update(*key, manifest=manifest)
+            if payload.succeeded and snapshot_settings(approved['snapshot'])[0] == 'benchmark':
+                from .benchmarks import BenchmarkCatalog, validate_benchmark_output
+                package, package_hash = await asyncio.to_thread(validate_benchmark_output, root,
+                    approved['snapshot']['idea']['benchmark_definition'], manifest)
+                self.records.append_log(*key, 'Đang tạo và xác minh Kaggle dataset public…\n', 'backend')
+                publication = {'directory': str(package), 'run_id': run_id,
+                    'title': approved['body']['objective'], 'manifest_sha256': package_hash,
+                    'files': [item for item in manifest['files'] if item['path'].startswith('output/benchmark/')]}
+                # Persist intent before the one irreversible upload. Unknown outcomes
+                # are reconciled explicitly; never create versions automatically.
+                intent = root / 'benchmark-publication-intent.json'
+                if intent.exists():
+                    raise StoreConflict('Benchmark publication đã được yêu cầu; đối soát dataset trước khi thử lại.')
+                intent.write_text(json.dumps(publication, indent=2), encoding='utf-8')
+                receipt = await asyncio.to_thread(self._run_donor(key).publish_benchmark, publication)
+                (root / 'benchmark-dataset.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+                BenchmarkCatalog(self.store).save(project_id, run_id, approved['body']['objective'],
+                    approved['snapshot']['idea']['benchmark_definition'], receipt)
             from .single_run import save_node, finish_research
             node, journal = await asyncio.to_thread(save_node, root, approved, payload, commands, run_id)
             if not is_etc:
@@ -525,6 +666,8 @@ class WorkingService:
                 await asyncio.to_thread(terminal.close)
                 self.terminals.pop(key, None)
             await self._finish_stop(key, receipt)
+            if key in self.workers:
+                await self.workers[key].close(2)
 
     async def _request_stop(self, key, terminal=None):
         self.records.append_log(*key, 'Backend đang dừng phiên Kaggle…\n', 'backend')
@@ -574,7 +717,7 @@ class WorkingService:
         save_memory(self.store, root, *key, approved, record, receipt)
         summary = record['summary'] or {'summary': 'User dừng Working trước khi agent hoàn thành.', 'limitations': []}
         outcome = record['outcome'] or 'FAILED'
-        if snapshot_settings(approved['snapshot'])[0] == 'etc':
+        if snapshot_settings(approved['snapshot'])[0] in {'etc', 'benchmark'}:
             from .outputs import save_output
             if not record['summary']:
                 record['summary'] = {'succeeded': False, 'summary': summary['summary'],
@@ -627,16 +770,31 @@ class WorkingService:
             (root / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.records.append_log(*key, 'Đã xác nhận Kaggle dừng. Kết quả Working đã lưu.\n', 'backend')
         self.records.finish(*key, receipt, outcome, 'report.md' if report_requested else None)
+        if outcome == 'COMPLETED' and approved['snapshot']['idea'].get('benchmark'):
+            await self.sync_tracking(*key)
+
+    async def sync_tracking(self, project_id, run_id):
+        from .compare import sync_run
+        root = self.view.root(project_id, run_id)
+        try:
+            result = await asyncio.to_thread(sync_run, self, project_id, run_id)
+            status = {'status': 'synced', **result}
+        except Exception as exc:
+            status = {'status': 'error', 'error': 'MLflow chưa đồng bộ; không có fallback.', 'error_type': type(exc).__name__}
+            self.records.append_log(project_id, run_id, status['error'] + '\n', 'backend')
+        (root / 'mlflow-status.json').write_text(json.dumps(status, indent=2), encoding='utf-8')
+        return status
 
     async def stop(self, project_id, run_id):
         key = (project_id, run_id)
         record = self.record(*key)
         if record is None:
             raise StoreConflict('Run này chưa mở Working')
-        if record['phase'] in {'queued', 'blocked'}:
+        if record['phase'] in {'queued', 'blocked', 'renewing_cookie'}:
+            self.stop_requests.add(key)
             async with self.planner.lock:
                 record = self.record(*key)
-                if record['phase'] in {'queued', 'blocked'}:
+                if record['phase'] in {'queued', 'blocked', 'renewing_cookie'}:
                     receipt = {'session_id': run_id, 'notebook_ref': None, 'status': 'not_submitted',
                                'stopped': True, 'source': 'local_queue_cancel'}
                     self.records.finish(*key, receipt, 'CANCELLED')
@@ -647,8 +805,8 @@ class WorkingService:
         task = self.tasks.get(key)
         if task and not task.done():
             self.records.update(*key, state='STOPPING', phase='stopping')
-            if self.planner.worker.state.get('request_id') == run_id and self.planner.worker.state.get('status') == 'running':
-                self.planner.worker.cancelled.set()
+            if key in self.workers:
+                self.workers[key].cancelled.set()
             return {'run_id': run_id, 'state': 'STOPPING'}
         self.tasks[key] = asyncio.create_task(self._recover_stop(key))
         return {'run_id': run_id, 'state': 'STOPPING'}
@@ -668,6 +826,11 @@ class WorkingService:
         for project in self.store.list_projects():
             for run in self.store.history(project['id'])['runs']:
                 record = self.record(project['id'], run['id'])
+                if record and not record['stop_confirmed'] and record['phase'] == 'renewing_cookie':
+                    # Login happens before submission. Recheck the pinned account
+                    # when this queued intent resumes; there is no notebook to stop.
+                    self.records.update(project['id'], run['id'], state='QUEUED', phase='queued')
+                    continue
                 if record and not record['stop_confirmed'] and record['phase'] not in {'queued', 'blocked'}:
                     key = (project['id'], run['id'])
                     self.tasks[key] = asyncio.create_task(self._recover_stop(key))
@@ -683,10 +846,12 @@ class WorkingService:
         approved = self.store.approved_snapshot(project_id, run_id)
         detail['protocol'] = {'split': approved['body'].get('split'), 'metric': approved['body'].get('metric'),
                               'context_sha256': approved['context_sha256']}
+        detail['benchmark'] = approved['snapshot']['idea'].get('benchmark')
+        detail['benchmark_definition'] = approved['snapshot']['idea'].get('benchmark_definition')
         from .experiments import search_artifacts
         root = self.view.root(project_id, run_id)
         detail['artifacts'] = sorted(set(detail['artifacts']) | set(search_artifacts(root)))
-        if detail['mode'] != 'etc':
+        if detail['mode'] == 'training_research':
             approved = self.store.approved_snapshot(project_id, run_id)
             if approved['body'].get('research'):
                 from .research import saved_pipeline
@@ -705,6 +870,9 @@ class WorkingService:
                                 'directory': display_path(root),
                                 'stages': stages,
                                 'tree_path': 'logs/0-run/unified_tree_viz.html' if (root / 'logs/0-run/unified_tree_viz.html').is_file() else None}
+        if detail['mode'] == 'benchmark':
+            from .benchmarks import BenchmarkCatalog
+            detail['benchmark'] = next((item for item in BenchmarkCatalog(self.store).list(project_id) if item['run_id'] == run_id), None)
         if record:
             detail['result_metric'] = self.records.result_metric(project_id, run_id) or detail.get('result_metric')
             descriptor = record['descriptor'] or {}
@@ -715,7 +883,7 @@ class WorkingService:
             detail['can_retry'] = record['stop_confirmed'] and not detail['deleted_at']
             detail['coder_calls'] = record['agent_called']
             root = self.view.root(project_id, run_id)
-            for name in ('working-manifest.json', 'working-stop.json', 'report.md', 'output.json', 'working.log'):
+            for name in ('working-manifest.json', 'working-stop.json', 'report.md', 'output.json', 'working.log', 'benchmark-dataset.json', 'mlflow-status.json'):
                 if (root / name).is_file() and not (root / name).is_symlink():
                     detail['artifacts'].append(name)
             for item in (record['manifest'] or {}).get('files', []):
@@ -725,7 +893,7 @@ class WorkingService:
                         and not any(parent.is_symlink() or parent.is_junction() for parent in path.parents if parent.is_relative_to(root))):
                     detail['artifacts'].append(item['path'])
             detail['artifacts'] = sorted(set(detail['artifacts']))
-        if detail['mode'] == 'etc':
+        if detail['mode'] in {'etc', 'benchmark'}:
             from .outputs import output_detail
             detail['output'] = output_detail(root, record, detail['artifact_dir'], detail['state'], detail['artifacts'])
             if detail['output']['directory']:
@@ -739,7 +907,7 @@ class WorkingService:
             run.update(execution_mode=detail['execution_mode'], working=detail.get('working'),
                        account=detail.get('account'), session_id=detail.get('session_id'),
                        result_metric=detail.get('result_metric'),
-                       protocol=detail['protocol'],
+                       protocol=detail['protocol'], benchmark=detail.get('benchmark'),
                        artifacts=detail['artifacts'], report_available=detail['report_path'] == 'report.md',
                        output_available=bool(detail.get('output', {}).get('summary') or detail.get('output', {}).get('files')))
         return history
@@ -781,7 +949,7 @@ class WorkingService:
             run, created = self.store.reserve_retry(project_id, parent_run_id, request_id, tuple(unknown_ids), True)
             if created:
                 approved = self.store.approved_snapshot(project_id, run['id'])
-                if snapshot_settings(approved['snapshot'])[0] == 'etc':
+                if snapshot_settings(approved['snapshot'])[0] in {'etc', 'benchmark'}:
                     from .outputs import prepare_output
                     prepare_output(self.store, project_id, run['id'], approved)
                 root = self.view.root(project_id, run['id'])
@@ -828,6 +996,7 @@ class WorkingService:
 
     async def close(self, timeout):
         self.closed = True
+        self.cookie_cancelled.set()
         if self.queue_task:
             self.queue_task.cancel()
             await asyncio.gather(self.queue_task, return_exceptions=True)
@@ -835,8 +1004,8 @@ class WorkingService:
             if not task.done():
                 self.stop_requests.add(key)
                 record = self.record(*key)
-                if self.planner.worker.state.get('request_id') == key[1] and self.planner.worker.state.get('status') == 'running':
-                    self.planner.worker.cancelled.set()
+                if key in self.workers:
+                    self.workers[key].cancelled.set()
         running = [task for task in self.tasks.values() if not task.done()]
         if running:
             done, pending = await asyncio.wait(running, timeout=timeout)
@@ -852,3 +1021,4 @@ class WorkingService:
                     task.exception()
         for terminal in list(self.terminals.values()):
             await asyncio.to_thread(terminal.close)
+        await asyncio.gather(*(worker.close(timeout) for worker in self.workers.values()))
