@@ -24,6 +24,22 @@ research. Nền MVP3 được ghép từ merge commit `b448faa`.
 | M5-8 | Research bridge/outbox, approval/version/hash/budget/provenance | Idea → duyệt → code/review → Kaggle → report | Todo |
 | M5-9 | Security/load/recovery/release QA | 4 seats + 2 harness thật + reboot/retry + remote + no duplicate run | Todo |
 
+## Tiến độ kiểm chứng
+
+- Baseline sau merge/sửa review: **317 tests pass**.
+- Schema/workspaces/recovery + execution fixtures: **16 tests pass**; pipeline
+  Lead → Builder → QA → Reviewer giữ checkout chính nguyên vẹn, trao checkpoint
+  qua dependency và không replay task DONE khi khởi động lại.
+- Probe thật: native Codex (`gpt-6-luna`, cấu hình hiện có) và **DSH ACP v1** đều
+  trả JSON `ready`, có receipt chứng minh process tree đã dừng.
+- Người dùng chọn DSH ACP làm harness thứ hai ngày 2026-10-10. Bản cài local
+  `@deepseek-ai/dsh@0.2.0-rc.2` được chạy bằng Node entrypoint; không gọi npx/install.
+  Provider/model từ profile Web được copy vào file cấu hình ignored của repo;
+  chọn model qua ACP `session/set_config_option`, không thay global profile.
+- Native Claude có adapter nhưng auth native cần đăng nhập riêng; proxy đang cấu
+  hình trên máy không đạt probe. Gate hai harness sử dụng Codex + DSH theo yêu cầu.
+- UI/remote/research bridge và release QA vẫn đang triển khai; chưa nghiệm thu MVP5.
+
 ## Review regressions
 
 PR gốc `ba22421`: 31 tests gateway/bootstrap/planning/working pass nhưng probes

@@ -159,9 +159,19 @@ class ControlStore:
             self.event(con, "session_starting", rig_id=task["rig_id"], seat_id=task["seat"], task_id=task["id"], request_id=task["request_id"], provider_id=provider_id, session_id=session_id)
         return session_id
 
-    def process_started(self, session_id, process_id):
+    def process_started(self, session_id, process_id, birth_identity=None):
         with self.connect(True) as con:
             con.execute("UPDATE sessions SET state='RUNNING',process_id=?,updated_at=? WHERE id=?", (process_id, _now(), session_id))
+            row = con.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+            self.event(con, "process_started", {"pid": process_id, "birth_identity": birth_identity,
+                       "containment": "job" if __import__("os").name == "nt" else "process_group"},
+                       rig_id=row["rig_id"], seat_id=row["seat_id"], task_id=row["task_id"],
+                       request_id=row["request_id"], provider_id=row["provider_id"], session_id=session_id)
+
+    def process_record(self, session_id):
+        with self.connect() as con:
+            row = con.execute("SELECT data_json FROM journal WHERE session_id=? AND kind='process_started' ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+            return json.loads(row[0]) if row else None
 
     def complete_session(self, session_id, *, state, receipt, provider_session=None, usage=None):
         with self.connect(True) as con:
