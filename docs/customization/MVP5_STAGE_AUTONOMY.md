@@ -26,8 +26,8 @@ per stage. This corrects the previous coding-team interpretation of issue #2.
 Implementation is performed in the attached review worktree. Main checkout and
 the user's backend keep the accepted release until the correction is verified.
 Refactor commit dc019d2 passed 30 affected baseline tests before behavior work.
-Local fixtures do not establish real-provider/real-Kaggle acceptance. A new live
-scope will be proposed only after the implementation and local QA are reviewable.
+Local fixtures do not establish real-provider/real-Kaggle acceptance. The approved
+live scope and measured acceptance receipts are recorded in MVP5_STAGE_QA_RESULTS.md.
 
 References: the supplied OpenRig activity recording and documentation,
 T3 Code harness/remote architecture, and the existing AI Scientist experiment
@@ -43,8 +43,8 @@ manager and research finishing modules. No external daemon is required.
 - [x] A6: Settings UI, human idea/proposal forms, per-agent harness/model/instructions,
   activity map, human review controls and explicit remote research scope.
 - [x] A7: local regression and fixture QA, including actual experiment-manager code.
-- [ ] A8: live scope authorized; human gate and both harnesses verified. Full
-  four-stage Kaggle acceptance is pending after three stopped attempts.
+- [x] A8: live human gate, native/ACP providers, all four Kaggle stages,
+  summary/report, confirmed stop and restart without replay verified.
 - [ ] A9: review release, bring the verified correction to the main checkout.
 
 ## How to use
@@ -83,12 +83,13 @@ manager and research finishing modules. No external daemon is required.
   traversed Draft/Tuning/Research/Ablation with one simulated SSH session and file-verified
   metrics. These checks did not call a model or Kaggle.
 - Frontend production build passed. Desktop/mobile GUI and both presets were verified; mobile had no horizontal overflow and the console had no errors. GUI fixture endpoints reject model/Kaggle execution.
-- Live QA uses the explicit scope in MVP5_STAGE_QA_SCOPE.md. It has verified human
-  pause/resume/rejection without admission and delegated agent approval with exact
-  version/hash/grant. Three CPU attempts have confirmed stop receipts; the third
-  reached the Draft actor, which refused the contradictory native harness prompt.
-  Full research completion is not yet established. No new dataset or remote
-  exposure was created.
+- Live QA uses MVP5_STAGE_QA_SCOPE.md and the user's autonomous retry authorization.
+  Human pause/resume/rejection caused no admission; delegated ACP approval records
+  exact version/hash/grant. Workflow acf745d77c674171ae479f9ebfade1ff completed run
+  691be18f19ee4cd4b0ad811b99c455c7 through all four original stages and summary/report.
+  All seven CPU sessions have confirmed stop receipts; restart preserved DONE,
+  calls and task receipts, and rejected replay. No new dataset or remote exposure
+  was created. See MVP5_STAGE_QA_RESULTS.md for measured values and history.
 - Follow-up QA fixed unrelated team inbox/source leakage into structured stage turns,
   atomic JSON publication under Windows readers and redirected Unicode console output.
   One same-actor schema-format repair is allowed per invocation; it uses the existing
@@ -98,4 +99,9 @@ manager and research finishing modules. No external daemon is required.
   the grant, before approval. Native harnesses permit returning structured action
   JSON for the backend-owned approved session while retaining disabled local tools.
   Two pre-admission workflow attempts stopped on invalid output/budget; neither
-  consumed a Kaggle session. Total live usage so far: 16 agent calls, 3 CPU sessions.
+  consumed a Kaggle session. Total live usage: 55 agent calls, seven CPU sessions.
+- The latest 11 search/Windows tests also enable the original ResearchPipeline,
+  upstream tuning/ablation idea classes, stage summaries and report generation.
+  Selected-node limitations are explicitly scoped to that node at execution time;
+  a Draft baseline selected after later stages does not describe the aggregate
+  experiment as Draft-only.

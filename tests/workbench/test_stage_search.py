@@ -173,6 +173,7 @@ def test_configured_workflow_reuses_original_four_stage_manager(tmp_path,monkeyp
             detail=working.detail(project,run)
             assert detail['state']=='COMPLETED',detail
             assert detail['working']['stop_confirmed']
+            assert detail['working']['summary']['limitations']==['Giới hạn node được chọn lúc thực thi: Local fixture only']
             node_stages=[r.stage for r in runtime.calls if r.role=='mvp1_search_node']
             assert node_stages==['draft','tuning','research','ablation']
             assert len(bootstrap.calls)==len(donor.opens)==1

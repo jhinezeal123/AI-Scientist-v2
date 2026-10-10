@@ -407,7 +407,12 @@ class TreeSearchRun:
                                  if any(item['succeeded'] and item['id'] in self.nodes
                                         and self.node_stages[item['id']] == name for item in results)}
             success = completed == successful_stages == {1, 2, 3, 4}
-            limitations = payload.limitations + ([] if success else ['Chưa có bản thử thành công ở đủ bốn giai đoạn.'])
+            # A selected baseline can originate in Draft even after all stages
+            # complete. Its limitations describe that node's execution time,
+            # not the final aggregate experiment outcome.
+            limitations = ['Giới hạn node được chọn lúc thực thi: ' + item for item in payload.limitations]
+            if not success:
+                limitations.append('Chưa có bản thử thành công ở đủ bốn giai đoạn.')
             if self.pipeline:
                 # Restore the selected implementation before optional SSH finishing
                 # steps; the last ablation/seed can differ from the selected node.
