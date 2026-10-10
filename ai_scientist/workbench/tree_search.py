@@ -86,7 +86,7 @@ class RemoteSearchAgent:
         elif self.owner.pipeline and action == 'improve' and self.stage_name.startswith('4_'):
             idea = ParallelAgent._generate_ablation_idea(self)
         node = self.owner.execute_node(self.stage_name, self.task_desc, parent, action,
-                                       stage_idea=asdict(idea) if idea else None)
+                                       stage_idea={'name': idea.name, 'description': idea.description} if idea else None)
         if idea:
             if self.stage_name.startswith('2_'):
                 node.hyperparam_name = idea.name

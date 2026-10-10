@@ -7,10 +7,30 @@ from types import SimpleNamespace
 import urllib.request
 import io
 import sys
+import os
+from pathlib import Path
 import pytest
 from ai_scientist.workbench.agents.contracts import RuntimeRequest
 from ai_scientist.workbench.models import SearchOptions
 from test_working import fixture
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows extended path namespace')
+def test_node_serialization_accepts_windows_extended_paths(tmp_path,monkeypatch):
+    from ai_scientist.treesearch.journal import Node
+    monkeypatch.chdir(tmp_path)
+    output=tmp_path/'output'
+    output.mkdir()
+    node=Node(plan='measured run',code='print(1)',exp_results_dir='\\\\?\\'+str(output))
+    assert node.to_dict()['exp_results_dir']=='output'
+
+
+def test_node_serialization_accepts_workspace_outside_process_cwd(tmp_path,monkeypatch):
+    from ai_scientist.treesearch.journal import Node
+    cwd=tmp_path/'backend';cwd.mkdir();monkeypatch.chdir(cwd)
+    output=tmp_path/'research-output';output.mkdir()
+    node=Node(plan='measured run',code='print(1)',exp_results_dir=str(output))
+    assert Path(node.to_dict()['exp_results_dir']).resolve()==output.resolve()
 
 
 def test_redirected_windows_console_accepts_vietnamese(monkeypatch):
@@ -52,6 +72,30 @@ def test_state_publication_does_not_hide_permanent_permissions(tmp_path,monkeypa
     with pytest.raises(PermissionError,match='Persistent'):
         write_json(tmp_path/'pipeline.json',{'status':'failed'})
 
+@pytest.mark.parametrize('stage,response,name',[
+    ('2_baseline_tuning_1_first_attempt','HYPERPARAM NAME: repeat\nDESCRIPTION: Repeat fixed baseline.','repeat'),
+    ('4_ablation_1_first_attempt','ABLATION NAME: intercept\nABLATION DESCRIPTION: Remove intercept.','intercept'),
+])
+def test_pipeline_preserves_original_stage_idea_objects(monkeypatch,stage,response,name):
+    from ai_scientist.workbench import tree_search
+    from ai_scientist.treesearch import parallel_agent
+    from ai_scientist.treesearch.journal import Journal,Node
+    import time
+    baseline=Node(plan='baseline',code='print(1)',is_buggy=False)
+    journal=Journal();journal.append(baseline)
+    captured=[]
+    def execute(*args,**kwargs):
+        captured.append(kwargs['stage_idea'])
+        return Node(plan='candidate',code=baseline.code,parent=baseline)
+    owner=SimpleNamespace(deadline=time.monotonic()+60,pipeline=True,check_running=lambda:None,execute_node=execute)
+    actor=tree_search.RemoteSearchAgent(owner,'approved objective',SimpleNamespace(agent=SimpleNamespace(code=SimpleNamespace(model='fixture',temp=0))),journal,stage_name=stage)
+    monkeypatch.setattr(tree_search,'select_parallel_nodes',lambda actor:[baseline])
+    monkeypatch.setattr(parallel_agent,'query',lambda **kwargs:response)
+    actor.step(None)
+    assert captured==[{'name':name,'description':'Repeat fixed baseline.' if stage.startswith('2_') else 'Remove intercept.'}]
+    assert getattr(journal.nodes[-1],'hyperparam_name' if stage.startswith('2_') else 'ablation_name')==name
+
+
 class SearchRuntime:
     def __init__(self):
         self.calls=[]
@@ -64,7 +108,15 @@ class SearchRuntime:
             data=json.loads((request.workdir/'query-request.json').read_text(encoding='utf-8'))
             spec=data.get('function')
             if not spec:
-                response='Verified local fixture analysis'
+                response_format=data.get('system_message',{}).get('Response format','') if isinstance(data.get('system_message'),dict) else ''
+                if 'HYPERPARAM NAME:' in response_format:
+                    response='HYPERPARAM NAME: repeat\nDESCRIPTION: Repeat the verified baseline.'
+                elif 'ABLATION NAME:' in response_format:
+                    response='ABLATION NAME: intercept\nABLATION DESCRIPTION: Remove the intercept.'
+                elif isinstance(data.get('system_message'),dict) and 'Messages' in data['system_message']:
+                    response='```json\n{"fixture":"Measured local fixture only","metric":0.25}\n```'
+                else:
+                    response='Verified local fixture analysis'
             else:
                 def value(schema):
                     if 'enum' in schema: return schema['enum'][0]
@@ -97,7 +149,8 @@ class SearchRuntime:
             'datasets_tested':['fixture']}),files={})
 
 @pytest.mark.parametrize('legacy_console',[False,True])
-def test_configured_workflow_reuses_original_four_stage_manager(tmp_path,monkeypatch,legacy_console):
+@pytest.mark.parametrize('research_enabled',[False,True])
+def test_configured_workflow_reuses_original_four_stage_manager(tmp_path,monkeypatch,legacy_console,research_enabled):
     if legacy_console:
         from ai_scientist.workbench.app import configure_console
         monkeypatch.setattr(sys,'stdout',io.TextIOWrapper(io.BytesIO(),encoding='cp1252'))
@@ -107,8 +160,14 @@ def test_configured_workflow_reuses_original_four_stage_manager(tmp_path,monkeyp
         runtime=SearchRuntime()
         store,project,run,worker,planner,working,_,bootstrap,donor=fixture(tmp_path,runtime=runtime)
         planner.bindings.request_type=RuntimeRequest
-        working.config.codex_model='fixture'
+        working.config.codex_model='gpt-fixture'
         try:
+            if research_enabled:
+                approved=store.approved_snapshot(project,run)
+                idea=store.save_idea(project,'Four stages with summary and report')
+                context=store.context_snapshot(project,idea['id'],[item['id'] for item in approved['snapshot']['resources']])
+                proposal=store.save_proposal(project,idea['id'],{**approved['body'],'research':{'summary':True,'report':True}},context)
+                run=(await planner.approve(project,proposal,1,context['context_sha256']))['id']
             await working.start(project,run)
             await working.tasks[project,run]
             detail=working.detail(project,run)
@@ -121,6 +180,12 @@ def test_configured_workflow_reuses_original_four_stage_manager(tmp_path,monkeyp
             state=json.loads((root/'logs/0-run/search-state.json').read_text(encoding='utf-8'))
             assert len(state['stages'])==4
             assert (root/'output/metric.json').is_file()
+            if research_enabled:
+                pipeline=json.loads((root/'research/pipeline.json').read_text(encoding='utf-8'))
+                assert pipeline['status']=='completed'
+                assert pipeline['components']['summary']['status']=='completed'
+                assert pipeline['components']['report']['status']=='completed'
+                assert (root/'research/report.md').is_file()
         finally:
             await working.close(2)
             await planner.close()

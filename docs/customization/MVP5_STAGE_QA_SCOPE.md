@@ -1,5 +1,20 @@
 # Scope QA: pipeline research theo stage
 
+## Ủy quyền cập nhật của user
+
+Sau khi duyệt phiên thứ năm, user đã cho phép tự chủ động chạy thêm phiên CPU
+để hoàn tất QA và không hỏi lại cho từng phiên. Ủy quyền này thay giới hạn số phiên
+cũ. Vẫn giữ account huynhtrungcuong, benchmark public hiện có, CPU, TTL 600s/work
+480s/output 5MB cho từng phiên. Chỉ mở lần tiếp theo khi lần trước đã dừng xác nhận;
+giữ evidence FAILED, không replay run cũ. Không đổi provider, dataset hay remote scope.
+Deadline 01:39 cũ đã được thay bằng cửa sổ QA tiếp đến 02:09 (19:09 UTC)
+theo quyền chạy tiếp của user; giữ 60 lượt agent đã đặt. Nếu cần lượt tiếp,
+operator tự ghi bổ sung hữu hạn theo ủy quyền mới trước khi mở phiên.
+
+Phiên thứ sáu đã dừng xác nhận sau Draft đo thật: lỗi adapter gọi `asdict`
+trên class ý tưởng Tuning/Ablation gốc, vốn không phải dataclass. Bản sửa giữ
+đúng hai thuộc tính `name`/`description` và kiểm tra cả hai loại gốc trước retry.
+
 Scope ban đầu được user duyệt ngày 2026-10-11. Bắt đầu 17:39 UTC ngày
 2026-10-10, deadline 18:09 UTC (01:09 giờ Việt Nam). Tổng 60 lượt agent.
 
@@ -78,3 +93,23 @@ User đã duyệt phiên thứ tư và deadline 01:39 giờ Việt Nam.
   **18:39 UTC / 01:39 giờ Việt Nam**. Không mở phiên trước khi user duyệt.
 - Giữ cả ba run FAILED và hai workflow bị gate chặn trước admission làm evidence.
   Không replay run cũ, không tạo dataset mới và không tự mở phiên thứ năm.
+
+## Bổ sung lần bốn (đã duyệt)
+
+User đã duyệt phiên thứ năm, giữ deadline 01:39 giờ Việt Nam.
+
+- Phiên thứ tư `56e2448e18704df58fbde8d09b2bd322` đã FAILED, có
+  `stop_confirmed=true`. Backend đã thực thi action, nhưng source do agent tạo
+  có lỗi cú pháp; agent trả prose thay vì action JSON khi báo lỗi. Không có metric.
+- Đã chuẩn bị workload bằng cách tái sử dụng source đã chạy thành công ở QA
+  benchmark cũ, chỉ đổi predictor/one-step/output names cho scope này. Local QA
+  xác minh hash cả ba file public và chạy đủ bốn biến thể bằng evaluator thật:
+  baseline/repeat MSE 0.0013851734605946817; ablation MSE 1.002662336883973.
+  Resolver download được mô phỏng trong local QA; đây chưa phải nghiệm thu Kaggle.
+- Source được chọn và pin trong Library; agent vẫn phải thực thi nó qua action
+  backend và trả evidence thật. Native seats dùng gpt-6.1-sol đã có trong catalog;
+  approval vẫn dùng DSH ACP. Không dùng code/metric fixture thay thế kết quả live.
+- Xin thêm tối đa **1 phiên CPU 10 phút**, tổng tối đa 5 phiên. Không tăng
+  deadline **18:39 UTC / 01:39 giờ Việt Nam**, không tăng tổng **60 lượt agent**
+  (đã dùng 22 lượt). Giữ account/benchmark/output/TTL/work như scope hiện có.
+- Không mở phiên thứ năm trước khi được user duyệt; không replay bốn run FAILED.
