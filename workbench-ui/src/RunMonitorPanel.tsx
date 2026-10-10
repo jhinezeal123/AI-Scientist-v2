@@ -7,6 +7,7 @@ type Delta=LogMetadata & {run_state:string;next_cursor:string;
   has_more:boolean;reset:boolean;gap:boolean;terminal:boolean;
   error:string|null;telemetry_error:string|null;points:MetricPoint[];primary_metric:string|null;direction:string|null;
   eta_seconds:number|null;
+  metric_nodes?:{id:string;stage:string;points:MetricPoint[];error:string|null}[];metric_node?:string|null;
   observation:{identity:{status:string};observed_at:string;source:string;complete:boolean}|null};
 type CollectorStats={upstream_frames:number;upstream_log_bytes:number;client_reads:number;client_bytes:number;
   client_mean_latency_ms:number|null;provider:{requests:number;request_bytes:number;response_bytes:number;mean_latency_ms:number|null}|null};
@@ -46,9 +47,10 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
   const [stats,setStats]=useState<CollectorStats|null>(null);
   const [error,setError]=useState('');
   const [selectedMetric,setSelectedMetric]=useState('');
+  const [selectedNode,setSelectedNode]=useState('');
   useEffect(() => {
     let cancelled=false;let timer:number;
-    setData(null);setStats(null);setError('');setSelectedMetric('');
+    setData(null);setStats(null);setError('');setSelectedMetric('');setSelectedNode('');
     async function poll() {
       try {
         const page=await api<Delta>(`/projects/${projectId}/runs/${runId}/log-window?limit=0`);
@@ -65,7 +67,9 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
     void poll();
     return () => {cancelled=true;window.clearTimeout(timer);};
   },[projectId,runId,onObserved,working]);
-  const points=data?.points || [];
+  const metricNodes=data?.metric_nodes || [];
+  const node=metricNodes.find(item=>item.id===selectedNode)||metricNodes.find(item=>item.id===data?.metric_node);
+  const points=node?.points || data?.points || [];
   const metrics=Array.from(new Set(points.flatMap(point=>Object.keys(point.metrics)
     .filter(name=>Number.isFinite(point.metrics[name])))));
   const metric=metrics.includes(selectedMetric) ? selectedMetric : metrics.includes('training_loss')
@@ -81,10 +85,11 @@ export default function RunMonitorPanel({projectId,runId,onObserved,working=fals
     {data?.gap && <p className="alert error">Nguồn log bị cắt hoặc đổi. Đã lưu generation mới; đang chờ đối soát log terminal.</p>}
     {data?.telemetry_error && <p className="alert error" role="alert">{data.telemetry_error}</p>}
     {working && !latest && !data?.terminal && <p className="muted">Curve/ETA: chưa đủ dữ liệu metric theo step từ phiên thật.</p>}
+    {metricNodes.length>0&&<label>Node thí nghiệm<select value={node?.id||''} onChange={e=>{setSelectedNode(e.target.value);setSelectedMetric('');}}>{metricNodes.map(item=><option key={item.id} value={item.id}>{({1:'Draft',2:'Tuning',3:'Research',4:'Ablation'} as Record<string,string>)[item.stage.split('_')[0]]||item.stage} · {item.id.slice(0,8)}{item.id===data?.metric_node?' · node được chọn':''}</option>)}</select></label>}
     {latest && <section className="training-metrics" aria-label="Loss và metric training">
       <div className="panel-head"><h3>Loss và metric</h3>
         <span className="muted">Step {latest.step}/{latest.total_steps} · {samples.length} mẫu</span></div>
-      {!data?.terminal && <p className="muted">ETA: {data?.eta_seconds==null ? 'chưa đủ dữ liệu' : `${Math.ceil(data.eta_seconds/60)} phút (theo tốc độ step gần nhất)`}</p>}
+      {!data?.terminal && <p className="muted">ETA: {(node&&node.id!==data?.metric_node)||data?.eta_seconds==null ? 'chưa đủ dữ liệu' : `${Math.ceil(data.eta_seconds/60)} phút (theo tốc độ step gần nhất)`}</p>}
       <label>Metric hiển thị<select value={metric} onChange={event=>setSelectedMetric(event.target.value)}>
         {metrics.map(name=><option key={name} value={name}>{name}</option>)}
       </select></label>

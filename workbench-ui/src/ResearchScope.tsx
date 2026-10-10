@@ -1,7 +1,7 @@
 import {ResearchPlan, ResearchPipeline} from './api';
 import ResearchOptions from './ResearchOptions';
 
-const parts:Record<string,string>={execution:'Thực thi run',tree:'Cây đã lưu từ phiên bản trước',multi_seed:'Đánh giá nhiều seed',
+const parts:Record<string,string>={execution:'Thực thi run',tree:'Cây thí nghiệm',multi_seed:'Đánh giá nhiều seed',
   summary:'Summary thí nghiệm',report:'Report kỹ thuật',plots:'Tổng hợp figures',writeup:'Bài PDF',review:'Review văn bản'};
 const statuses:Record<string,string>={pending:'Chưa chạy',running:'Đang chạy',completed:'Hoàn tất',
   failed:'Có lỗi',interrupted:'Bị gián đoạn',blocked:'Thiếu đầu vào',not_requested:'Không yêu cầu'};
