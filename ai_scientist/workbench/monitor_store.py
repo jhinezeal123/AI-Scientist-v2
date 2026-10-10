@@ -34,6 +34,36 @@ def telemetry(records, metric, max_steps=100):
     return points,error
 
 
+def node_telemetry(records, metric, selected_node=None):
+    """Separate step counters only at backend-authored experiment boundaries."""
+    groups={};current=None
+    for record in records:
+        text=record['text']
+        marker=(re.fullmatch(r'Giai đoạn ([1-4]_[A-Za-z0-9_-]+): (?:draft|improve|debug|seed) · node ([0-9a-f]{8,32})\n',text)
+                if record['stream']=='backend' else None)
+        if marker:
+            stage,identity=marker.groups()
+            current=groups.setdefault(identity,{'id':identity,'stage':stage,'chunks':[]})
+        elif current is not None and record['stream']!='backend':
+            current['chunks'].append(text)
+    if not groups:return None
+    nodes=[]
+    for group in groups.values():
+        split_lines=''.join(group.pop('chunks')).split('\n')
+        carry=split_lines.pop()
+        lines=split_lines
+        metric_lines=[line.rstrip('\r') for line in lines if line.startswith('AILAB_METRIC ')]
+        points,error=telemetry([{'data':line} for line in metric_lines[:1000]],metric,max_steps=1_000_000)
+        nodes.append({**group,'points':points,'error':error or ('Metric stream vượt giới hạn; xem log gốc.' if len(metric_lines)>1000 or len(carry)>16384 else None)})
+    chosen=nodes[-1]
+    if selected_node:
+        matches=[node for node in nodes if selected_node.startswith(node['id'])]
+        if len(matches)!=1:return {'nodes':nodes,'points':[],'node':None,'error':'Không xác định được telemetry của node đã chọn.'}
+        chosen=matches[0]
+    return {'nodes':nodes,'points':chosen['points'],'node':chosen['id'],
+            'error':next((node['error'] for node in nodes if node['error']),None)}
+
+
 class MonitorStore:
     def __init__(self, store):self.store=store
 

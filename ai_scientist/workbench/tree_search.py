@@ -204,7 +204,7 @@ class TreeSearchRun:
         self.service.records.update(*self.key, phase=stage_name)
         record = self.service.record(*self.key)
         self.service.records.update(*self.key, agent_called=record['agent_called'] + 1)
-        self.service.records.append_log(*self.key, f'Giai đoạn {stage_name}: {action} · node {node.id[:8]}\n', 'backend')
+        self.service.records.append_log(*self.key, f'Giai đoạn {stage_name}: {action} · node {node.id}\n', 'backend')
         remote = self.descriptor['remote_directory']
         # Reset only the two backend-owned implementation/result folders, never
         # the notebook, Library, SSH process, or credentials. Commands keep SSH.

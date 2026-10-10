@@ -28,7 +28,7 @@ jobs:
       - name: Validate syntax
         run: python -m compileall -q 'agent management' ai_scientist/workbench/runtime.py ai_scientist/workbench/app.py
       - name: Test gateway, execution, scopes, recovery and research bridge
-        run: python -m pytest tests/workbench/test_agent_management.py tests/workbench/test_agent_team_execution.py tests/workbench/test_agent_team_api.py tests/workbench/test_agent_research_bridge.py tests/workbench/test_agent_release_guards.py -q
+        run: python -m pytest tests/workbench/test_agent_management.py tests/workbench/test_agent_team_execution.py tests/workbench/test_agent_team_api.py tests/workbench/test_agent_research_bridge.py tests/workbench/test_agent_release_guards.py tests/workbench/test_node_telemetry.py -q
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

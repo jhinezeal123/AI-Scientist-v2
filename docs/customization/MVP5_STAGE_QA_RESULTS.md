@@ -72,3 +72,17 @@ workflows were stopped before admission by output-format/budget gates.
 
 Live raw receipts and artifacts stay in the ignored local QA workspace; credentials
 are not part of the committed evidence.
+
+## Follow-up: metric display for multiple nodes
+
+Final run-page QA found that the flat step stream treated each new node's step 1
+as a conflict. The follow-up separates metrics at backend-authored node boundaries,
+preserves strict step/elapsed validation inside each node, and defaults completed
+run telemetry to the selected node. The GUI can inspect all four nodes. Invalid
+telemetry in any node is still reported; workload stdout cannot establish a boundary.
+
+Reading the original live SQLite frames again yielded all four exact metrics with
+no error and selected Draft metric 0.0013851734605946817. No saved log, artifact,
+metric, run state or model call was rewritten, and no additional Kaggle session
+was needed. Targeted verification: 7 node telemetry cases, 11 original stage and
+research cases, 13 monitor cases; frontend build passed.

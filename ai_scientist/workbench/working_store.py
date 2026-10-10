@@ -7,7 +7,7 @@ import time
 
 from .store import StoreConflict, canonical
 from .modes import snapshot_settings
-from .monitor_store import telemetry
+from .monitor_store import telemetry, node_telemetry
 
 SCHEMA = '''CREATE TABLE IF NOT EXISTS working_runs(
 run_id TEXT PRIMARY KEY REFERENCES runs(id), session_id TEXT NOT NULL UNIQUE,
@@ -173,17 +173,28 @@ class WorkingStore:
             raise ValueError('Invalid log cursor or page limit')
         seq = int(cursor.split(':')[1]) if cursor else 0
         run = self.store.run(project_id, run_id)
+        state_path=self.store.run_root(project_id,run_id)/'logs/0-run/search-state.json'
         with self.store.connection(project_id) as connection:
             rows = connection.execute('SELECT seq,text,stream FROM logs WHERE run_id=? AND generation=1 AND seq>? ORDER BY seq LIMIT ?', (run_id, seq, limit + 1)).fetchall()
             count = connection.execute('SELECT COALESCE(MAX(seq),0) FROM logs WHERE run_id=? AND generation=1', (run_id,)).fetchone()[0]
             self._schema(connection)
             telemetry_row = connection.execute('SELECT * FROM working_telemetry WHERE run_id=?', (run_id,)).fetchone()
+            node_records=(connection.execute('SELECT text,stream FROM logs WHERE run_id=? AND generation=1 ORDER BY seq',(run_id,)).fetchall()
+                          if state_path.is_file() else [])
         if seq > count:
             raise ValueError('Log cursor is ahead of stored records')
         entries = [dict(row) for row in rows[:limit]]
         points = json.loads(telemetry_row['points_json']) if telemetry_row else []
+        segmented=None
+        if telemetry_row and telemetry_row['primary_metric']:
+            selected=None
+            if run['state'] in TERMINAL and state_path.is_file():
+                selected=json.loads(state_path.read_text(encoding='utf-8')).get('selected_node_id')
+            segmented=node_telemetry(node_records,telemetry_row['primary_metric'],selected)
+            if segmented:points=segmented['points']
+        telemetry_error=segmented['error'] if segmented else telemetry_row['error'] if telemetry_row else None
         eta = None
-        if (run['state'] not in TERMINAL and telemetry_row and not telemetry_row['error'] and not telemetry_row['gap'] and len(points) >= 2):
+        if (run['state'] not in TERMINAL and telemetry_row and not telemetry_error and not telemetry_row['gap'] and len(points) >= 2):
             previous, latest = points[-2:]
             duration = latest['elapsed_seconds'] - previous['elapsed_seconds']
             steps = latest['step'] - previous['step']
@@ -195,7 +206,8 @@ class WorkingStore:
                 'next_cursor': '1:' + str(entries[-1]['seq'] if entries else seq), 'has_more': len(rows) > limit,
                 'terminal': run['state'] in TERMINAL, 'reset': False,
                 'gap': bool(telemetry_row and telemetry_row['gap']),
-                'error': run['error'], 'telemetry_error': telemetry_row['error'] if telemetry_row else None,
+                'error': run['error'], 'telemetry_error': telemetry_error,
+                'metric_nodes':segmented['nodes'] if segmented else [],'metric_node':segmented['node'] if segmented else None,
                 'points': points, 'eta_seconds': eta,
                 'primary_metric': telemetry_row['primary_metric'] if telemetry_row else None,
                 'direction': telemetry_row['direction'] if telemetry_row else None, 'observation': None}
