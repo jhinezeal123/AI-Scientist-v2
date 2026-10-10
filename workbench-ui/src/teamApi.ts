@@ -2,11 +2,11 @@ export type Policy={sandbox:'read-only';file_edits:boolean;terminal:boolean;netw
 export type Seat={id:string;role:string;pod:string;harness:string;model:string|null;instructions:string;policy:Policy};
 export type RigSpec={version:2;name:string;project_id:string|null;base_ref:string;pods:{id:string;max_parallel:number}[];seats:Seat[];context:unknown[];max_parallel:number;timeout_seconds:number;template:string|null};
 export type Team={id:string;spec:RigSpec;enabled:boolean;revision:number};
-export type Task={id:string;seat:string;request_id:string;state:string;depends_on:string|null;payload:{instruction?:string;argv?:string[]};result:{summary?:string;error?:string;checks?:string[];handoff?:string;checkpoint?:string}|null};
-export type Session={id:string;seat_id:string;state:string;provider_id:string;provider_session:string|null;usage:Record<string,unknown>;stop_receipt:Record<string,unknown>|null};
+export type Task={id:string;seat:string;request_id:string;state:string;depends_on:string|null;payload:{instruction?:string;argv?:string[]};result:{summary?:string;error?:string;checks?:string[];handoff?:string;checkpoint?:string;session_id?:string}|null};
+export type Session={id:string;seat_id:string;task_id?:string|null;created_at?:string;updated_at?:string;state:string;provider_id:string;provider_session:string|null;usage:Record<string,unknown>;stop_receipt:Record<string,unknown>|null};
 export type Snapshot=Team&{tasks:Task[];seats:{id:string;state:string;worktree:string|null;checkpoint:string|null}[];sessions:Session[]};
 export type Harness={spec:{id:string;kind:string;models:string[]};probe:{ready:boolean;auth?:string;attention_required?:string;capabilities:Record<string,boolean>}};
-export type Event={id:number;kind:string;seat_id:string|null;timestamp:string;data:Record<string,unknown>};
+export type Event={id:number;kind:string;seat_id:string|null;task_id?:string|null;session_id?:string|null;request_id?:string|null;provider_id?:string|null;timestamp:string;data:Record<string,unknown>};
 export type Permission={id:string;session_id:string;operation:{options?:{optionId:string;name:string;kind:string}[];toolCall?:unknown;subject?:unknown}};
 export type Device={id:string;name:string;revoked:boolean;expires_at:string;scopes:string[];rig_ids:string[]};
 // Preserve an intent across lost responses, reloads and reconnects. Store only
