@@ -50,7 +50,9 @@ class RpcChannel:
                     if len(line) > 2_000_000 or count > 8_000_000:
                         self.failed.set()
                         break
-                    self.inbox.put_nowait(json.loads(line))
+                    message = self.decode_stdout(line)
+                    if message is not None:
+                        self.inbox.put_nowait(message)
             except (ValueError, queue.Full, OSError):
                 self.failed.set()
             finally:
@@ -74,6 +76,7 @@ class RpcChannel:
                 while chunk := self.proc.stderr.read1(8192):
                     count += len(chunk)
                     self.stderr.extend(chunk[:max(0,100000-len(self.stderr))])
+                    self.consume_stderr(chunk)
                     if count > 2000000:
                         self.failed.set()
                         break
@@ -88,6 +91,12 @@ class RpcChannel:
         except BaseException:
             self.close()
             raise
+
+    def decode_stdout(self, line):
+        return json.loads(line)
+
+    def consume_stderr(self, chunk):
+        pass
 
     def guard(self):
         if self.cancelled():
@@ -241,6 +250,9 @@ class AcpHarness:
             raise ValueError("ACP v2 agent does not support session prompting")
         return result
 
+    def open_channel(self, *args):
+        return RpcChannel(*args)
+
     def send(self, handle, message, *, request_id, timeout, emit, started):
         messages, order = {}, []
         legacy_chunks = []
@@ -296,7 +308,7 @@ class AcpHarness:
         argv = [self.executable(), *self.spec.args]
         if self.sandbox:
             argv = self.sandbox(handle, argv, provider_home=environment.get('DSH_HOME'))
-        channel = RpcChannel(argv, handle.workspace, timeout,
+        channel = self.open_channel(argv, handle.workspace, timeout,
                              handle.interrupted.is_set, handler, started, environment)
         try:
             initialized = self.initialize(channel)
