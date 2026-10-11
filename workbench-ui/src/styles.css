@@ -139,3 +139,6 @@ main{margin-left:240px;padding:0 32px 40px;max-width:1700px}header{display:flex;
 @media(max-width:1200px){.observer-layout{grid-template-columns:minmax(0,1fr)}.observer-inspector{border-left:0;border-top:1px solid var(--line)}.observer-inspector-body{max-height:340px}.observer-map{max-height:none}}
 @media(max-width:640px){.observer-heading{align-items:flex-start;flex-direction:column;padding:16px}.observer-summary{padding:0 16px 14px;flex-direction:column;gap:6px}.observer-map{min-width:0}.observer-legend{padding:8px 16px;gap:12px}.observer-hint{margin:6px 16px 16px}.observer-inspector-head{padding:16px}.observer-heading h3{font-size:17px}.observer-table th,.observer-table td{padding:10px 8px}.observer-table td:nth-child(2){min-width:95px}.observer-table td:nth-child(3),.observer-table td:nth-child(4){white-space:normal}.observer-table button{font-size:11px;white-space:normal}.observer-table small{max-width:125px}}
 @media(prefers-reduced-motion:reduce){.observer-edge.active,.observer-node.running .observer-status-dot,.observer-table-row.running .observer-state{animation:none}}
+
+/* Provider configuration on narrow settings pages. */
+@media(max-width:650px){.settings-rail .settings-nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.settings-rail .settings-nav a{padding:9px 12px;font-size:13px}}

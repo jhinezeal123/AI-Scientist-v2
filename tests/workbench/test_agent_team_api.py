@@ -11,7 +11,9 @@ from tests.workbench.test_agent_team_execution import repository
 
 Gateway = _agent_gateway_class()
 P = Gateway.__module__.rsplit('.',1)[0]
-api = importlib.import_module(P+'.team_api')
+api = importlib.import_module(P+'.api')
+support = importlib.import_module(P+'.api_support')
+auth = importlib.import_module(P+'.auth')
 models = importlib.import_module(P+'.models')
 remote = importlib.import_module(P+'.remote')
 
@@ -22,8 +24,8 @@ def client(repository, monkeypatch):
     gateway=Gateway(SimpleNamespace(executable='',model=None),repository)
     app=FastAPI()
     app.state.runtime=SimpleNamespace(runtime=gateway)
-    app.include_router(api.create_team_router())
-    app.middleware('http')(api.remote_boundary)
+    app.include_router(api.create_management_router())
+    app.middleware('http')(support.remote_boundary)
     with TestClient(app,headers={'Authorization':'Bearer fixture-only-key'}) as client:
         yield client,gateway
     gateway.close()
@@ -87,7 +89,33 @@ def test_pair_scope_csrf_revocation_and_one_time_code(client):
     assert client.get('/api/agent-management/teams/team').status_code==401
     with gateway.platform.store.connect() as con:
         rows=[dict(r) for r in con.execute('SELECT * FROM devices')]
-    assert client.cookies.get(remote.COOKIE) not in json.dumps(rows)
+    assert client.cookies.get(auth.COOKIE) not in json.dumps(rows)
+
+
+def test_local_token_creates_persistent_revocable_browser_session(client):
+    browser, _ = client
+    response = browser.post('/api/agent-management/local-session')
+    assert response.status_code == 200, response.text
+    assert 'token' not in response.json()
+    assert 'HttpOnly' in response.headers['set-cookie']
+    assert 'Max-Age=2592000' in response.headers['set-cookie']
+    browser.headers.pop('Authorization')
+    identity = browser.get('/api/agent-management/identity')
+    assert identity.status_code == 200
+    assert 'admin' in identity.json()['scopes']
+    assert browser.get('/api/agent-management/teams').status_code == 200
+    assert browser.post('/api/agent-management/logout').status_code == 403
+    browser.headers['X-Agent-CSRF'] = identity.json()['csrf']
+    assert browser.post('/api/agent-management/logout').status_code == 200
+    assert browser.get('/api/agent-management/identity').status_code == 401
+
+
+def test_local_session_rejects_remote_and_wrong_token(client, monkeypatch):
+    local, _ = client
+    assert local.post('/api/agent-management/local-session', headers={'Authorization':'Bearer wrong'}).status_code == 401
+    monkeypatch.setenv('AI_SCIENTIST_AGENT_PUBLIC_ORIGIN', 'https://private.example')
+    with TestClient(local.app, base_url='https://private.example', headers={'Authorization':'Bearer fixture-only-key'}) as device:
+        assert device.post('/api/agent-management/local-session').status_code == 403
 
 
 def test_https_reverse_proxy_does_not_expose_bootstrap_or_legacy_api(client,monkeypatch):
@@ -113,7 +141,7 @@ def test_https_reverse_proxy_does_not_expose_bootstrap_or_legacy_api(client,monk
 def test_agent_cannot_approve_or_impersonate(client):
     client,gateway=client
     create(client)
-    token=remote.DeviceAccess(gateway.platform.store).agent_token('team','builder')['token']
+    token=auth.DeviceAccess(gateway.platform.store).agent_token('team','builder')['token']
     client.headers['Authorization']='Bearer '+token
     assert client.post('/api/agent-management/teams/team/start').status_code==403
     assert client.post('/api/agent-management/pair',json={'scopes':['admin'],'rig_ids':['*']}).status_code==403
@@ -136,7 +164,7 @@ def test_agent_read_scope_covers_diff_snapshot_and_event_content(client):
     for _ in range(205):
         control.store.publish('output',{'text':'peer event canary'},rig_id='team',seat_id='lead')
     control.store.publish('output',{'text':'own event'},rig_id='team',seat_id='builder')
-    token=remote.DeviceAccess(control.store).agent_token('team','builder')['token']
+    token=auth.DeviceAccess(control.store).agent_token('team','builder')['token']
     client.headers['Authorization']='Bearer '+token
     base='/api/agent-management/teams/team'
     assert client.get(base+'/seats/lead/review').status_code==403

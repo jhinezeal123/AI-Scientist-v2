@@ -1,0 +1,801 @@
+import {useEffect,useRef,useState,type ReactElement,type ReactNode} from 'react';
+import {PlusIcon,XIcon,Trash2Icon,LockIcon,LockOpenIcon} from 'lucide-react';
+import * as Arr from 'effect/Array';
+import * as Result from 'effect/Result';
+import {isProviderDriverKind,resolveProviderInstanceEnabled,type ProviderInstanceConfig,type ProviderInstanceEnvironmentVariable,type ProviderInstanceId,type ProviderDriverKind,type ServerProvider,type ServerProviderModel,type ProviderClientDefinition,type ProviderEnvironmentField} from '../../bridge/contracts';
+import {type CustomModelDefinition,readCustomModelEntries,toCustomModelSetting} from '../../bridge/model';
+import {normalizeProviderAccentColor} from '../../bridge/providerInstances';
+import {cn} from '../../lib/utils';
+import {Badge} from '../ui/badge';
+import {Button} from '../ui/button';
+import {DraftInput} from '../ui/draft-input';
+import {Switch} from '../ui/switch';
+import {Tooltip,TooltipPopup,TooltipTrigger} from '../ui/tooltip';
+import {deriveProviderSettingsFields,ProviderSettingsForm} from './ProviderSettingsForm';
+import {ProviderModelsSection} from './ProviderModelsSection';
+import {ProviderInstanceIcon} from '../chat/ProviderInstanceIcon';
+import {ProviderAccentColorPicker} from './ProviderAccentColorPicker';
+import {SettingsRow,SettingsSection} from './settingsLayout';
+import {getProviderSummary,PROVIDER_STATUS_STYLES,type ProviderStatusKey} from './providerStatus';
+function MorphIcon({icon,className}:{icon:unknown;className?:string}){const Glyph=icon===LockOpenIcon?LockOpenIcon:LockIcon;return <Glyph className={className}/>;}
+const LockGlyph=LockIcon, LockOpen=LockOpenIcon;
+const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+function ProviderStatusDiagnostic({
+  detail,
+  children,
+}: {
+  detail: string | null;
+  children: ReactElement;
+}) {
+  if (!detail) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={children} />
+      <TooltipPopup side="top">{detail}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+let environmentVariableDraftId = 0;
+const nextEnvironmentVariableDraftId = () => `provider-env-${environmentVariableDraftId++}`;
+
+type EnvironmentDraftRow = {
+  readonly id: string;
+  readonly name: string;
+  readonly value: string;
+  readonly sensitive: boolean;
+  readonly valueRedacted?: boolean;
+};
+
+function makeEnvironmentDraftRow(
+  variable: ProviderInstanceEnvironmentVariable,
+  index: number,
+): EnvironmentDraftRow {
+  return {
+    id: `${index}:${variable.name}`,
+    name: variable.name,
+    value: variable.value,
+    sensitive: variable.sensitive,
+    ...(variable.valueRedacted !== undefined ? { valueRedacted: variable.valueRedacted } : {}),
+  };
+}
+
+function providerEnvironmentsEqual(
+  left: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+  right: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((variable, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        variable.name === other.name &&
+        variable.value === other.value &&
+        variable.sensitive === other.sensitive &&
+        variable.valueRedacted === other.valueRedacted
+      );
+    })
+  );
+}
+
+/**
+ * Read `customModels` from the opaque config blob. The concrete driver
+ * schemas type it as `CustomModelSetting[]`, but it arrives here as
+ * `Schema.Unknown`, so the shared reader does the shape checking.
+ */
+function readConfigCustomModels(config: unknown): ReadonlyArray<CustomModelDefinition> {
+  if (config === null || typeof config !== "object") return [];
+  return readCustomModelEntries((config as Record<string, unknown>).customModels);
+}
+
+function readConfigString(config: unknown, key: string): string | null {
+  if (config === null || typeof config !== "object") return null;
+  const value = (config as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * Set `key` to an arbitrary value on the opaque config blob. Unlike
+ * provider settings field updates, does not drop empty-looking values — the
+ * caller is responsible for deciding whether an empty array / empty
+ * object should be stored explicitly (e.g. `customModels: []` is a
+ * meaningful "user cleared their custom list" state distinct from
+ * "driver default").
+ */
+function nextConfigBlobWithValue(
+  config: unknown,
+  key: string,
+  value: unknown,
+): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
+  base[key] = value;
+  return base;
+}
+
+/**
+ * Custom rows come from current settings so name/descriptor edits show
+ * instantly; a bare entry falls back to the live row's driver-default
+ * capabilities (the server fills those in on its next probe).
+ */
+export function deriveProviderModelsForDisplay(input: {
+  readonly liveModels: ReadonlyArray<ServerProviderModel> | undefined;
+  readonly customModels: ReadonlyArray<CustomModelDefinition>;
+}): ReadonlyArray<ServerProviderModel> {
+  const liveCustomModelsBySlug = new Map(
+    Arr.filterMap(input.liveModels ?? [], (model) =>
+      model.isCustom ? Result.succeed([model.slug, model] as const) : Result.failVoid,
+    ),
+  );
+  const serverModels = input.liveModels?.filter((model) => !model.isCustom) ?? [];
+  const customModels = input.customModels.map((entry) => ({
+    slug: entry.slug,
+    name: entry.name,
+    isCustom: true,
+    capabilities:
+      entry.capabilities ?? liveCustomModelsBySlug.get(entry.slug)?.capabilities ?? null,
+  }));
+  return [...serverModels, ...customModels];
+}
+
+export function readProviderEnvironmentVariable(
+  environment: ReadonlyArray<ProviderInstanceEnvironmentVariable> | undefined,
+  name: string,
+): ProviderInstanceEnvironmentVariable | undefined {
+  return environment?.find((variable) => variable.name === name);
+}
+
+export function providerEnvironmentWithoutNames(
+  environment: ReadonlyArray<ProviderInstanceEnvironmentVariable> | undefined,
+  names: ReadonlySet<string>,
+): ReadonlyArray<ProviderInstanceEnvironmentVariable> {
+  return (environment ?? []).filter((variable) => !names.has(variable.name));
+}
+
+export function nextProviderEnvironmentWithFieldValue(
+  environment: ReadonlyArray<ProviderInstanceEnvironmentVariable> | undefined,
+  field: ProviderEnvironmentField,
+  value: string,
+): ReadonlyArray<ProviderInstanceEnvironmentVariable> {
+  const trimmed = value.trim();
+  const next: ProviderInstanceEnvironmentVariable[] = [];
+  let found = false;
+
+  for (const variable of environment ?? []) {
+    if (variable.name !== field.name) {
+      next.push(variable);
+      continue;
+    }
+    found = true;
+    if (trimmed.length > 0) {
+      next.push({
+        name: variable.name,
+        value: trimmed,
+        sensitive: field.sensitive ?? true,
+      });
+    }
+  }
+
+  if (!found && trimmed.length > 0) {
+    next.push({
+      name: field.name,
+      value: trimmed,
+      sensitive: field.sensitive ?? true,
+    });
+  }
+
+  return next;
+}
+
+function ProviderEnvironmentFieldRow(props: {
+  readonly field: ProviderEnvironmentField;
+  readonly variable: ProviderInstanceEnvironmentVariable | undefined;
+  readonly idPrefix: string;
+  readonly onCommit: (field: ProviderEnvironmentField, value: string) => void;
+  readonly onRemove: (field: ProviderEnvironmentField) => void;
+}) {
+  const inputId = `${props.idPrefix}-environment-${props.field.name}`;
+  const value = props.variable?.valueRedacted ? "" : (props.variable?.value ?? "");
+  const placeholder = props.variable?.valueRedacted
+    ? "Stored secret - enter a new value to replace"
+    : props.field.placeholder;
+
+  return (
+    <SettingsRow
+      title={<label htmlFor={inputId}>{props.field.label}</label>}
+      description={props.field.description}
+      control={
+        <div className="flex w-full min-w-0 items-center gap-2 @min-[32rem]/settings-row:w-56">
+          <DraftInput
+            id={inputId}
+            size="sm"
+            className="min-w-0 flex-1"
+            type={props.field.sensitive === false ? undefined : "password"}
+            autoComplete="off"
+            value={value}
+            onCommit={(next) => props.onCommit(props.field, next)}
+            placeholder={placeholder}
+            spellCheck={false}
+          />
+          {props.variable ? (
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost-destructive"
+              onClick={() => props.onRemove(props.field)}
+              aria-label={`Clear ${props.field.label}`}
+            >
+              <XIcon className="size-3.5" />
+            </Button>
+          ) : null}
+        </div>
+      }
+    />
+  );
+}
+
+export function ProviderEnvironmentSection(props: {
+  readonly environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>;
+  readonly onChange: (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => void;
+}) {
+  const [rows, setRows] = useState<ReadonlyArray<EnvironmentDraftRow>>(() =>
+    props.environment.map(makeEnvironmentDraftRow),
+  );
+  const previousEnvironmentRef = useRef(props.environment);
+  const lastPublishedEnvironmentRef = useRef<
+    ReadonlyArray<ProviderInstanceEnvironmentVariable> | undefined
+  >(undefined);
+
+  useEffect(() => {
+    const previousEnvironment = previousEnvironmentRef.current;
+    const lastPublishedEnvironment = lastPublishedEnvironmentRef.current;
+    previousEnvironmentRef.current = props.environment;
+    lastPublishedEnvironmentRef.current = undefined;
+    if (
+      previousEnvironment === props.environment ||
+      providerEnvironmentsEqual(previousEnvironment, props.environment) ||
+      (lastPublishedEnvironment !== undefined &&
+        providerEnvironmentsEqual(lastPublishedEnvironment, props.environment))
+    ) {
+      return;
+    }
+    setRows(props.environment.map(makeEnvironmentDraftRow));
+  }, [props.environment]);
+
+  const publishRows = (nextRows: ReadonlyArray<EnvironmentDraftRow>) => {
+    const published: ProviderInstanceEnvironmentVariable[] = [];
+    for (const row of nextRows) {
+      const name = row.name.trim();
+      if (!ENVIRONMENT_VARIABLE_NAME_PATTERN.test(name)) {
+        if (
+          name.length > 0 ||
+          row.value.length > 0 ||
+          row.sensitive !== true ||
+          row.valueRedacted !== undefined
+        ) {
+          return;
+        }
+        continue;
+      }
+      const { id: _id, ...rest } = row;
+      published.push({ ...rest, name });
+    }
+    lastPublishedEnvironmentRef.current = published;
+    props.onChange(published);
+  };
+
+  const updateVariable = (id: string, patch: Partial<Omit<EnvironmentDraftRow, "id">>) => {
+    const nextRows = rows.map((row) =>
+      row.id === id
+        ? {
+            ...row,
+            ...patch,
+            ...(patch.value !== undefined ? { valueRedacted: false } : {}),
+          }
+        : row,
+    );
+    setRows(nextRows);
+    publishRows(nextRows);
+  };
+
+  const removeVariable = (id: string) => {
+    const nextRows = rows.filter((row) => row.id !== id);
+    setRows(nextRows);
+    publishRows(nextRows);
+  };
+
+  const addVariable = () =>
+    setRows([
+      ...rows,
+      {
+        id: nextEnvironmentVariableDraftId(),
+        name: "",
+        value: "",
+        sensitive: true,
+      },
+    ]);
+
+  return (
+    <SettingsRow
+      title="Variables"
+      description="API keys, base URLs, and other per-instance CLI settings."
+      control={
+        <Button type="button" size="sm" variant="outline" onClick={addVariable}>
+          <PlusIcon className="size-3" />
+          Add variable
+        </Button>
+      }
+    >
+      {rows.length > 0 ? (
+        <div className="mt-3 min-w-0 space-y-2 pb-2">
+          {rows.map((variable, index) => (
+            <div key={variable.id} className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <DraftInput
+                size="sm"
+                font="mono"
+                className="w-full min-w-0 sm:w-44 sm:shrink-0"
+                value={variable.name}
+                onCommit={(name) => updateVariable(variable.id, { name: name.trim() })}
+                placeholder="VARIABLE_NAME"
+                spellCheck={false}
+                aria-label={`Environment variable name ${index + 1}`}
+              />
+              <span className="hidden text-xs text-muted-foreground sm:inline" aria-hidden>
+                =
+              </span>
+              <DraftInput
+                size="sm"
+                font="mono"
+                className="min-w-0 flex-1"
+                value={variable.valueRedacted ? "" : variable.value}
+                onCommit={(value) => updateVariable(variable.id, { value })}
+                type={variable.sensitive ? "password" : undefined}
+                autoComplete="off"
+                placeholder={
+                  variable.valueRedacted ? "Stored secret, enter a new value to replace" : "value"
+                }
+                spellCheck={false}
+                aria-label={`Environment variable value ${index + 1}`}
+              />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="icon-micro"
+                      variant="ghost-muted"
+                      onClick={() => {
+                        const sensitive = !variable.sensitive;
+                        updateVariable(variable.id, {
+                          sensitive,
+                          ...(sensitive && variable.valueRedacted === undefined
+                            ? {}
+                            : { valueRedacted: sensitive ? variable.valueRedacted : false }),
+                        });
+                      }}
+                      aria-pressed={variable.sensitive}
+                      aria-label={`Mark environment variable ${variable.name || index + 1} as sensitive`}
+                    >
+                      <MorphIcon
+                        className="size-3"
+                        icon={variable.sensitive ? LockGlyph : LockOpen}
+                      />
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="top">
+                  {variable.sensitive ? "Sensitive, hidden after saving" : "Plain text"}
+                </TooltipPopup>
+              </Tooltip>
+              <Button
+                type="button"
+                size="icon-micro"
+                variant="ghost-destructive"
+                onClick={() => removeVariable(variable.id)}
+                aria-label={`Remove environment variable ${variable.name || index + 1}`}
+              >
+                <XIcon className="size-3" />
+              </Button>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            Sensitive values are stored separately and never returned to the app.
+          </p>
+        </div>
+      ) : null}
+    </SettingsRow>
+  );
+}
+
+
+type ProviderInstanceCardProps = {
+ instanceId:ProviderInstanceId;instance:ProviderInstanceConfig;driverOption:ProviderClientDefinition|undefined;liveProvider:ServerProvider|undefined;mode:'list'|'editor';selected?:boolean;onSelect?:()=>void;readOnly?:boolean;canWriteSettings?:boolean;onUpdate:(next:ProviderInstanceConfig)=>void;onDelete?:()=>void;headerAction?:ReactNode;setup?:ReactNode;
+ hiddenModels:ReadonlyArray<string>;favoriteModels:ReadonlyArray<string>;modelOrder:ReadonlyArray<string>;onHiddenModelsChange:(next:ReadonlyArray<string>)=>void;onFavoriteModelsChange:(next:ReadonlyArray<string>)=>void;onModelOrderChange:(next:ReadonlyArray<string>)=>void;
+};
+export function ProviderInstanceCard({instanceId,instance,driverOption,liveProvider,mode,selected=false,onSelect,readOnly=false,canWriteSettings=true,onUpdate,onDelete,headerAction,setup,hiddenModels,favoriteModels,modelOrder,onHiddenModelsChange,onFavoriteModelsChange,onModelOrderChange}:ProviderInstanceCardProps){
+ const enabled=resolveProviderInstanceEnabled(instance);
+ const statusKey:ProviderStatusKey=enabled?(liveProvider?.status??'warning'):'disabled';
+ const statusStyle=PROVIDER_STATUS_STYLES[statusKey];
+ const summary=enabled?getProviderSummary(liveProvider):{headline:'Disabled',detail:null};
+ const displayName=instance.displayName?.trim()||driverOption?.label||String(instance.driver);
+ const accentColor=normalizeProviderAccentColor(instance.accentColor);
+ const versionLabel=liveProvider?.version??null;
+ const versionAdvisoryNode=null,updateProgress=null;
+  // Narrow `instance.driver` for callers that key on the closed
+  // `ProviderDriverKind` union (e.g. `normalizeModelSlug`'s alias table). Custom
+  // fork drivers pass through as `null` and those callers fall back to
+  // verbatim behaviour.
+  const driverKind: ProviderDriverKind | null = isProviderDriverKind(instance.driver)
+    ? instance.driver
+    : null;
+  const customModels =
+    instance.driver === "antigravity" ? [] : readConfigCustomModels(instance.config);
+  // Server-returned models may lag behind settings writes. Treat server
+  // models as the source for built-ins only; custom rows come directly
+  // from the current instance config so add/remove reflects immediately.
+  const modelsForDisplay = deriveProviderModelsForDisplay({
+    liveModels: liveProvider?.models,
+    customModels,
+  });
+  const updateDisplayName = (value: string) => {
+    const trimmed = value.trim();
+    const { displayName: _omit, ...rest } = instance;
+    onUpdate(
+      trimmed.length > 0
+        ? ({ ...rest, displayName: trimmed } as ProviderInstanceConfig)
+        : (rest as ProviderInstanceConfig),
+    );
+  };
+
+  const updateEnabled = (value: boolean) => {
+    onUpdate({ ...instance, enabled: value });
+  };
+
+  const updateAccentColor = (value: string) => {
+    const normalized = normalizeProviderAccentColor(value);
+    const { accentColor: _omit, ...rest } = instance;
+    onUpdate(
+      normalized
+        ? ({ ...rest, accentColor: normalized } as ProviderInstanceConfig)
+        : (rest as ProviderInstanceConfig),
+    );
+  };
+
+  const updateConfig = (nextConfig: Record<string, unknown> | undefined) => {
+    const { config: _omit, ...rest } = instance;
+    onUpdate(
+      nextConfig !== undefined
+        ? ({ ...rest, config: nextConfig } as ProviderInstanceConfig)
+        : (rest as ProviderInstanceConfig),
+    );
+  };
+
+  const updateCustomModels = (next: ReadonlyArray<CustomModelDefinition>) => {
+    const nextConfig = nextConfigBlobWithValue(
+      instance.config,
+      "customModels",
+      next.map(toCustomModelSetting),
+    );
+    const { config: _omit, ...rest } = instance;
+    onUpdate({ ...rest, config: nextConfig } as ProviderInstanceConfig);
+  };
+
+  const updateEnvironment = (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => {
+    const cleaned = environment.filter((variable) => variable.name.trim().length > 0);
+    const { environment: _omit, ...rest } = instance;
+    onUpdate(
+      cleaned.length > 0
+        ? ({ ...rest, environment: cleaned } as ProviderInstanceConfig)
+        : (rest as ProviderInstanceConfig),
+    );
+  };
+  // Drivers that need a named secret (Cursor's API key) get a dedicated field;
+  // the generic editor only shows the remaining variables.
+  const environmentFields = driverOption?.environmentFields ?? [];
+  const environmentFieldNames = new Set(environmentFields.map((field) => field.name));
+  const genericEnvironment = providerEnvironmentWithoutNames(
+    instance.environment,
+    environmentFieldNames,
+  );
+  const updateGenericEnvironment = (
+    environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+  ) => {
+    const dedicatedEnvironment = (instance.environment ?? []).filter((variable) =>
+      environmentFieldNames.has(variable.name),
+    );
+    updateEnvironment([...dedicatedEnvironment, ...environment]);
+  };
+  const updateEnvironmentField = (field: ProviderEnvironmentField, value: string) => {
+    updateEnvironment(nextProviderEnvironmentWithFieldValue(instance.environment, field, value));
+  };
+  const removeEnvironmentField = (field: ProviderEnvironmentField) => {
+    updateEnvironment(providerEnvironmentWithoutNames(instance.environment, new Set([field.name])));
+  };
+
+  const titleIconNode = (
+    <ProviderInstanceIcon
+      driverKind={driverKind ?? instance.driver}
+      displayName={displayName}
+      accentColor={accentColor}
+      acpRegistryAgentId={
+        readConfigString(instance.config, "source") === "local"
+          ? undefined
+          : (readConfigString(instance.config, "agentId") ?? undefined)
+      }
+      acpRegistryIconUrl={
+        readConfigString(instance.config, "source") === "local"
+          ? undefined
+          : (readConfigString(instance.config, "registryIconUrl") ?? undefined)
+      }
+      showBadge={Boolean(accentColor)}
+      className="size-5"
+      iconClassName="size-4 text-foreground/80"
+      badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
+    />
+  );
+
+  const titleTailNode = headerAction ? (
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">{headerAction}</span>
+  ) : null;
+
+  const versionCodeNode = versionLabel ? (
+    <code className="text-xs text-muted-foreground">{versionLabel}</code>
+  ) : null;
+
+  // Healthy and disabled rows read fine from their text; only trouble gets a dot.
+  const statusDotNode =
+    statusKey === "warning" || statusKey === "error" ? (
+      <span className={cn("size-1.5 shrink-0 rounded-full", statusStyle.dot)} aria-hidden />
+    ) : null;
+  const needsAttention = statusKey === "warning" || statusKey === "error";
+  const statusDiagnostic = null;
+  // Keep compatibility copy compact; the version popover carries the explanation.
+  const inlineStatusDetail = summary.detail;
+  const editorStatusNode = <><span>{summary.headline}</span>{inlineStatusDetail ? <span>{inlineStatusDetail}</span> : null}</>;
+  if (mode === "list") {
+    return (
+      <div
+        data-slot="settings-row"
+        className={cn(
+          "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
+          selected ? "bg-muted/45" : "hover:bg-muted/25",
+        )}
+      >
+        <div
+          className={cn(
+            "pointer-events-none relative flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-opacity",
+            !enabled && !selected && "opacity-60 group-hover:opacity-100",
+          )}
+        >
+          <button
+            type="button"
+            className="pointer-events-auto absolute inset-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={onSelect}
+            aria-label={`Select ${displayName}`}
+            aria-pressed={selected}
+          />
+          {titleIconNode}
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+              {versionLabel ? (
+                <code className="max-w-24 shrink-0 truncate text-xs text-muted-foreground">
+                  {versionLabel}
+                </code>
+              ) : null}
+              {versionAdvisoryNode}
+            </span>
+            <span className="mt-0.5 flex items-start gap-1.5 text-xs leading-normal text-muted-foreground/80">
+              {/* The dot describes provider health, not the update in progress. */}
+              {statusDotNode && !updateProgress ? (
+                <span className="flex h-[1.45em] shrink-0 items-center">{statusDotNode}</span>
+              ) : null}
+              <ProviderStatusDiagnostic detail={statusDiagnostic}>
+                <span
+                  tabIndex={statusDiagnostic ? 0 : undefined}
+                  aria-live="polite"
+                  className="pointer-events-auto line-clamp-2 [overflow-wrap:anywhere]"
+                >
+                  {updateProgress ? (
+                    `Updating · ${updateProgress}`
+                  ) : (
+                    <>
+                      {summary.headline}
+                      {needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : null}
+                    </>
+                  )}
+                </span>
+              </ProviderStatusDiagnostic>
+            </span>
+          </span>
+        </div>
+        <span className="flex h-5 shrink-0 items-center">
+          <Switch
+            checked={enabled}
+            disabled={readOnly}
+            onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
+            aria-label={`Enable ${displayName}`}
+          />
+        </span>
+      </div>
+    );
+  }
+
+  const editorHeaderAction = (
+    <div className="flex shrink-0 items-center gap-1.5">
+      {driverOption?.badgeLabel ? (
+        <Badge variant="warning" size="sm" className="shrink-0">
+          {driverOption.badgeLabel}
+        </Badge>
+      ) : null}
+      {versionCodeNode}
+      {versionAdvisoryNode}
+      <span
+        inert={readOnly}
+        aria-disabled={readOnly || undefined}
+        className={cn("inline-flex items-center gap-1", readOnly && "opacity-50")}
+      >
+        {titleTailNode}
+        {onDelete ? (
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost-destructive"
+            disabled={readOnly}
+            onClick={onDelete}
+            aria-label={`Delete instance ${instanceId}`}
+          >
+            <Trash2Icon />
+          </Button>
+        ) : null}
+      </span>
+    </div>
+  );
+
+  const runtimeFields = driverOption ? (
+    <ProviderSettingsForm
+      definition={driverOption}
+      value={instance.config}
+      idPrefix={`provider-instance-${instanceId}`}
+      variant="settings"
+      onChange={updateConfig}
+    />
+  ) : (
+    <SettingsRow
+      title="Driver"
+      description={
+        <span>
+          This instance uses <code className="text-foreground">{String(instance.driver)}</code>,
+          which is not available in this build. Its configuration is preserved.
+        </span>
+      }
+    />
+  );
+
+  return (
+    <>
+      <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
+        <SettingsRow
+          title="Display name"
+          status={
+            <>
+              <ProviderStatusDiagnostic detail={statusDiagnostic}>
+                <div
+                  tabIndex={statusDiagnostic ? 0 : undefined}
+                  className="flex min-w-0 flex-wrap items-baseline gap-x-1.5"
+                >
+                  {editorStatusNode}
+                </div>
+              </ProviderStatusDiagnostic>
+
+            </>
+          }
+          control={
+            <div
+              inert={readOnly}
+              aria-disabled={readOnly || undefined}
+              className={cn(
+                "flex w-full min-w-0 items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto",
+                readOnly && "opacity-50 select-none",
+              )}
+            >
+              <ProviderAccentColorPicker
+                layout="inline"
+                displayName={displayName}
+                value={accentColor}
+                onCommit={updateAccentColor}
+                commitDelayMs={120}
+              />
+              <DraftInput
+                id={`provider-instance-${instanceId}-display-name`}
+                size="sm"
+                className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
+                value={instance.displayName ?? ""}
+                onCommit={updateDisplayName}
+                placeholder={driverOption?.label ?? "Instance label"}
+                spellCheck={false}
+              />
+            </div>
+          }
+        />
+      </SettingsSection>
+
+      {setup || environmentFields.length > 0 ? (
+        <SettingsSection title="Setup">
+          {setup}
+          <div
+            inert={readOnly}
+            aria-disabled={readOnly || undefined}
+            className={readOnly ? "opacity-50 select-none" : undefined}
+          >
+            {environmentFields.length > 0 ? (
+              <>
+                {environmentFields.map((field) => (
+                  <ProviderEnvironmentFieldRow
+                    key={field.name}
+                    field={field}
+                    variable={readProviderEnvironmentVariable(instance.environment, field.name)}
+                    idPrefix={`provider-instance-${instanceId}`}
+                    onCommit={updateEnvironmentField}
+                    onRemove={removeEnvironmentField}
+                  />
+                ))}
+              </>
+            ) : null}
+          </div>
+        </SettingsSection>
+      ) : null}
+
+      {!driverOption || deriveProviderSettingsFields(driverOption).length > 0 ? (
+        <SettingsSection
+          title="Runtime"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          {runtimeFields}
+        </SettingsSection>
+      ) : null}
+
+      <SettingsSection
+        title="Environment"
+        inert={readOnly}
+        aria-disabled={readOnly || undefined}
+        className={readOnly ? "opacity-50 select-none" : undefined}
+      >
+        <ProviderEnvironmentSection
+          environment={genericEnvironment}
+          onChange={updateGenericEnvironment}
+        />
+      </SettingsSection>
+
+
+      {driverOption !== undefined ? (
+        <SettingsSection title="Models">
+          <div className="px-3 py-3 sm:px-4">
+            <p className="mb-3 text-xs text-muted-foreground">
+              Favorites, visibility, ordering and custom models are saved in Workbench.
+            </p>
+            <ProviderModelsSection
+              canManageCustomModels={!readOnly}
+              canWritePreferences={canWriteSettings}
+              instanceId={instanceId}
+              driverKind={driverKind}
+              models={modelsForDisplay}
+              customModels={customModels}
+              hiddenModels={hiddenModels}
+              favoriteModels={favoriteModels}
+              modelOrder={modelOrder}
+              onChange={updateCustomModels}
+              onHiddenModelsChange={onHiddenModelsChange}
+              onFavoriteModelsChange={onFavoriteModelsChange}
+              onModelOrderChange={onModelOrderChange}
+            />
+          </div>
+        </SettingsSection>
+      ) : null}
+    </>
+  );
+}

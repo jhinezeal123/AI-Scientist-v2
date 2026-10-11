@@ -30,6 +30,9 @@ class AgentGateway:
         self.spec: GatewaySpec = load_spec(self.spec_path)
         self._store: AgentStore | None = None
         self._platform = None
+        self._control_store = None
+        self._harness_catalog = None
+        self._project_platforms = {}
         self._lock = RLock()
         self.protected_paths = ()
 
@@ -42,14 +45,35 @@ class AgentGateway:
         return self._store
 
     @property
+    def control_store(self):
+        """Shared persistence without constructing the team scheduler."""
+        with self._lock:
+            if self._control_store is None:
+                from .control_store import ControlStore
+                self._control_store = ControlStore(self.store)
+        return self._control_store
+
+    @property
+    def harness_catalog(self):
+        """Provider configuration/probes, independent of Project team lifecycle."""
+        with self._lock:
+            if self._harness_catalog is None:
+                from .harnesses import HarnessRegistry
+                self._harness_catalog = HarnessRegistry(self.control_store, codex=self.codex_runtime,
+                    repository=self.workspace_root, protected=self.protected_paths)
+        return self._harness_catalog
+
+    @property
     def platform(self):
         with self._lock:
             if self._platform is None:
                 from .orchestrator import TeamPlatform
-                self._platform = TeamPlatform(self.store, self.workspace_root, codex=self.codex_runtime, protected=self.protected_paths)
+                self._platform = TeamPlatform(self.store, self.workspace_root, codex=self.codex_runtime, protected=self.protected_paths,provider_setup=self.harness_catalog.provider_setup)
             return self._platform
 
     def close(self):
+        if self._harness_catalog is not None and self._harness_catalog._provider_setup is not None:
+            self._harness_catalog._provider_setup.close()
         if self._platform is not None:
             return self._platform.close()
 

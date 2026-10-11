@@ -1,0 +1,11 @@
+{
+  "upstream": "https://github.com/pingdotgg/t3code",
+  "commit": "f0a47b3172c4a73e1932b23d37c3345481c5a67e",
+  "adaptation": "Provider installation and authentication contracts adapted to the Python Workbench service; these backend modules are not byte-for-byte TS imports.",
+  "source_sha256": {
+    "apps/server/src/provider/antigravityAuthSupport.ts": "dea6e50ce5cf8f4f6d0faa16cf20e5cc8243af42a6315f0eba53cd78dbfa30cd",
+    "apps/server/src/provider/AntigravityInstallation.ts": "7ff00388e5d03cb226f00ebd0c2739dcf3a98929fbb0a1b939f3aaf4097d96f1",
+    "packages/provider-acp-registry/src/server/auth.ts": "d3f7cdf7f57010e49ba3e580a76bc24584adea603a53b1f09d7aff347ecce2ba",
+    "packages/provider-acp-registry/src/server/probe.ts": "5f49fd94839c92951567ba0568f61627deff81b2c7d87ed5f2eee5fadab138f4"
+  }
+}

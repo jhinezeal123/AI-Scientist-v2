@@ -164,3 +164,19 @@ compatible control state only into a separate closed checkout. Never overwrite
 project SQLite with a control backup or downgrade a live/newer control DB.
 Legacy Workbench can run with management disabled.
 No source code was copied from T3 Code or OpenRig.
+
+## Config agent and ACP provider setup
+
+Settings → Config agent manages reusable agent/model presets and provider instances.
+The actual T3 Code setup controls and MIT source notices are in
+`workbench-ui/src/vendor/t3code`. ACP Registry uses the official catalog, with
+managed binary/npm/Python installations and per-provider sign-in. Antigravity
+uses Google's official ACP runtime and its own persistent account profile.
+Provider model discovery reads native/ACP metadata without an inference turn.
+The browser remembers a revocable local login for 30 days. Secrets remain in
+backend provider storage and are masked in the UI.
+
+Preset endpoints, catalog/install/auth services and provider model discovery
+are independent of the team scheduler. Provenance is recorded under
+`agent_management/vendor/t3code`. Run the provider setup, model catalog and
+preset configuration tests, plus the frontend build and feature tests.

@@ -81,8 +81,9 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
     _agent_gateway_class()
     from _ai_scientist_agent_management.http_api import create_router
     app.include_router(create_router())
-    from _ai_scientist_agent_management.team_api import create_team_router, remote_boundary
-    app.include_router(create_team_router())
+    from _ai_scientist_agent_management.api import create_management_router
+    from _ai_scientist_agent_management.api_support import remote_boundary
+    app.include_router(create_management_router())
     from .workflow_api import create_workflow_router
     app.include_router(create_workflow_router())
     app.middleware('http')(remote_boundary)

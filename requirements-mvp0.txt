@@ -18,6 +18,8 @@ anthropic
 pytest>=8,<9
 pypdf>=6,<7
 python-multipart>=0.0.20,<1
+# Provider-advertised ACP login terminals on Windows.
+pywinpty>=3.0,<4; sys_platform == 'win32'
 # Original AgentManager, tree visualization and token tracker.
 omegaconf>=2.3,<3
 igraph>=0.11,<2

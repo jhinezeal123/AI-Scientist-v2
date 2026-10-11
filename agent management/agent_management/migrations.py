@@ -1,5 +1,6 @@
 """Forward-only, backed-up migrations for the isolated coordination database."""
 from __future__ import annotations
+from contextlib import closing
 
 import sqlite3
 import threading
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS integration_config(id TEXT PRIMARY KEY,spec_json TEXT
 def migrate(path: Path):
     # AgentStore creates the v1 tables first. The backup also includes that baseline.
     with _lock:
-        with sqlite3.connect(path, timeout=15) as con:
+        with closing(sqlite3.connect(path, timeout=15)) as con:
             version = con.execute("PRAGMA user_version").fetchone()[0]
             if version > VERSION:
                 raise ValueError("Control database is newer than this application")
@@ -59,7 +60,7 @@ def migrate(path: Path):
             if not backup.exists():
                 if backup.is_symlink():
                     raise ValueError("Refusing symlinked migration backup")
-                with sqlite3.connect(backup) as target:
+                with closing(sqlite3.connect(backup)) as target:
                     con.backup(target)
             con.executescript("BEGIN IMMEDIATE;" + SCHEMA + f"PRAGMA user_version={VERSION};COMMIT;")
 
@@ -67,7 +68,7 @@ def migrate(path: Path):
 def backup_database(path: Path, target: Path):
     if target.exists() or target.is_symlink():
         raise ValueError("Backup target must be a new file")
-    with sqlite3.connect(path) as source, sqlite3.connect(target) as dest:
+    with closing(sqlite3.connect(path)) as source, closing(sqlite3.connect(target)) as dest:
         source.backup(dest)
         if dest.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("Backup integrity check failed")

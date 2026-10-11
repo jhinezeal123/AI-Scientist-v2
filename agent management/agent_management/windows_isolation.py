@@ -50,9 +50,20 @@ def scope_acl(repository, paths, *, deny=False, legacy=False):
     roots=[repository/'.workbench/agents/worktrees',repository/'.workbench/agents/runtimes']
     if legacy:
         roots.append(repository/'.workbench/projects')
+    else:
+        projects = repository/'.workbench/projects'
+        if projects.exists():
+            roots.extend(project/'agents'/name for project in projects.iterdir()
+                         if not project.is_symlink() and not getattr(project,'is_junction',lambda:False)()
+                         for name in ('worktrees','runtimes'))
     checked=[]
     for path in paths:
         path=Path(path)
+        for parent in (path, *path.parents):
+            if parent == repository:
+                break
+            if parent.is_symlink() or getattr(parent,'is_junction',lambda:False)():
+                raise ValueError('Refusing linked sandbox scope')
         if path.is_symlink() or getattr(path,'is_junction',lambda:False)() or not any(path.resolve().is_relative_to(r.resolve()) for r in roots):
             raise ValueError('Sandbox ACL scope must be an owned worktree or runtime directory')
         checked.append(str(path.resolve(strict=True)))

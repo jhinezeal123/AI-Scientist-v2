@@ -11,57 +11,19 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import Field
 
+from .api_support import platform, access, ConflictRoute, remote_boundary
 from .models import RigSpec, HarnessSpec, TaskRequest, StrictModel, templates
 from .remote import DeviceAccess, COOKIE, loopback, remote_surface, transport_guard, digest
 from .research_bridge import ResearchCommand
 from .resources import CodingResource
 
 
-def platform(request):
-    if not os.environ.get('AI_SCIENTIST_AGENT_CONTROL_TOKEN'):
-        raise HTTPException(404, 'Agent management disabled. Set AI_SCIENTIST_AGENT_CONTROL_TOKEN when starting Workbench.')
-    gateway = getattr(getattr(request.app.state, 'runtime', None), 'runtime', None)
-    if gateway is None or not hasattr(type(gateway), 'platform'):
-        raise HTTPException(503, 'Agent gateway is unavailable')
-    config = getattr(request.app.state, 'config', None)
-    gateway.protected_paths = tuple(p for p in (getattr(config, 'donor_root', None),) if p)
-    control = gateway.platform
-    control.context.projects = getattr(request.app.state, 'store', None)
-    return control
 
 
-def access(request, scope='read', rig_id=None, *, human=False):
-    control = platform(request)
-    principal = DeviceAccess(control.store).authenticate(request, scope=scope, rig_id=rig_id, human=human)
-    return control, principal
 
 
-async def remote_boundary(request, call_next):
-    # A private HTTPS route must not accidentally expose the unpaired legacy project API.
-    if request.url.path!='/health' and remote_surface(request):
-        try:
-            transport_guard(request)
-            path = request.url.path
-            if path.startswith('/api/') and path != '/api/agent-management/pair/exchange':
-                if not path.startswith('/api/agent-management/'):
-                    raise HTTPException(403, 'Remote devices use the scoped multi-agent API')
-                access(request)
-        except HTTPException as exc:
-            return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
-    return await call_next(request)
 
 
-class ConflictRoute(APIRoute):
-    def get_route_handler(self):
-        handler = super().get_route_handler()
-        async def run(request):
-            try:
-                return await handler(request)
-            except KeyError:
-                return JSONResponse({'detail': 'Team, seat or resource not found'}, status_code=404)
-            except ValueError as exc:
-                return JSONResponse({'detail': str(exc)[:2000]}, status_code=409)
-        return run
 
 
 class CreateTeam(StrictModel):
@@ -153,41 +115,14 @@ def workspace(control, rig_id, seat_id):
 def create_team_router():
     router = APIRouter(prefix='/api/agent-management', tags=['Teams'], route_class=ConflictRoute)
 
-    @router.get('/identity')
-    def identity(request: Request):
-        _, who = access(request)
-        cookie=request.cookies.get(COOKIE)
-        return {'id': who.id, 'scopes': sorted(who.scopes), 'rig_ids': sorted(who.rig_ids), 'agent': who.agent,
-                'csrf':digest(cookie+':csrf') if cookie and not request.headers.get('authorization') else None}
 
     @router.get('/templates')
     def catalog(request: Request):
         access(request)
         return templates()
 
-    @router.get('/harnesses')
-    def harnesses(request: Request, details: bool=False):
-        control, who = access(request)
-        if details:
-            who.require('admin',human=True)
-        return [{'spec': s.model_dump() if details else {k:v for k,v in s.model_dump().items() if k not in {'args','executable','managed_home'}},
-                 'probe': control.registry.resolve(s.id).probe()} for s in control.store.harnesses()]
 
-    @router.put('/harnesses/{identifier}')
-    def configure(identifier: str, body: HarnessSpec, request: Request):
-        control, _ = access(request, 'admin', human=True)
-        if identifier != body.id:
-            raise ValueError('Harness ID mismatch')
-        control.store.put_harness(body)
-        return body.model_dump()
 
-    @router.post('/harnesses/dsh/import')
-    def import_dsh(request: Request):
-        control, _ = access(request, 'admin', human=True)
-        from .dsh import install_local_profile
-        spec = install_local_profile(control.workspaces.repository)
-        control.store.put_harness(spec)
-        return spec.model_dump()
 
     @router.get('/teams')
     def teams(request: Request):
@@ -498,11 +433,6 @@ def create_team_router():
     async def research_reconcile(rig_id: str,request_id: str,request: Request,retry: bool=False):
         return await bridge(request,rig_id,mutation=True).reconcile(rig_id,request_id,retry=retry)
 
-    @router.post('/teams/{rig_id}/seats/{seat_id}/credential')
-    def agent_credential(rig_id: str,seat_id: str,request: Request):
-        control,_=access(request,'admin',rig_id,human=True)
-        from .remote import DeviceAccess
-        return JSONResponse(DeviceAccess(control.store).agent_token(rig_id,seat_id),headers={'Cache-Control':'no-store'})
 
     @router.get('/integrations/slack')
     def slack(request: Request):

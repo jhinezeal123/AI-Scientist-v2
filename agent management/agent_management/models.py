@@ -33,25 +33,88 @@ class PermissionPolicy(StrictModel):
         return self
 
 
+class ModelOptionChoice(StrictModel):
+    id: str = Field(min_length=1, max_length=256)
+    label: str = Field(min_length=1, max_length=256)
+    isDefault: bool = False
+    description: str | None = Field(default=None, max_length=2048)
+
+
+class ModelOptionDescriptor(StrictModel):
+    id: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1, max_length=256)
+    type: Literal['select', 'boolean']
+    options: list[ModelOptionChoice] = Field(default_factory=list, max_length=100)
+    currentValue: str | bool | None = None
+    description: str | None = Field(default=None, max_length=2048)
+    promptInjectedValues: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ModelCapabilities(StrictModel):
+    optionDescriptors: list[ModelOptionDescriptor] = Field(default_factory=list, max_length=32)
+
+
+class CustomModel(StrictModel):
+    slug: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=256)
+    capabilities: ModelCapabilities | None = None
+
+
 class HarnessSpec(StrictModel):
     id: str = Field(pattern=ID)
+    name: str = Field(default="", max_length=120)
     kind: Literal["native_codex", "native_claude", "acp", "cli_json"]
     executable: str = Field(default="", max_length=2048)
     args: list[str] = Field(default_factory=list, max_length=32)
     protocol_version: Literal[1, 2] = 1
     models: list[str] = Field(default_factory=list, max_length=100)
     managed_home: str | None = Field(default=None, max_length=2048)
+    config_directory: str = Field(default='', max_length=2048)
     # A local command is an explicit administrator configuration, never an installer.
     enabled: bool = True
+    environment: dict[str, str] = Field(default_factory=dict, max_length=32)
+    environment_sensitive: list[str] | None = Field(default=None, max_length=32)
+    accent_color: str = Field(default='', pattern=r'^(#[0-9a-fA-F]{6})?$')
+    custom_models: list[CustomModel] = Field(default_factory=list, max_length=100)
+    archived: bool = False
+    registry_agent_id: str = Field(default='', pattern=r'^([a-z0-9][a-z0-9._-]{0,127})?$')
+    registry_distribution: Literal['auto', 'binary', 'npx', 'uvx'] = 'auto'
+    registry_icon_url: str = Field(default='', max_length=2048)
+    auth_method: str = Field(default='', max_length=128)
+    api_key: str = Field(default='', max_length=8192)
+    gcp_project: str = Field(default='', max_length=256)
+    gcp_location: str = Field(default='', max_length=128)
+    hidden_models: list[str] = Field(default_factory=list, max_length=256)
+    favorite_models: list[str] = Field(default_factory=list, max_length=256)
+    model_order: list[str] = Field(default_factory=list, max_length=256)
 
     @model_validator(mode="after")
     def valid_command(self):
-        if self.kind in {"acp", "cli_json"} and not self.executable:
+        if self.kind in {"acp", "cli_json"} and not self.executable and not (self.kind == 'acp' and self.registry_agent_id):
             raise ValueError("Local harness needs an explicit installed executable")
-        if "\x00" in self.executable or any("\x00" in x or len(x) > 2048 for x in self.args):
+        if "\x00" in self.executable or "\x00" in self.config_directory or any("\x00" in x or len(x) > 2048 for x in self.args):
             raise ValueError("Invalid literal harness arguments")
         if any(not model or len(model) > 256 for model in self.models):
             raise ValueError("Invalid model catalog")
+        if self.registry_agent_id and self.kind != 'acp':
+            raise ValueError('Registry agents use ACP')
+        if any(not value or len(value) > 256 for values in (self.hidden_models,self.favorite_models,self.model_order) for value in values):
+            raise ValueError('Invalid model preference')
+        if self.registry_agent_id == 'antigravity-acp' and self.auth_method not in {'','oauth-personal','oauth-business','gemini-api-key','agent-platform'}:
+            raise ValueError('Unknown Antigravity sign-in method')
+        if len({model.slug for model in self.custom_models}) != len(self.custom_models):
+            raise ValueError('Duplicate custom model')
+        if self.environment_sensitive is not None and set(self.environment_sensitive)-self.environment.keys():
+            raise ValueError('Sensitive variable must be configured')
+        import re
+        blocked = {'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'SYSTEMROOT', 'COMSPEC',
+                   'TEMP', 'TMP', 'TMPDIR', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE'}
+        for key, value in self.environment.items():
+            if (not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', key)
+                    or key.upper() in blocked
+                    or key.upper().startswith(('AI_SCIENTIST_', 'PYTHON', 'LD_', 'DYLD_'))
+                    or len(value) > 8192 or '\x00' in value):
+                raise ValueError('Invalid or reserved provider environment variable')
         return self
 
 

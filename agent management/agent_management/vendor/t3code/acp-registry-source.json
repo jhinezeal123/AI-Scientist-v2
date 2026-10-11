@@ -1,0 +1,7 @@
+{
+  "url": "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+  "retrievedAt": "2026-10-11",
+  "sha256": "1d172c5340cd26e9f654940cecb39ceaea83a80801280b1741fb934c6d98a5cb",
+  "agents": 41,
+  "purpose": "Offline fallback for the same official ACP Registry used by T3 Code."
+}

@@ -107,8 +107,9 @@ class NativeHarness:
             # Version/readiness probes do not initialize a model session or install a CLI.
             result = subprocess.run([executable, "--version"], capture_output=True, timeout=10,
                                     encoding="utf-8", errors="replace",
+                                    env=self.environment(),
                                     creationflags=subprocess.CREATE_NO_WINDOW if __import__("os").name == "nt" else 0)
-            ready = result.returncode == 0
+            ready = self.spec.enabled and result.returncode == 0
             version = result.stdout.strip()[:200]
         except (OSError, ValueError, subprocess.SubprocessError):
             ready, version = False, None
@@ -124,9 +125,15 @@ class NativeHarness:
         if not self.spec.enabled:
             raise ValueError("Harness is disabled")
         self.executable()
-        if self.spec.models and seat.model and seat.model not in self.spec.models:
-            raise ValueError("Selected model is not in the harness catalog")
         return SessionHandle(uuid.uuid4().hex, seat, Path(workspace))
+
+    def environment(self):
+        from .processes import private_environment
+        environment = {**private_environment(), **self.spec.environment}
+        if self.spec.config_directory and self.spec.kind in {'native_codex', 'native_claude'}:
+            key = 'CODEX_HOME' if self.spec.kind == 'native_codex' else 'CLAUDE_CONFIG_DIR'
+            environment[key] = str(Path(self.spec.config_directory).expanduser().resolve())
+        return environment
 
     def resume(self, handle, provider_session):
         if not self.capabilities.resume:
@@ -198,7 +205,8 @@ class NativeHarness:
                 if self.sandbox:
                     args = self.sandbox(handle, args)
             raw, receipt = run_process(args, handle.workspace, body, timeout=timeout,
-                                       cancelled=handle.interrupted.is_set, emit=emit, started=started)
+                                       cancelled=handle.interrupted.is_set, emit=emit, started=started,
+                                       **({'env': self.environment()} if self.spec.environment or self.spec.config_directory else {}))
             handle.stop_receipt = receipt
         finally:
             schema_file.unlink(missing_ok=True)
@@ -235,22 +243,38 @@ class NativeHarness:
 
 
 class HarnessRegistry:
-    def __init__(self, store, *, codex=None, permission=None, repository=None, protected=()):
+    def __init__(self, store, *, codex=None, permission=None, repository=None, protected=(), provider_setup=None):
         self.store, self.codex, self.permission = store, codex, permission
         self.repository = repository
         self.protected = tuple(protected)
+        self._provider_setup = provider_setup
+        self._provider_setup_lock = threading.RLock()
         existing = {spec.id for spec in store.harnesses()}
-        for spec in (HarnessSpec(id="codex", kind="native_codex"), HarnessSpec(id="claude", kind="native_claude")):
+        for spec in (HarnessSpec(id="codex", kind="native_codex"), HarnessSpec(id="claude", kind="native_claude"),
+                     HarnessSpec(id='antigravity',name='Antigravity',kind='acp',registry_agent_id='antigravity-acp')):
             if spec.id not in existing:
                 store.put_harness(spec)
+
+    @property
+    def provider_setup(self):
+        with self._provider_setup_lock:
+            if self._provider_setup is None:
+                from .providers.setup import ProviderSetup
+                if self.repository is None: raise ValueError('Provider setup needs a workspace root')
+                self._provider_setup=ProviderSetup(self,self.repository)
+            return self._provider_setup
 
     def resolve(self, identifier):
         spec = next((s for s in self.store.harnesses() if s.id == identifier), None)
         if spec is None:
             raise ValueError("Unknown harness; no implicit fallback")
         if spec.kind == "acp":
-            from .acp_sessions import AcpHarness
-            adapter=AcpHarness(spec, permission=self.permission, sandbox=self.sandbox)
+            if spec.registry_agent_id:
+                from .providers.runtime import ManagedAcpHarness
+                adapter=ManagedAcpHarness(spec,self.provider_setup,permission=self.permission,sandbox=self.sandbox)
+            else:
+                from .acp_sessions import AcpHarness
+                adapter=AcpHarness(spec, permission=self.permission, sandbox=self.sandbox)
         else:
             adapter=NativeHarness(spec, codex=self.codex, sandbox=self.sandbox if spec.kind=='cli_json' else None)
         if __import__('os').name=='nt' and spec.kind in {'acp','cli_json'}:
@@ -267,7 +291,8 @@ class HarnessRegistry:
             import hashlib
             import sys
             key=hashlib.sha256(str(handle.workspace.resolve()).encode()).hexdigest()
-            home=self.repository/'.workbench/agents/runtimes'/('cli-'+handle.seat.harness+'-'+key)
+            from .project_storage import data_root
+            home=data_root(self.repository, handle.workspace)/'runtimes'/('cli-'+handle.seat.harness+'-'+key)
             if any(p.is_symlink() or getattr(p,'is_junction',lambda:False)() for p in (home,*home.parents) if p.is_relative_to(self.repository)):
                 raise ValueError('Refusing redirected harness runtime storage')
             home.mkdir(parents=True,exist_ok=True)

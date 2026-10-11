@@ -239,7 +239,7 @@ class AcpHarness:
         params = {"protocolVersion": version}
         info = {"name": "ai-scientist-teams", "version": "1.0.0"}
         if version == 1:
-            params.update(clientInfo=info, clientCapabilities={})
+            params.update(clientInfo=info, clientCapabilities=getattr(self,'client_capabilities',{}))
         else:
             params.update(info=info, capabilities={})
         result = channel.rpc("initialize", params)
@@ -299,6 +299,7 @@ class AcpHarness:
                 return {}
             return {"error": {"code": -32601, "message": "Client filesystem/terminal capability disabled"}}
         environment = private_environment()
+        environment.update(self.spec.environment)
         if self.spec.managed_home:
             from .dsh import session_home
             environment['DSH_HOME'] = str(session_home(Path(self.spec.managed_home), handle.workspace))
@@ -307,7 +308,7 @@ class AcpHarness:
             environment.update(TEMP=str(temporary),TMP=str(temporary),TMPDIR=str(temporary))
         argv = [self.executable(), *self.spec.args]
         if self.sandbox:
-            argv = self.sandbox(handle, argv, provider_home=environment.get('DSH_HOME'))
+            argv = self.sandbox(handle, argv, provider_home=environment.get('DSH_HOME') or environment.get('WORKBENCH_PROVIDER_HOME'))
         channel = self.open_channel(argv, handle.workspace, timeout,
                              handle.interrupted.is_set, handler, started, environment)
         try:
@@ -332,20 +333,24 @@ class AcpHarness:
                 raise ValueError("ACP session identity is missing")
             if handle.seat.model:
                 options = session.get("configOptions", [])
-                model_option = next((o for o in options if o.get("category") == "model"), None)
+                model_option = next((o for o in options if o.get("category") == "model" or o.get('id') == 'model'), None)
                 if model_option is None:
-                    raise ValueError("Agent does not advertise a model configuration option")
+                    legacy=session.get('models',{})
+                    if handle.seat.model not in {m.get('modelId') for m in legacy.get('availableModels',[])}:
+                        raise ValueError("Agent does not advertise this model")
+                    channel.rpc('session/set_model',{'sessionId':active['session'],'modelId':handle.seat.model})
                 def values(options):
                     for option in options:
                         if isinstance(option, dict):
                             if "value" in option:
                                 yield option["value"]
                             yield from values(option.get("options", []))
-                allowed = set(values(model_option.get("options", [])))
-                if handle.seat.model not in allowed:
-                    raise ValueError("Model is not advertised by this ACP session")
-                channel.rpc("session/set_config_option", {"sessionId": active["session"],
-                    "configId": model_option["id"], "value": handle.seat.model})
+                if model_option is not None:
+                    allowed = set(values(model_option.get("options", [])))
+                    if handle.seat.model not in allowed:
+                        raise ValueError("Model is not advertised by this ACP session")
+                    channel.rpc("session/set_config_option", {"sessionId": active["session"],
+                        "configId": model_option["id"], "value": handle.seat.model})
             active["collect"] = True
             instruction = message + "\nReturn only JSON matching this schema:\n" + json.dumps(RESULT_SCHEMA)
             accepted = channel.rpc("session/prompt", {"sessionId": active["session"],
