@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {Idea, Proposal, Resource, modeLabel} from './api';
 import ResearchScope from './ResearchScope';
 
-type Props = {idea?: Idea; proposals: Proposal[]; resources:Resource[]; busy: boolean;
+type Props = {idea?: Idea; proposals: Proposal[]; resources:Resource[]; busy: boolean;workflow?:{ready:boolean;paused:boolean;approvalAllowed:boolean};
   onOpenParent:(id:string)=>void;
   onReplan:()=>Promise<void>;
   onAnswer: (proposal: Proposal, text: string) => Promise<void>;
@@ -18,7 +18,7 @@ function Details({value}:{value:string|Record<string,unknown>}) {
     .map(([key,item])=><p key={key}><strong>{labels[key] || key}: </strong>{key==='train' && item==null ? 'Không có tập train' : typeof item==='string' ? item : JSON.stringify(item)}</p>)}</div>;
 }
 
-export default function ProposalPanel({idea,proposals,resources,busy,onOpenParent,onAnswer,onContinue,onApprove,onReplan}:Props) {
+export default function ProposalPanel({idea,proposals,resources,busy,workflow,onOpenParent,onAnswer,onContinue,onApprove,onReplan}:Props) {
   const [answer,setAnswer] = useState('');
   const latest = proposals.filter(p => p.idea_id === idea?.id).sort((a,b) => b.version-a.version)[0];
   const pinnedIdea=latest?.context_snapshot.idea;
@@ -35,6 +35,7 @@ export default function ProposalPanel({idea,proposals,resources,busy,onOpenParen
       !current.deletion_pending && current.id === source.id && current.version === source.version && current.content_sha256 === source.content_sha256));
   return <section className="panel proposal-panel"><div className="panel-head"><h2>Trao đổi và proposal</h2>{idea && <span className="state-tag">{idea.state==='NEEDS_REVIEW' ? 'Cần xem lại proposal' : idea.state}</span>}</div>
     {!idea && <p className="empty">Chọn một idea đã lưu để lập proposal.</p>}
+    {workflow&&<p className="muted">{workflow.ready?'Thao tác tại đây sẽ tiếp tục workflow n8n của project.':workflow.paused?'Workflow đã dừng hoặc chưa tới bước duyệt. Mở Workflow để tiếp tục.':'Workflow đang xử lý proposal; chờ phiên bản mới.'}</p>}
     {idea?.state === 'PLANNING' && <p role="status" className="alert">Codex đang đọc nguồn và lập proposal. Bạn vẫn có thể xem Library; chưa tạo code hoặc chạy notebook.</p>}
     {idea?.error && <p role="alert" className="alert error">{idea.error}</p>}
     {idea?.variant && <div className="context variant-context">
@@ -63,9 +64,9 @@ export default function ProposalPanel({idea,proposals,resources,busy,onOpenParen
       <p className="mode-tag" data-mode={pinnedIdea?.mode}>{modeLabel(pinnedIdea?.mode)}</p>
       {pinnedIdea?.mode==='etc' && <><h3>Đầu ra user yêu cầu</h3><pre>{pinnedIdea.desired_output}</pre></>}
       {!latest.body.needs_clarification && <p>{latest.body.paraphrase}</p>}
-      {latest.state === 'NEEDS_CLARIFICATION' && <form className="stack" onSubmit={event => {event.preventDefault(); void onAnswer(latest,answer).then(() => setAnswer('')).catch(() => {});}}>
-        <label>Trả lời câu hỏi<textarea value={answer} rows={5} maxLength={20000} required onChange={e => setAnswer(e.target.value)}/></label>
-        <button className="primary" disabled={busy || !answer.trim()}>Lưu câu trả lời</button><small className="muted">Sau khi lưu, bấm “Lập proposal bằng Codex” để tạo phiên bản mới.</small></form>}
+      {(latest.state === 'NEEDS_CLARIFICATION'||workflow?.ready&&latest.state==='AWAITING_APPROVAL') && <form className="stack" onSubmit={event => {event.preventDefault(); void onAnswer(latest,answer).then(() => setAnswer('')).catch(() => {});}}>
+        <label>{workflow?'Nhắn lại cho agent':'Trả lời câu hỏi'}<textarea value={answer} rows={5} maxLength={20000} required onChange={e => setAnswer(e.target.value)}/></label>
+        <button className="primary" disabled={busy || !!workflow&&!workflow.ready || !answer.trim()}>{workflow?'Gửi và lập lại proposal':'Lưu câu trả lời'}</button><small className="muted">{workflow?'Gửi tin nhắn sẽ yêu cầu n8n lập proposal mới. Duyệt bị khóa khi agent còn cần làm rõ.':'Sau khi lưu, bấm “Lập proposal bằng Codex” để tạo phiên bản mới.'}</small></form>}
       {!latest.body.needs_clarification && <>
         <h3>Mục tiêu</h3><p>{latest.body.objective}</p>
         <h3>Nguồn đã chọn</h3>{latest.context_snapshot.resources.map(source => <div className="context-source" key={source.id}><strong>{source.title}</strong><small>v{source.version} · {source.status}</small><code className="source-id">{source.file_path || source.id}</code></div>)}
@@ -73,28 +74,28 @@ export default function ProposalPanel({idea,proposals,resources,busy,onOpenParen
         {latest.body.metric && <><h3>Cách đánh giá</h3><Details value={latest.body.metric}/></>}
         <h3>Cách triển khai</h3><ol>{latest.body.implementation_steps?.map((step,i) => <li key={i}>{step}</li>)}</ol>
         {latest.body.budget && Object.keys(latest.body.budget).some(key=>!['coder_calls','training_attempts'].includes(key)) && <><h3>Giới hạn bạn yêu cầu</h3><Details value={latest.body.budget}/></>}
-        <p className="muted">{latest.approval_provenance?'Workflow chỉ chạy trong phạm vi và hạn mức bạn đã ủy quyền.':'Bạn quyết định từng lượt Working, không giới hạn tổng số lượt.'}</p>
+        <p className="muted">{latest.approval_provenance||workflow?'Workflow chỉ chạy trong phạm vi và hạn mức bạn đã ủy quyền.':'Bạn quyết định từng lượt Working, không giới hạn tổng số lượt.'}</p>
         {pinnedIdea?.mode!=='etc' && latest.body.research && <><h3>Phạm vi Research</h3>
           <ResearchScope plan={latest.body.research}/><p className="muted">Các phần này được ghim khi duyệt. Đổi yêu cầu trong idea và lập proposal mới nếu muốn thêm hoặc bỏ đầu ra.</p></>}
         {!!latest.body.expected_outputs?.length && <><h3>Đầu ra dự kiến</h3><ul>{latest.body.expected_outputs.map((output,i) => <li key={i}>{output}</li>)}</ul></>}
         <code className="source-id">Context SHA256 {latest.context_sha256}</code>
-        {latest.state === 'AWAITING_APPROVAL' && <div className="stack"><p className="muted">Duyệt sẽ lưu phạm vi công việc và tạo run đầu tiên. Agent kiểm tra môi trường và thực hiện trong phiên Working.</p><button className="primary" disabled={busy || idea?.state === 'PLANNING'} onClick={() => void onApprove(latest).catch(() => {})}>Duyệt proposal v{latest.version}</button></div>}
+        {latest.state === 'AWAITING_APPROVAL' && <div className="stack"><p className="muted">Duyệt sẽ lưu phạm vi công việc và tạo run đầu tiên. Agent kiểm tra môi trường và thực hiện trong phiên Working.</p><button className="primary" disabled={busy || idea?.state === 'PLANNING' || !!answer.trim() || !!workflow&&(!workflow.ready||!workflow.approvalAllowed)} onClick={() => void onApprove(latest).catch(() => {})}>Duyệt proposal v{latest.version}</button></div>}
         {latest.state === 'APPROVED' && <p className="alert">{latest.approval_provenance
           ? `Đã được ${latest.approval_provenance.actor==='agent'?'agent '+latest.approval_provenance.seat:'bạn'} duyệt trong workflow. Mở tab Run để theo dõi. Grant: ${latest.approval_provenance.grant_id.slice(0,8)}.`
           : pinnedIdea?.mode==='etc'
           ? 'Đã duyệt proposal Etc. Mở tab Run và bấm Bắt đầu Working; kết quả sẽ nằm trong Output.'
           : 'Đã duyệt. Mở tab Run và bấm Bắt đầu Working để thực hiện công việc trên Kaggle.'}</p>}
       </>}
-      {answered && <div className="stack"><p className="alert">Câu trả lời đã được lưu. Tiếp tục để Codex đọc câu trả lời và lập proposal v{latest.version + 1} từ các nguồn của v{latest.version}.</p>
+      {answered && !workflow && <div className="stack"><p className="alert">Câu trả lời đã được lưu. Tiếp tục để Codex đọc câu trả lời và lập proposal v{latest.version + 1} từ các nguồn của v{latest.version}.</p>
         <button type="button" className="primary" disabled={busy || idea?.state === 'PLANNING'}
           onClick={() => void onContinue(latest).catch(() => {})}>Tiếp tục lập proposal v{latest.version + 1}</button></div>}
-      {latest.state === 'STALE' && !answered && <div className="stack"><p className="alert error">Proposal cần xem lại.{changedSources.length
+      {latest.state === 'STALE' && !answered && !workflow && <div className="stack"><p className="alert error">Proposal cần xem lại.{changedSources.length
         ? ` Nguồn đã đổi phiên bản hoặc bị xóa: ${changedSources.map(source=>source.title).join(', ')}.`
         : !settingsMatch ? ' Mode hoặc đầu ra mong muốn đã thay đổi.' : ' Nội dung idea hoặc trao đổi đã thay đổi.'} Bản proposal cũ vẫn được lưu; kiểm tra nguồn đang chọn rồi lập bản mới trước khi duyệt.</p>
         {idea?.state!=='APPROVED' && <button type="button" className="primary" disabled={busy}
           onClick={()=>void onReplan()}>Lập lại proposal từ nguồn đang chọn</button>}</div>}
     </article>}
-    {idea?.state==='FAILED' && <div className="stack"><p className="muted">Trao đổi đã lưu sẽ được gửi cùng các nguồn đang chọn. Tiếp tục là yêu cầu một lượt lập proposal mới.</p>
+    {idea?.state==='FAILED' && !workflow && <div className="stack"><p className="muted">Trao đổi đã lưu sẽ được gửi cùng các nguồn đang chọn. Tiếp tục là yêu cầu một lượt lập proposal mới.</p>
       <button type="button" className="primary" disabled={busy} onClick={()=>void onReplan()}>Tiếp tục lập proposal</button></div>}
   </section>;
 }

@@ -17,6 +17,11 @@ class HumanAnswer(StrictModel):
     result: dict
 
 
+class WorkflowStart(StrictModel):
+    idea_id: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+    from_run_id: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+
+
 class LiteratureKey(StrictModel):
     api_key: str = Field(min_length=1,max_length=2000)
 
@@ -85,6 +90,7 @@ def create_n8n_router():
         return {'project_id': project, 'resources': service.projects.resources(project),
                 'benchmarks': BenchmarkCatalog(service.projects).list(project),
                 'accounts': service.working.accounts.list() if service.working.accounts else [],
+                'configuration':service.controls.configuration.get(project),
                 'n8n': service.client.status(), 'literature':{'configured':bool(saved_search_key(service.projects.workspace))}}
 
     @router.get('/projects/{project}/workflows')
@@ -106,8 +112,8 @@ def create_n8n_router():
         return [{k: v for k, v in row.items() if k != 'input'} for row in IdeaArchive(service.projects).list(project)[-100:]]
 
     @router.post('/projects/{project}/workflows/{identity}/start')
-    async def start(project: str, identity: str, request: Request):
-        return await owner(request, project, 'research').start(project, identity)
+    async def start(project: str, identity: str, request: Request, body: WorkflowStart = WorkflowStart()):
+        return await owner(request, project, 'research').start(project, identity, **body.model_dump())
 
     @router.post('/projects/{project}/workflows/{identity}/pause')
     async def pause(project: str, identity: str, request: Request):
@@ -121,7 +127,11 @@ def create_n8n_router():
     def answer(project: str, identity: str, input_id: str, body: HumanAnswer, request: Request):
         service = owner(request, project, 'research')
         service.current(project, identity)
-        service.store.answer(project, identity, input_id, body.result)
+        pending = next((i for i in service.store.inputs(project,identity) if i['id']==input_id),None)
+        if pending and pending['stage']=='ideation' and 'idea_id' in body.result:
+            service.controls.choose_idea(project,identity,input_id,body.result['idea_id'])
+        else:
+            service.store.answer(project, identity, input_id, body.result)
         return service.view(project, identity)
 
     @router.post('/n8n/step')

@@ -66,6 +66,31 @@ class WorkflowStore:
                         (json.dumps(state), now(), identity))
         return self.get(project, identity)
 
+    def attach_idea(self, project, identity, idea_id, spec, fingerprints, *, input_id=None):
+        with self.projects.connection(project) as con:
+            self.setup(con)
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT state_json FROM research_workflows WHERE id=?', (identity,)).fetchone()
+            state = json.loads(row[0])
+            if state.get('idea_id'):
+                if state['idea_id'] != idea_id:
+                    raise StoreConflict('Workflow đã gắn với idea khác')
+                return
+            if state.get('proposal_id') or state.get('run_id'):
+                raise StoreConflict('Không đổi idea sau khi agent bắt đầu xử lý')
+            if input_id:
+                gate = con.execute('SELECT * FROM workflow_inputs WHERE id=? AND workflow_id=? AND stage=?',(input_id,identity,'ideation')).fetchone()
+                if gate is None or gate['state']!='PENDING' or state['status']!='WAITING':
+                    raise StoreConflict('Yêu cầu chọn idea đã được xử lý hoặc đã dừng')
+                import jsonschema
+                jsonschema.validate({'idea_id':idea_id},json.loads(gate['prompt_json'])['schema'])
+                con.execute("UPDATE workflow_inputs SET state='DONE',result_json=? WHERE id=?",(canonical({'idea_id':idea_id}),input_id))
+                state['status']='RUNNING'
+            state.update(idea_id=idea_id, source_fingerprints=fingerprints)
+            state.setdefault('entry_idea_id',idea_id)
+            con.execute('UPDATE research_workflows SET spec_json=?,state_json=?,updated_at=? WHERE id=?',
+                        (canonical(spec.model_dump(mode='json')),canonical(state),now(),identity))
+
     def event(self, project, identity, stage, kind, **details):
         def add(state):
             state['stage'] = stage

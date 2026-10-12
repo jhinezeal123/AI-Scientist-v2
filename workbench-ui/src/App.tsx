@@ -3,6 +3,12 @@ import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Pro
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
 import ProjectWorkflow from './ProjectWorkflow';
+import WorkflowHumanStep from './WorkflowHumanStep';
+import {ProjectSources,IdeaSourceSelection} from './ProjectSources';
+import {ProjectConfiguration} from './projectConfiguration';
+import {useProjectWorkflow} from './useProjectWorkflow';
+import {agentCall,teamIntent} from './agentApi';
+import {workflowBase} from './projectWorkflows';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import SourceCards from './SourceCards';
@@ -55,6 +61,13 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [projectNotice,setProjectNotice]=useState('');
   const [revision, setRevision] = useState(0);
+  const [projectConfig,setProjectConfig]=useState<ProjectConfiguration|null>(null);
+  const [sourceReady,setSourceReady]=useState(false);
+  const initializedDefaults=useRef('');
+  const {flow:currentFlow,error:workflowError}=useProjectWorkflow(projectId);
+  const flowIdea=!!currentFlow&&currentFlow.state.idea_id===ideaId;
+  const flowInput=currentFlow?.inputs?.find(i=>i.state==='PENDING');
+  const flowProposalReady=flowIdea&&currentFlow?.state.status==='WAITING'&&flowInput?.stage==='approval';
   const [connectionRevision,setConnectionRevision] = useState(0);
   const [connectionError,setConnectionError] = useState('');
   const [reviewedVariantSources,setReviewedVariantSources] = useState('');
@@ -82,7 +95,7 @@ export default function App() {
     }
     firstRestore.current=false;
     setTab(saved.tab);setRunId(saved.runId);setSelected(saved.sourceIds);setIdeaId(saved.ideaId);setSessionProject(projectId);
-    setMode(saved.mode);setDesiredOutput('');setBenchmarkId('');setBenchmarkDefinition(emptyBenchmark());setBenchmarks([]);
+    setProjectConfig(null);setMode(saved.mode);setDesiredOutput('');setBenchmarkId('');setBenchmarkDefinition(emptyBenchmark());setBenchmarks([]);
     setBranch(null);setBranchChanges('');setResearch(emptyResearch());setRunTags([]);
     setContext(null);setEditing(null);setForm(blank);setReplacing(null);
     setIdeaText(''); setTitle(''); setEditingIdea(null); setNotice(''); setResources([]); setIdeas([]); setProposals([]); setHistory({proposals: [], runs: []});
@@ -113,9 +126,10 @@ export default function App() {
     let cancelled = false;
     setLoading(true);
     loadProjectData(projectId)
-      .then(([r, i, h, p, b]) => {
+      .then(([r, i, h, p, b, c]) => {
         if (cancelled) return;
-        setResources(r); setIdeas(i); setHistory(h); setProposals(p);setBenchmarks(b);
+        setResources(r); setIdeas(i); setHistory(h); setProposals(p);setBenchmarks(b);setProjectConfig(c);
+        const defaultsKey=projectId+':'+JSON.stringify(c.workflow);if(initializedDefaults.current!==defaultsKey&&!ideaText.trim()&&!title.trim()&&!editingIdea&&!branch){initializedDefaults.current=defaultsKey;const d=c.workflow;if(d){setMode(d.mode);setResearch(d.research);setBenchmarkId(d.benchmark_id||'');setDesiredOutput(d.desired_output);}}
         setConnectionError('');
         setSelected(current=>current.filter(id=>r.some(source=>source.id===id && !source.deletion_pending)));
         setIdeaId(current => i.some(idea => idea.id === current && !idea.deleted_at) ? current : '');
@@ -130,10 +144,10 @@ export default function App() {
   const implementing = history.runs.some(run => ['IMPLEMENTING','SUBMITTING','STARTING','WORKING','STOPPING'].includes(run.state));
   const queued = history.runs.some(run => run.state==='QUEUED');
   useEffect(() => {
-    if ((!planning && !implementing && !queued) || connectionError) return;
+    if ((!planning && !implementing && !queued && !currentFlow) || connectionError) return;
     const timer = window.setInterval(() => setRevision(n => n+1),1500);
     return () => window.clearInterval(timer);
-  },[planning,implementing,queued,projectId,connectionError]);
+  },[planning,implementing,queued,projectId,connectionError,!!currentFlow]);
 
   useEffect(() => {
     if (!projectId || !history.runs.length || connectionError)return;
@@ -208,6 +222,7 @@ export default function App() {
   const sourceVersionSignature=JSON.stringify(resources.filter(source=>!source.deletion_pending)
     .map(source=>[source.id,source.version,source.content_sha256]));
   useEffect(()=>{setReviewedVariantSources('');},[projectId,sourceVersionSignature]);
+  function resetIdeaSettings(){const d=projectConfig?.workflow;setDesiredOutput(d?.desired_output||'');setResearch(d?.research||emptyResearch());setBenchmarkId(d?.benchmark_id||'');setRunTags([]);if(d)setMode(d.mode);}
   function selectIdea(id:string) {
     setIdeaId(id);setContext(null);
     setReviewedVariantSources('');
@@ -242,7 +257,7 @@ export default function App() {
       setReviewedVariantSources(hasChanged ? '' : created.id);
       setIdeaId(created.id);setEditingIdea(null);setIdeaText('');setTitle('');setContext(null);setTab('Idea');
       setDesiredOutput('');
-      setBranch(null);setBranchChanges('');setResearch(emptyResearch());setRunTags([]);
+      setBranch(null);setBranchChanges('');resetIdeaSettings();
       setRevision(n=>n+1);setNotice('Đã lưu idea biến thể ở trạng thái bản nháp. Chưa gọi planner hoặc tạo run.');
     });
     return created;
@@ -251,8 +266,8 @@ export default function App() {
   function beginBranch(id:string,branchMode:RunMode) {
     const parent=history.runs.find(run=>run.id===id);
     setBranch({parentId:id,title:parent?.title || 'Run '+id.slice(0,8),mode:branchMode,requestId:crypto.randomUUID().replaceAll('-','')});
-    setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput('');setBranchChanges('');
-    setResearch(emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');setBenchmarkId(parent?.benchmark?.id||'');
+    setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput(branchMode==='etc'?parent?.desired_output||projectConfig?.workflow?.desired_output||'':'');setBranchChanges('');
+    setResearch(proposals.find(p=>p.id===parent?.proposal_id)?.body.research||projectConfig?.workflow?.research||emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');setBenchmarkId(parent?.benchmark?.id||'');
     setSelected((parent?.source_refs || []).map(source=>source.id).filter(id=>resources.some(source=>source.id===id && !source.deletion_pending)));
   }
   return <div className="app">
@@ -281,11 +296,14 @@ export default function App() {
         <button type="button" onClick={refresh}>Kết nối lại</button></div>}
       {!project ? <section className="panel welcome"><h2>Tạo project đầu tiên</h2><p>Lưu đề bài, nguồn dữ liệu và idea cùng một project. Bắt đầu bằng form bên trái.</p></section> : <>
         {loading && <p role="status" className="muted">Đang đọc project…</p>}
-        {tab === 'Workflow' && <ProjectWorkflow key={project.id} projectId={project.id}/>}
+        {tab === 'Workflow' && <ProjectWorkflow key={project.id} projectId={project.id} ideas={ideas} runs={history.runs} onChanged={()=>setRevision(n=>n+1)} onOpen={(next,id)=>{setTab(next);if(next==='Idea'&&id)selectIdea(id);if(next==='Run'&&id)setRunId(id);}}/>}
+        {workflowError&&projectConfig?.workflow&&tab!=='Workflow'&&<div className="alert"><p>Chưa đọc được trạng thái workflow. Mở Workflow để kiểm tra kết nối đã lưu.</p><button onClick={()=>setTab('Workflow')}>Mở Workflow</button></div>}
+        {currentFlow&&tab!=='Workflow'&&<div className="alert"><strong>Workflow · {currentFlow.state.status==='WAITING'?'Chờ bạn':currentFlow.state.status==='PAUSED'?'Đã dừng':'Đang điều phối'}</strong><div className="actions"><button onClick={()=>setTab('Workflow')}>Xem toàn luồng</button>{currentFlow.state.idea_id&&tab!=='Idea'&&<button onClick={()=>{selectIdea(currentFlow.state.idea_id!);setTab('Idea');}}>Mở idea / proposal</button>}{currentFlow.state.run_id&&tab!=='Run'&&<button onClick={()=>{setRunId(currentFlow.state.run_id!);setTab('Run');}}>Mở run</button>}</div></div>}
         {tab === 'Library' && <div className="columns">
           <section className="panel"><div className="panel-head"><h2>Library <span className="muted">{resources.length} nguồn</span></h2></div>
             <p className="muted">Nguồn được lưu thành file riêng theo phiên bản. Agent nhận đường dẫn và tự tìm, đọc phần cần thiết.</p>
             <code className="source-id">{project.library_path}</code>
+            <ProjectSources projectId={projectId} resources={resources} onSaved={()=>setRevision(n=>n+1)}/>
             <SourceCards key={projectId} projectId={projectId} resources={resources} busy={busy || unavailable}
               deletionBlocked={planning || implementing} onEdit={resource=>{
                 if (resource.attachment){setReplacing(resource);return;}
@@ -313,7 +331,7 @@ export default function App() {
               onCancel={()=>setReplacing(null)} onUpload={action} onSaved={source=>{setReplacing(null);setContext(null);setRevision(n=>n+1);
                 setNotice(`Đã nhập ${source.title} · v${source.version}: ${statusText(source.status)}.`);}}/></section>
         </div>}
-        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{branch ? (formMode==='etc' ? 'Etc từ run đã chọn' : 'Improve từ run đã chọn') : editingIdea ? 'Sửa idea' : 'Idea mới · Draft'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal bằng Codex. Mỗi proposal được duyệt tạo đúng một run.</p>
+        {tab === 'Idea' && <div className="columns"><section className="panel"><h2>{branch ? (formMode==='etc' ? 'Etc từ run đã chọn' : 'Improve từ run đã chọn') : editingIdea ? 'Sửa idea' : 'Idea mới · Draft'}</h2><p className="muted">Lưu bản nháp, chọn nguồn rồi lập proposal. Cấu hình project sẽ điều phối các bước qua n8n. Mỗi proposal được duyệt tạo đúng một run.</p>
           {branch && <div className="context"><strong>Run cha: {branch.title}</strong><p>Run mới nhận code, memory_journal và liên kết artifact của cha.</p></div>}
           <form className="stack" onSubmit={event => {event.preventDefault();
             if(branch) {
@@ -330,8 +348,7 @@ export default function App() {
                 expected_research:editingIdea.research || null,expected_tags:editingIdea.tags || [],
                 expected_benchmark_id:editingIdea.benchmark_id||null,expected_benchmark_definition:editingIdea.benchmark_definition||null} : {})});
             setIdeaId(idea.id); setIdeaText(''); setTitle(''); setEditingIdea(null); setContext(null); setRevision(n => n+1); setNotice('Đã lưu idea.');
-            setDesiredOutput('');
-            setResearch(emptyResearch());setRunTags([]);
+            resetIdeaSettings();
           });
           }}><label>Tiêu đề idea<input value={title} required maxLength={80} placeholder="Ví dụ: CNN nhỏ cho ảnh đất" onChange={e=>setTitle(e.target.value)}/></label>
           <ModeFields mode={formMode} desiredOutput={desiredOutput} disabled={busy || unavailable} allowBenchmark={!branch}
@@ -344,10 +361,11 @@ export default function App() {
             <div className="actions">{['research','tuning','ablation'].map(tag=><label className="check" key={tag}>
               <input type="checkbox" checked={runTags.includes(tag)} onChange={e=>setRunTags(old=>e.target.checked ? [...old,tag] : old.filter(value=>value!==tag))}/><span>{tag}</span></label>)}</div>
             <small className="muted">Chỉ để ghi nhớ; không thay đổi cách agent thực hiện.</small></fieldset>}
+          {projectConfig?.workflow&&!editingIdea&&<p className="muted">Đang dùng mặc định của project. Thay đổi dưới đây chỉ áp dụng cho idea này.</p>}
           {formMode==='training_research' && <ResearchOptions value={research} onChange={setResearch} disabled={busy || unavailable}/>}
           <div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim() || (!!branch && !branchChanges.trim())}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>
-            {(editingIdea || branch) && <button type="button" onClick={()=>{setEditingIdea(null);setBranch(null);setBranchChanges('');setIdeaText('');setTitle('');setDesiredOutput('');setResearch(emptyResearch());setRunTags([]);}}>Hủy</button>}</div></form>
-          <IdeaCards key={projectId} ideas={ideas} selectedId={ideaId} busy={busy || unavailable} onSelect={selectIdea}
+            {(editingIdea || branch) && <button type="button" onClick={()=>{setEditingIdea(null);setBranch(null);setBranchChanges('');setIdeaText('');setTitle('');resetIdeaSettings();}}>Hủy</button>}</div></form>
+          <IdeaCards key={projectId} ideas={ideas} selectedId={ideaId} busy={busy || unavailable} lockedId={currentFlow?.state.idea_id} onSelect={selectIdea}
             onDelete={async id=>{await action(async()=>{
               await api(`/projects/${projectId}/ideas/${id}`,'DELETE');setIdeaId('');setContext(null);setEditingIdea(null);setIdeaText('');setTitle('');
               setDesiredOutput('');
@@ -373,22 +391,25 @@ export default function App() {
                 onChange={event=>setReviewedVariantSources(event.target.checked ? ideaId : '')}/>
                 <span>Tôi đã kiểm tra nguồn đang chọn cho proposal mới.</span></label>
             </div>}
-            {resources.filter(resource=>!resource.deletion_pending).map(resource => <label className="check" key={resource.id}><input type="checkbox" checked={selected.includes(resource.id)} onChange={e => {setSelected(current => e.target.checked ? [...current,resource.id] : current.filter(id => id !== resource.id));setContext(null);setReviewedVariantSources('');}}/><span>{resource.title}<small>v{resource.version} · {statusText(resource.status)}</small></span></label>)}
-            <button disabled={busy || unavailable || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
+            <IdeaSourceSelection projectId={projectId} ideaId={ideaId} resources={resources} revision={(flowIdea?currentFlow?.id||'':'')+':'+(proposals.find(p=>p.idea_id===ideaId)?.id||'')} disabled={busy||unavailable||flowIdea||planning} onSelected={setSelected} onReady={setSourceReady}/>
+            {currentFlow?.state.status==='WAITING'&&flowInput?.stage==='ideation'&&<div className="alert"><p>{flowInput.prompt.parent_run_id?'Workflow đang chờ idea Improve từ run cha. Mở Run, tạo Improve rồi chọn idea đó tại đây.':'Workflow đang chờ idea. Nhập và lưu idea ở trên, hoặc chọn idea đã có.'}</p>{flowInput.prompt.parent_run_id&&<button onClick={()=>{setRunId(flowInput.prompt.parent_run_id!);setTab('Run');}}>Mở run cha để tạo Improve</button>}<button className="primary" disabled={busy||!sourceReady||!ideaId||selectedIdea?.mode==='benchmark'||selectedIdea?.state==='APPROVED'||!!flowInput.prompt.parent_run_id&&selectedIdea?.variant?.parent_run_id!==flowInput.prompt.parent_run_id} onClick={()=>void action(async()=>{await agentCall(workflowBase(projectId)+'/'+currentFlow.id+'/inputs/'+flowInput.id,'POST',{result:{idea_id:ideaId}});setRevision(n=>n+1);setNotice('Đã chọn idea này. Workflow tiếp tục kiểm tra novelty và lập proposal.');})}>Dùng idea đang chọn và tiếp tục</button></div>}
+            {currentFlow?.state.status==='WAITING'&&flowInput?.stage==='literature'&&<WorkflowHumanStep input={flowInput} disabled={busy||unavailable} answer={result=>void action(async()=>{await agentCall(workflowBase(projectId)+'/'+currentFlow.id+'/inputs/'+flowInput.id,'POST',{result});setRevision(n=>n+1);})}/>}
+
+            <button disabled={busy || unavailable || !sourceReady || !ideaId} onClick={() => void action(async () => {setContext(await api<Context>(`/projects/${projectId}/context`, 'POST', {idea_id:ideaId,resource_ids:selected}));})}>Xem context đã chọn</button>
             {selectedIdea && <p className="muted">Idea đang chọn: {modeLabel(selectedIdea.mode,selectedIdea.mode_legacy)}.</p>}
             {outputMissing && <p role="status" className="alert">{selectedIdea?.mode==='training_research' ? 'Training/Research cần chọn benchmark đã hoàn tất.' : 'Etc cần đầu ra mong muốn.'} Bấm Sửa idea để nhập trước khi lập proposal.</p>}
-            <button className="primary" disabled={busy || unavailable || planning || outputMissing || variantSourceReviewRequired || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
-              await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected}); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
-            })}>Lập proposal bằng Codex</button>
+            <button className="primary" disabled={busy || unavailable || !sourceReady || !!projectConfig?.workflow&&!!workflowError || flowIdea || planning || outputMissing || variantSourceReviewRequired || !ideaId || ideas.find(i => i.id === ideaId)?.state === 'APPROVED'} onClick={() => void action(async () => {
+              const body={idea_id:ideaId,resource_ids:selected};const intent=await teamIntent(projectId+':plan',body);await api(`/projects/${projectId}/plan`,'POST',{...body,request_id:intent.id.replaceAll('-','')});intent.ack(); setRevision(n => n+1);setNotice('Đã gửi yêu cầu lập proposal cho Codex.');
+            })}>{projectConfig?.workflow?'Lập proposal và tiếp tục workflow':'Lập proposal bằng Codex'}</button>
           </div>{context && <div className="context"><h3>Context snapshot</h3><code className="source-id">SHA256 {context.context_sha256}</code>{context.snapshot.resources.map(resource => <div className="context-source" key={resource.id}><strong>{resource.title}</strong><small>v{resource.version} · {statusText(resource.status)}</small><a href={`/api/projects/${projectId}/library/${resource.id}/versions/${resource.version}`} target="_blank" rel="noreferrer">Mở file nguồn ↗</a><code className="source-id">{resource.file_path}</code></div>)}<details><summary>Xem context và đường dẫn nguồn</summary><pre>{JSON.stringify(context.snapshot,null,2)}</pre></details></div>}
         </section><ProposalPanel key={`${projectId}:${ideaId}`} idea={selectedIdea} proposals={proposals} resources={resources} busy={busy || unavailable || planning || outputMissing || variantSourceReviewRequired}
           onOpenParent={openRun}
-          onReplan={async()=>{await action(async()=>{
-            await api(`/projects/${projectId}/plan`,'POST',{idea_id:ideaId,resource_ids:selected});
+          workflow={flowIdea?{ready:!!flowProposalReady,paused:currentFlow?.state.status!=='WAITING',approvalAllowed:!!flowInput?.prompt.approval_allowed}:undefined} onReplan={async()=>{await action(async()=>{
+            const body={idea_id:ideaId,resource_ids:selected};const intent=await teamIntent(projectId+':plan',body);await api(`/projects/${projectId}/plan`,'POST',{...body,request_id:intent.id.replaceAll('-','')});intent.ack();
             setRevision(n=>n+1);setNotice('Đã yêu cầu Codex tiếp tục từ trao đổi đã lưu và các nguồn đang chọn.');
           });}} onAnswer={async (proposal,text) => {
           let saved = false;
-          await action(async () => {await api(`/projects/${projectId}/ideas/${ideaId}/answer`,'POST',{proposal_id:proposal.id,version:proposal.version,text});setRevision(n => n+1);setNotice(`Đã lưu câu trả lời. Bấm “Tiếp tục lập proposal v${proposal.version + 1}” để Codex tiếp tục.`);saved = true;});
+          await action(async () => {await api(`/projects/${projectId}/ideas/${ideaId}/answer`,'POST',{proposal_id:proposal.id,version:proposal.version,text});setRevision(n => n+1);setNotice(flowIdea?'Đã gửi tin nhắn; n8n sẽ lập phiên bản proposal mới.':`Đã lưu câu trả lời. Bấm “Tiếp tục lập proposal v${proposal.version + 1}” để Codex tiếp tục.`);saved = true;});
           if (!saved) throw new Error('Answer not saved');
         }} onContinue={async proposal => {await action(async () => {
           const resourceIds = proposal.context_snapshot.resources.map(source => source.id);
@@ -396,10 +417,10 @@ export default function App() {
           setSelected(resourceIds);setContext(null);setRevision(n => n+1);
           setNotice(`Đã gửi câu trả lời và nguồn của v${proposal.version} cho Codex để lập proposal v${proposal.version + 1}.`);
         });}} onApprove={async proposal => {await action(async () => {
-          const run = await api<{id:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
-          setRunId(run.id);setTab('Run');
+          const run = await api<{id?:string;workflow_id?:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(run.workflow_id?'Đã gửi duyệt proposal; workflow sẽ tạo run và chờ bạn duyệt bắt đầu.':`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
+          if(run.workflow_id)setRunId('');else if(run.id)setRunId(run.id);setTab('Run');
         });}}/></div>}
-        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId} onSelect={setRunId} runs={history.runs} busy={busy || unavailable || planning}
+        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId||currentFlow?.state.run_id||''} onSelect={setRunId} workflow={currentFlow||undefined} onWorkflowAnswer={async(input,result)=>{await action(async()=>{await agentCall(workflowBase(projectId)+'/'+currentFlow!.id+'/inputs/'+input.id,'POST',{result});setRevision(n=>n+1);});}} runs={history.runs} busy={busy || unavailable || planning}
           onOutputCopied={()=>setRevision(n=>n+1)}
           onBatch={async items=>{await action(async()=>{
             const result=await api<{runs:{run_id:string;state:string;reason?:string}[]}>(`/projects/${projectId}/runs/batch`,'POST',{runs:items});

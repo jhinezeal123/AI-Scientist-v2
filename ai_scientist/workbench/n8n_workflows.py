@@ -32,6 +32,8 @@ class N8nResearchWorkflows:
         self.agent_turns = N8nAgentTurns(self.client, self.executor)
         self.callbacks = StepCallbacks(self.store, self.client)
         self.run_phases = RunPhases(self)
+        from .project_workflow_controls import ProjectWorkflowControls
+        self.controls = ProjectWorkflowControls(self)
         self.tasks, self.workers, self.locks = {}, {}, {}
         self.closed = False
 
@@ -59,13 +61,21 @@ class N8nResearchWorkflows:
         if set(spec.resource_ids) - {r['id'] for r in resources}:
             raise ValueError('Context is outside the selected project')
         fingerprints = {r['id']: digest(canonical(r)) for r in resources if r['id'] in spec.resource_ids}
-        row = self.store.create(project, project, identity, spec, fingerprints)
+        existing = any(r['id']==identity for r in self.store.list(project))
+        self.store.create(project, project, identity, spec, fingerprints)
+        if not existing:
+            saved = self.controls.configuration.update(project, workflow=spec.model_dump(mode='json'))
+            self.store.change(project,identity,lambda s:s.update(configuration_version=saved['version']))
+        self.write_grant(project, identity)
+        return self.view(project, identity)
+
+    def write_grant(self, project, identity):
+        row = self.store.get(project, identity)
         folder = self.projects.directory(project) / 'automation' / identity
         folder.mkdir(parents=True, exist_ok=True)
         (folder / 'grant.json').write_text(json.dumps({'workflow_id': identity, 'project_id': project,
-            'spec': row['spec'], 'grant_id': row['state']['grant_id'], 'sources': fingerprints,
+            'spec': row['spec'], 'grant_id': row['state']['grant_id'], 'sources': row['state']['source_fingerprints'],
             'n8n_workflow_id': 'workbenchResearch'}, ensure_ascii=False, indent=2), encoding='utf-8')
-        return self.view(project, identity)
 
     def list(self, project):
         self.projects.project(project)
@@ -130,7 +140,7 @@ class N8nResearchWorkflows:
                 raise StoreConflict('Provider for ' + stage + ' is not ready; open Config agent')
             checked.add(binding.harness)
 
-    async def start(self, project, identity):
+    async def start(self, project, identity, *, idea_id=None, from_run_id=None):
         async with self.locks.setdefault(project, asyncio.Lock()):
             row = self.current(project, identity)
             if row['state']['status'] in {'RUNNING', 'WAITING'}:
@@ -141,6 +151,18 @@ class N8nResearchWorkflows:
                 raise StoreConflict('Start local n8n before starting this workflow')
             if any(r['id'] != identity and r['state']['status'] in {'RUNNING', 'WAITING', 'UNKNOWN'} for r in self.list(project)):
                 raise StoreConflict('Stop or reconcile the current project workflow first')
+            if idea_id and from_run_id:
+                raise ValueError('Chọn một điểm bắt đầu')
+            if idea_id:
+                self.controls.configure_idea(project, identity, idea_id)
+                row = self.current(project, identity)
+            if from_run_id:
+                # The project store checks completion, deletion and remote stop.
+                with self.projects.connection(project) as con:
+                    self.projects._variant_parent(con, from_run_id)
+                if row['state'].get('calls') or row['state'].get('idea_id'):
+                    raise StoreConflict('Chỉ chọn run cha trước khi workflow bắt đầu')
+                self.store.change(project,identity,lambda s:s.update(parent_run_id=from_run_id))
             await asyncio.to_thread(self.preflight, project, WorkflowSpec.model_validate(row['spec']))
             run = row['state'].get('run_id')
             if run and self.working.record(project, run) and not self.working.record(project, run).get('stop_confirmed'):
@@ -293,6 +315,7 @@ class N8nResearchWorkflows:
             __import__('time').monotonic()+86400, lambda: False)
         if not decision['approve']:
             raise StoreConflict('Run rejected: ' + decision['reason'][:500])
+        self.store.change(runtime.project,runtime.workflow,lambda s:s.update(run_approval_id=state['run_id']))
 
     async def pause(self, project, identity):
         row = self.current(project, identity)

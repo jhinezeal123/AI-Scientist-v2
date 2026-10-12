@@ -1,5 +1,8 @@
 import {useCallback,useEffect,useState} from 'react';
 import {api,Benchmark,History,Variant,Working,RunMode,RunOutput,Resource,ResearchPlan,ResearchPipeline,KaggleAccount} from './api';
+import WorkflowHumanStep from './WorkflowHumanStep';
+import {Flow,HumanInput} from './projectWorkflows';
+import {configuration} from './projectConfiguration';
 import RunMonitorPanel from './RunMonitorPanel';
 import OutputToLibrary from './OutputToLibrary';
 import ResearchScope from './ResearchScope';
@@ -17,7 +20,8 @@ type RunDetail={id:string;title:string;state:string;error:string|null;deleted_at
   result_metric?:{name:string;direction:string;final_value:number;best_value:number}};
 
 export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onWorking,onStop,onResumeQueue,onReconcile,
-  onDelete,onRestore,onBranch,onBatch,onOutputCopied}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
+  onDelete,onRestore,onBranch,onBatch,onOutputCopied,workflow,onWorkflowAnswer}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
+  workflow?:Flow;onWorkflowAnswer:(input:HumanInput,result:unknown)=>Promise<void>;
   runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,account:string)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onResumeQueue:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;onDelete:(id:string)=>Promise<void>;
   onRestore:(id:string)=>Promise<void>;onBranch:(id:string,mode:RunMode)=>void;
@@ -37,6 +41,9 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
       .catch(e=>{if(!cancelled)setAccountError(e instanceof Error?e.message:String(e));});
     return ()=>{cancelled=true;};
   },[]);
+  useEffect(()=>{let stopped=false;configuration(projectId).then(value=>{if(!stopped&&value.workflow){setAccelerator(value.workflow.accelerator);setTtl(value.workflow.ttl_seconds);setAccount(value.workflow.account);}}).catch(e=>{if(!stopped)setError(e.message);});return()=>{stopped=true;};},[projectId]);
+  const ownedRun=!!workflow&&workflow.state.run_id===selectedRunId;
+  const runInputs=workflow?.inputs?.filter(i=>i.state==='PENDING'&&!['ideation','literature','approval'].includes(i.stage))||[];
   const selectedAccount=accounts.find(item=>item.account===account);
   const readinessLabel={verified_idle:'đã kiểm tra idle',unverified:'chưa kiểm tra',busy:'đang có phiên chạy',
     needs_login:'cần đăng nhập lại',unavailable:'chưa kết nối được'};
@@ -78,7 +85,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
     <section className="run-comparison"><label>Biểu đồ MLflow theo benchmark<select value={benchmarkId} onChange={e=>setBenchmarkId(e.target.value)}><option value="">Chọn benchmark</option>{benchmarks.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label></section>
     {benchmarkId && <RunComparison projectId={projectId} benchmarkId={benchmarkId} runIds={[]} onClose={()=>setBenchmarkId('')} onOpen={onSelect}/>}
     <RunBoard runs={visible} selectedId={selectedId} onSelect={onSelect} onCompare={ids=>setComparison(ids)}
-      onBatch={ids=>{setBatchIds(ids);setBatchAccounts(Object.fromEntries(ids.map(id=>[id,account])));}}/>
+      onBatch={ids=>{if(workflow&&ids.includes(workflow.state.run_id||'')){setError('Run này được điều phối qua workflow. Duyệt tại bước chờ bên dưới.');return;}setBatchIds(ids);setBatchAccounts(Object.fromEntries(ids.map(id=>[id,account])));}}/>
     {batchIds.length>=2 && <section className="run-comparison" aria-label="Batch Working"><div className="panel-head"><h3>Batch đã duyệt</h3>
       <button type="button" onClick={()=>setBatchIds([])}>Đóng</button></div>
       <p className="muted">Các run chạy song song, tối đa 2 session cho mỗi account, gồm cả phiên đang chạy trên Kaggle. Run vượt giới hạn tự vào hàng chờ và bắt đầu khi có chỗ trống.</p>
@@ -89,6 +96,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
       <button className="primary" type="button" disabled={busy || batchIds.some(id=>!batchAccounts[id])}
         onClick={()=>void onBatch(batchIds.map(id=>({run_id:id,account:batchAccounts[id],accelerator,ttl_seconds:ttl})))
           .then(()=>setBatchIds([]))}>Chạy batch song song</button></section>}
+    {workflow&&runInputs.map(input=><WorkflowHumanStep key={input.id} input={input} disabled={busy||workflow.state.status!=='WAITING'} answer={result=>void onWorkflowAnswer(input,result)}/>)}
     {comparison.length>=2 && <RunComparison projectId={projectId} runIds={comparison}
       onClose={()=>setComparison([])} onOpen={onSelect}/>}
     {!visible.length ? <p className="empty">Chưa có run. Lập và duyệt proposal trong Idea để tạo draft.</p>
@@ -100,7 +108,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
     {selectedId && !run && !error && <p role="status">Đang tải run…</p>}
     {run && <article className="resource run-detail" id="run-detail" aria-label={`Chi tiết ${run.title}`}>
       <div className="panel-head"><h3>{run.title || 'Run '+run.id.slice(0,8)}</h3><div className="actions">
-        <button className="danger-button" type="button" disabled={busy || !run.can_delete}
+        <button className="danger-button" type="button" disabled={busy || ownedRun || !run.can_delete}
           title={run.can_delete ? 'Xóa node lá và các file của run' : 'Chỉ xóa node lá đã dừng, không có idea con đang chờ'}
           onClick={()=>{if(window.confirm('Xóa run này và toàn bộ file đã lưu của run?'))void onDelete(run.id);}}>Xóa node lá</button>
         <button type="button" onClick={()=>onSelect('')}>Đóng chi tiết</button></div></div>
@@ -117,7 +125,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
         <div className="actions"><button type="button" disabled={busy} onClick={()=>onBranch(run.id,'training_research')}>Improve</button>
           <button type="button" disabled={busy} onClick={()=>onBranch(run.id,'etc')}>Etc</button></div></div>}
       {parent && <p>Run cha: <button type="button" onClick={()=>onSelect(parent)}>{runs.find(item=>item.id===parent)?.title || parent.slice(0,8)}</button></p>}
-      {!run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
+      {!ownedRun && !run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
         <h3>Working</h3>{run.mode==='training_research' && !run.benchmark && <p role="alert" className="alert error">Run cũ chưa có benchmark. Tạo Improve và chọn benchmark để chạy phiên mới.</p>}<p>Một run, một phiên SSH. Agent tự sửa lỗi trong run này. Bạn chủ động tạo các phiên bản improve.</p>
         <label>Account Kaggle<select value={account} disabled={busy || checking} onChange={e=>setAccount(e.target.value)}>
           {accounts.map(item=><option key={item.account} value={item.account} disabled={!item.configured}>
@@ -137,6 +145,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
         {startingRun===run.id && <p role="status">Đang kiểm tra cookie của {selectedAccount?.username}. Nếu hết hạn, tự đăng nhập rồi tiếp tục run.</p>}
         <button className="primary" disabled={(run.mode==='training_research' && !run.benchmark) || busy || checking || !!startingRun || !selectedAccount?.configured || !Number.isInteger(ttl) || ttl<60 || ttl>43200}
           onClick={()=>void beginWorking(run.id)}>{startingRun===run.id?'Đang kiểm tra account…':'Bắt đầu Working'}</button></div>}
+      {ownedRun&&!run.working&&<div className="context"><h3>Cấu hình run đã ghim</h3><p>Account: {workflow!.spec.account} · {workflow!.spec.accelerator} · {workflow!.spec.ttl_seconds/60} phút</p><p>{workflow!.state.status==='WAITING'?'Duyệt bước đang chờ ở trên để n8n tiếp tục.':'n8n sẽ bắt đầu run theo cấu hình và phạm vi đã duyệt.'}</p></div>}
       {run.working && <div className="context"><h3>Phiên Working</h3>
         <p>Account: {accounts.find(item=>item.account===run.working?.account)?.username || run.working.account || 'chưa rõ'}</p>
         <p>{run.working.accelerator==='NvidiaT4' ? 'GPU · T4 x2' : run.working.accelerator} · tối đa {run.working.ttl_seconds/60} phút</p>

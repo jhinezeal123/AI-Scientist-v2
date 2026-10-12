@@ -45,6 +45,7 @@ class ResearchSteps:
             context['snapshot']['workflow_constraints'] = {'execution_seconds': spec.execution_seconds,
                 'output_bytes': spec.output_bytes, 'accelerator': spec.accelerator, 'goal': spec.goal,
                 'grant_id': state['grant_id'], 'account': spec.account, 'max_runs': spec.max_runs,
+                'configuration_version': state.get('configuration_version'),
                 'search': spec.search.model_dump(), 'approval_actor': spec.stages['approval'].actor}
             from .store import canonical, digest
             context['context_sha256'] = digest(canonical(context['snapshot']))
@@ -108,7 +109,7 @@ class ResearchSteps:
         state = owner.store.get(project, identity)['state']
         run = state['run_id']
         if not owner.working.record(project, run):
-            if spec.require_run_approval:
+            if spec.require_run_approval and state.get('run_approval_id') != run:
                 decision = await asyncio.to_thread(runtime.human, 'run_approval',
                     {'kind': 'review', 'candidate': {'run_id': run, 'proposal': {
                      k: proposal[k] for k in ('id','version','context_sha256','body')},
@@ -144,5 +145,6 @@ class ResearchSteps:
                 s['runs'].append(run)
                 s['iteration'] += 1
             s.update(idea_id=None, proposal_id=None, run_id=None, stage='ideation', proposal_round=0,
+                     selected_candidate_id=None, run_approval_id=None,
                      revise_proposal=False, proposal_revision_request={})
         owner.store.change(project, identity, finish)

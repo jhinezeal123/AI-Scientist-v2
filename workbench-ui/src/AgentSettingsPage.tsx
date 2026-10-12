@@ -5,7 +5,7 @@ import {lazy,Suspense} from 'react';
 import SlackSettings from './SlackSettings';
 import RemoteSettings from './RemoteSettings';
 import RemotePairing from './RemotePairing';
-import ProjectWorkflow from './ProjectWorkflow';
+import RemoteResearchControls from './RemoteResearchControls';
 
 const remoteProjects=()=>agentCall<{id:string;name:string}[]>('/workflow-projects');
 const PresetSettings=lazy(()=>import('./PresetSettings'));
@@ -22,7 +22,7 @@ export default function AgentSettingsPage(){
       <button onClick={()=>void agentCall('/logout','POST').then(()=>location.reload())}>Đăng xuất</button>
       {active==='config-agent'&&<Suspense fallback={<p role="status">Đang tải cấu hình agent…</p>}><PresetSettings admin={identity.scopes.includes('admin')}/></Suspense>}
       {active==='slack'&&<SlackSettings admin={identity.scopes.includes('admin')}/>}
-      {active==='remote'&&<RemoteSettings identity={identity} loadProjects={remoteProjects} renderProject={id=><ProjectWorkflow key={id} projectId={id}/>}/>}
+      {active==='remote'&&<RemoteSettings identity={identity} loadProjects={remoteProjects} renderProject={id=><RemoteResearchControls key={id} projectId={id}/>}/>}
     </>}</AgentAccess>
   </main></>;
 }

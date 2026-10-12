@@ -15,8 +15,8 @@ function TitleEditor({idea,busy,onRename}:{idea:Idea;busy:boolean;onRename:(idea
   </form>;
 }
 
-export default function IdeaCards({ideas,selectedId,busy,onSelect,onEdit,onRename,onDelete,onRestore}:{
-  ideas:Idea[];selectedId:string;busy:boolean;onSelect:(id:string)=>void;onEdit:(idea:Idea)=>void;
+export default function IdeaCards({ideas,selectedId,busy,lockedId,onSelect,onEdit,onRename,onDelete,onRestore}:{
+  ideas:Idea[];selectedId:string;busy:boolean;lockedId?:string|null;onSelect:(id:string)=>void;onEdit:(idea:Idea)=>void;
   onRename:(idea:Idea,title:string)=>Promise<void>;
   onDelete:(id:string)=>Promise<void>;onRestore:(id:string)=>Promise<void>;
 }) {
@@ -57,9 +57,9 @@ export default function IdeaCards({ideas,selectedId,busy,onSelect,onEdit,onRenam
       {selected.mode==='etc' && <><h3>Đầu ra mong muốn</h3><pre>{selected.desired_output || 'Chưa nhập'}</pre></>}
       {selected.variant && <p className="muted">Biến thể từ Run {selected.variant.parent_run_id.slice(0,8)} · {selected.variant.purpose}</p>}
       <pre>{selected.text}</pre><code className="source-id">{selected.id}</code>
-      <button type="button" disabled={busy || selected.state==='PLANNING' || selected.state==='APPROVED'}
+      <button type="button" disabled={busy || selected.id===lockedId || selected.state==='PLANNING' || selected.state==='APPROVED'}
         onClick={()=>onEdit(selected)}>{selected.variant ? 'Sửa mode / đầu ra' : 'Sửa idea'}</button>
-      <button type="button" className="danger-button" disabled={busy || selected.state==='PLANNING'}
+      <button type="button" className="danger-button" disabled={busy || selected.id===lockedId || selected.state==='PLANNING'}
         onClick={()=>void onDelete(selected.id)}>Xóa idea</button>
     </article>}
   </div>;

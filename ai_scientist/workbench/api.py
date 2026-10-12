@@ -53,7 +53,18 @@ class IdeaInput(StrictModel):
 
 class ContextInput(StrictModel):
     idea_id: str
-    resource_ids: list[str] = Field(default_factory=list, max_length=30)
+    resource_ids: list[str] | None = Field(default=None, max_length=30)
+    request_id: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+
+
+class ProjectSourcesInput(StrictModel):
+    version: int = Field(ge=1)
+    resource_ids: list[str] = Field(max_length=30)
+
+
+class IdeaSourcesInput(StrictModel):
+    version: int = Field(ge=0)
+    resource_ids: list[str] | None = Field(default=None,max_length=30)
 
 
 class IdeaUpdate(IdeaInput):
@@ -162,6 +173,25 @@ def library_router(store, workspace_root):
     @router.get("/projects")
     def projects():
         return call(store.list_projects)
+
+    from .project_configuration import ProjectConfiguration
+    configuration = ProjectConfiguration(store)
+
+    @router.get('/projects/{project_id}/configuration')
+    def project_configuration(project_id: str):
+        return call(configuration.get,project_id)
+
+    @router.put('/projects/{project_id}/configuration/sources')
+    def project_sources(project_id: str, body: ProjectSourcesInput):
+        return call(configuration.update,project_id,version=body.version,resource_ids=body.resource_ids)
+
+    @router.get('/projects/{project_id}/ideas/{idea_id}/sources')
+    def idea_sources(project_id: str, idea_id: str):
+        return call(configuration.selection,project_id,idea_id)
+
+    @router.put('/projects/{project_id}/ideas/{idea_id}/sources')
+    def save_idea_sources(project_id: str, idea_id: str, body: IdeaSourcesInput):
+        return call(configuration.select,project_id,idea_id,body.resource_ids,body.version)
 
     @router.get('/kaggle/accounts')
     def kaggle_accounts(request: Request):
@@ -326,6 +356,9 @@ def library_router(store, workspace_root):
 
     @router.delete('/projects/{project_id}/ideas/{idea_id}')
     async def delete_idea(project_id: str, idea_id: str, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner and owner.controls.owning(project_id,idea=idea_id):
+            raise HTTPException(409,'Idea đang thuộc workflow; kết thúc lượt nghiên cứu trước khi xóa')
         return await change_deleted(request, project_id, 'ideas', idea_id, True)
 
     @router.post('/projects/{project_id}/ideas/{idea_id}/restore')
@@ -334,6 +367,9 @@ def library_router(store, workspace_root):
 
     @router.delete('/projects/{project_id}/runs/{run_id}')
     async def delete_run(project_id: str, run_id: str, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner and owner.controls.owning(project_id,run=run_id):
+            raise HTTPException(409,'Run đang thuộc workflow; kết thúc lượt nghiên cứu trước khi xóa')
         service = getattr(request.app.state, 'service', None)
         if service:
             async with service.lock:
@@ -346,12 +382,15 @@ def library_router(store, workspace_root):
 
     @router.post("/projects/{project_id}/ideas", status_code=201)
     def add_idea(project_id: str, body: IdeaInput):
-        return call(store.save_idea, project_id, body.text, body.title, body.mode, body.desired_output,
-                    body.research.model_dump() if body.research else None, body.tags, body.benchmark_id,
-                    body.benchmark_definition.model_dump() if body.benchmark_definition else None)
+        value = call(configuration.idea_values,project_id,body)
+        return call(store.save_idea, project_id, value['text'], value['title'], value['mode'], value['desired_output'],
+                    value['research'], value['tags'], value['benchmark_id'], value['benchmark_definition'])
 
     @router.put("/projects/{project_id}/ideas/{idea_id}")
-    def update_idea(project_id: str, idea_id: str, body: IdeaUpdate):
+    def update_idea(project_id: str, idea_id: str, body: IdeaUpdate, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner and owner.controls.owning(project_id,idea=idea_id):
+            raise HTTPException(409,'Nhắn lại trong proposal để chỉnh yêu cầu của workflow đang chạy')
         return call(store.update_idea, project_id, idea_id, body.text, body.expected_text,
                     body.title, body.expected_title, body.mode, body.desired_output,
                     body.expected_mode, body.expected_desired_output,
@@ -366,10 +405,41 @@ def library_router(store, workspace_root):
 
     @router.post("/projects/{project_id}/plan", status_code=202)
     async def plan(project_id: str, body: ContextInput, request: Request):
-        return await async_call(request.app.state.service.start, project_id, body.idea_id, body.resource_ids)
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner and body.request_id:
+            try:
+                previous = owner.store.get(project_id,body.request_id)
+            except KeyError:
+                previous = None
+            if previous:
+                if previous['state'].get('entry_idea_id')!=body.idea_id:
+                    raise HTTPException(409,'Yêu cầu này đã thuộc một idea khác')
+                return owner.view(project_id,body.request_id)
+        if owner and owner.controls.owning(project_id,idea=body.idea_id):
+            raise HTTPException(409,'Workflow đang điều phối idea này. Nhắn lại trong proposal để yêu cầu phiên bản mới.')
+        sources = body.resource_ids if body.resource_ids is not None else configuration.selection(project_id,body.idea_id)['resource_ids']
+        saved = configuration.get(project_id)['workflow']
+        if owner and saved:
+            import uuid
+            from .workflow_models import WorkflowSpec
+            identity = body.request_id or uuid.uuid4().hex
+            selection = configuration.selection(project_id,body.idea_id)
+            if body.resource_ids is not None and body.resource_ids != selection['resource_ids']:
+                call(configuration.select,project_id,body.idea_id,body.resource_ids,selection['version'])
+            saved = {**saved,'resource_ids':configuration.get(project_id)['resource_ids']}
+            call(owner.create,project_id,identity,WorkflowSpec.model_validate(saved))
+            return await async_call(lambda:owner.start(project_id,identity,idea_id=body.idea_id))
+        return await async_call(request.app.state.service.start, project_id, body.idea_id, sources)
 
     @router.post("/projects/{project_id}/ideas/{idea_id}/answer")
     async def answer(project_id: str, idea_id: str, body: AnswerInput, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner and owner.controls.owning(project_id,idea=idea_id):
+            candidate = next((p for p in store.proposals(project_id,idea_id) if p['id']==body.proposal_id and p['version']==body.version),None)
+            if candidate is None:
+                raise HTTPException(409,'Proposal đã thay đổi; tải lại trước khi trả lời')
+            import uuid
+            return call(owner.controls.proposal_answer,project_id,candidate,message=body.text,request_id=uuid.uuid4().hex)
         return await async_call(request.app.state.service.answer, project_id, idea_id, body.proposal_id, body.version, body.text)
 
     @router.get("/projects/{project_id}/proposals")
@@ -378,11 +448,18 @@ def library_router(store, workspace_root):
 
     @router.post("/projects/{project_id}/proposals/{proposal_id}/approve")
     async def approve(project_id: str, proposal_id: str, body: ApprovalInput, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner and owner.controls.owning(project_id,proposal=proposal_id):
+            candidate = next(p for p in store.proposals(project_id) if p['id']==proposal_id)
+            if candidate['version']!=body.version or candidate['context_sha256']!=body.context_sha256:
+                raise HTTPException(409,'Proposal đã thay đổi; tải lại trước khi duyệt')
+            return call(owner.controls.proposal_answer,project_id,candidate,approve=True)
         return await async_call(request.app.state.service.approve, project_id, proposal_id, body.version, body.context_sha256)
 
     @router.post("/projects/{project_id}/context")
     def context(project_id: str, body: ContextInput):
-        return call(store.context_snapshot, project_id, body.idea_id, body.resource_ids)
+        sources = body.resource_ids if body.resource_ids is not None else configuration.selection(project_id,body.idea_id)['resource_ids']
+        return call(store.context_snapshot, project_id, body.idea_id, sources)
 
     @router.get("/projects/{project_id}/history")
     def history(project_id: str, request: Request, include_deleted: bool = False):
@@ -407,6 +484,9 @@ def library_router(store, workspace_root):
     @router.post('/projects/{project_id}/runs/batch', status_code=202)
     async def batch_runs(project_id: str, body: BatchInput, request: Request):
         for item in body.runs:
+            owner = getattr(request.app.state,'research_workflows',None)
+            if owner and owner.controls.owning(project_id,run=item.run_id):
+                raise HTTPException(409,'Run đang thuộc workflow; duyệt bắt đầu trong tab Run')
             require_run_benchmark(project_id, item.run_id)
         return await async_call(request.app.state.working.start_batch, project_id,
                                 [item.model_dump() for item in body.runs])
@@ -418,11 +498,25 @@ def library_router(store, workspace_root):
 
     @router.post('/projects/{project_id}/runs/{run_id}/working', status_code=202)
     async def working(project_id: str, run_id: str, body: WorkingInput, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner:
+            flow = owner.controls.owning(project_id,run=run_id)
+            if flow:
+                if (body.account,body.accelerator,body.ttl_seconds)!=(flow['spec']['account'],flow['spec']['accelerator'],flow['spec']['ttl_seconds']):
+                    raise HTTPException(409,'Run dùng cấu hình đã ghim. Duyệt đúng phiên trong tab Run.')
+                pending = call(owner.controls.pending,project_id,flow['id'],'run_approval')
+                call(owner.store.answer,project_id,flow['id'],pending['id'],{'approve':True,'reason':'Operator approved this exact run'})
+                return {'workflow_id':flow['id'],'pending':True}
         require_run_benchmark(project_id, run_id)
         return await async_call(request.app.state.working.start, project_id, run_id, body.accelerator, body.ttl_seconds, body.search, body.account)
 
     @router.post('/projects/{project_id}/runs/{run_id}/stop', status_code=202)
     async def stop_working(project_id: str, run_id: str, request: Request):
+        owner = getattr(request.app.state,'research_workflows',None)
+        if owner:
+            flow = owner.controls.owning(project_id,run=run_id)
+            if flow:
+                return await async_call(owner.pause,project_id,flow['id'])
         return await async_call(request.app.state.working.stop, project_id, run_id)
 
     @router.post('/projects/{project_id}/runs/{run_id}/queue/resume')
