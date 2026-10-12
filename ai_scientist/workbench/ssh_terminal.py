@@ -142,6 +142,17 @@ class DonorSession:
                                    start_new_session=os.name != 'nt', env=kaggle_environment())
         return SshTerminal(process, on_output)
 
+    def open_branch(self, session_id, branch, on_output):
+        """Another SSH shell in the same notebook, with its own root and cwd."""
+        import re
+        if not re.fullmatch(r'[a-f0-9]{32}', branch):
+            raise ValueError('Invalid experiment branch')
+        process = subprocess.Popen([*self.command('bridge', session_id), '--branch', branch],
+            cwd=self.config.donor_root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, start_new_session=os.name != 'nt', env=kaggle_environment(),
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return SshTerminal(process, on_output)
+
     def inspect(self, kernel_ref):
         command = [str(self.config.donor_python), '-m', 'interface_ai_scientist', 'inspect',
                    '--account', self.account, '--kernel-ref', kernel_ref]

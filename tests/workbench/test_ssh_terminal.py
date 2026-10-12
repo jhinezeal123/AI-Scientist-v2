@@ -156,7 +156,7 @@ def test_codex_path_recovery_and_working_cli_options(tmp_path, monkeypatch):
     runtime = CodexCliRuntime(str(tmp_path / 'removed.exe'), model='fixture', reasoning_effort='max')
     from ai_scientist.workbench.system_prompt import load_prompt
     prompt = load_prompt('working.agent', workdir=tmp_path)
-    request = SimpleNamespace(role='mvp0_working', workdir=tmp_path, prompt=prompt, timeout_seconds=1, max_output_bytes=100000)
+    request = SimpleNamespace(role='mvp0_working', images=(), workdir=tmp_path, prompt=prompt, timeout_seconds=1, max_output_bytes=100000)
     result = runtime.run(request, lambda event: None, lambda: False)
     assert json.loads(result.text) == payload
     assert arguments[0] == str(executable) and '--ignore-user-config' in arguments
@@ -198,7 +198,7 @@ def test_planner_cli_returns_native_json_with_read_only_tools(tmp_path, monkeypa
         return Process()
     monkeypatch.setattr('ai_scientist.workbench.agents.codex.subprocess.Popen', launch)
     runtime = CodexCliRuntime(str(executable), model='fixture', reasoning_effort='max')
-    result = runtime.run(SimpleNamespace(role='mvp0_plan',workdir=tmp_path,
+    result = runtime.run(SimpleNamespace(role='mvp0_plan',images=(),workdir=tmp_path,
         prompt='Return JSON in the generic text envelope, files={}.',timeout_seconds=1,max_output_bytes=100000),
         lambda event:None, lambda:False)
     assert json.loads(result.text) == {**payload,'split':{'test':'all rows','train':None},

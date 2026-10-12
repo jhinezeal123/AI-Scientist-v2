@@ -37,7 +37,7 @@ class FixturePlatform:
         message = json.loads(request.instruction)
         self.messages.append(message)
         stage = message['stage']
-        payload = ({'title': 'Checksum experiment', 'text': 'Verify checksum correctness'} if stage == 'ideation'
+        payload = ({'title': 'Checksum experiment', 'text': 'Verify checksum correctness' + (' with Unicode inputs' if message['input'].get('previous_runs') else '')} if stage == 'ideation'
                    else {'approve': True, 'reason': 'Within the explicit operator grant'} if stage == 'approval'
                    else {'needs_clarification': False, 'questions': [], 'paraphrase': 'Verify checksum correctness',
                          'objective': 'Verify checksum correctness', 'implementation_steps': ['Execute checksum cases'],

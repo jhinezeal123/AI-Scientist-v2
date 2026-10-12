@@ -503,10 +503,12 @@ class ProjectStore:
                 result.append(item)
             return result
 
-    def save_idea(self, project_id, text, title=None, mode='training_research', desired_output='', research=None, tags=None, benchmark_id=None, benchmark_definition=None):
+    def save_idea(self, project_id, text, title=None, mode='training_research', desired_output='', research=None, tags=None, benchmark_id=None, benchmark_definition=None, *, idea_id=None):
         if not text.strip():
             raise ValueError("Idea must contain text")
-        idea_id = uuid.uuid4().hex
+        if idea_id is not None and not re.fullmatch(r'[a-f0-9]{32}', idea_id):
+            raise ValueError('Invalid idea identity')
+        idea_id = idea_id or uuid.uuid4().hex
         title = idea_title(title) if title is not None else ''
         mode, desired_output = request_settings(mode, desired_output)
         from .run_graph import run_settings
@@ -514,6 +516,15 @@ class ProjectStore:
         from .benchmarks import validate_selection
         benchmark_id, benchmark_definition = validate_selection(self, project_id, mode, benchmark_id, benchmark_definition)
         with self.connection(project_id) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            existing = connection.execute('SELECT * FROM ideas WHERE id=?', (idea_id,)).fetchone()
+            if existing:
+                if (existing['deleted_at'] or (existing['text'], existing['title'], existing['mode'], existing['desired_output'], existing['benchmark_id'])
+                        != (text, title, mode, desired_output, benchmark_id)
+                        or existing['research_json'] != (canonical(research) if research is not None else None)
+                        or existing['tags_json'] != canonical(tags)):
+                    raise StoreConflict('Idea identity belongs to another saved candidate')
+                return self.idea(project_id, idea_id)
             connection.execute("INSERT INTO ideas(id,text,conversation_json,state,error,created_at,title,mode,desired_output) VALUES(?,?,?,'DRAFT',NULL,?,?,?,?)",
                                (idea_id, text, "[]", datetime.now(timezone.utc).isoformat(), title, mode, desired_output))
             connection.execute('UPDATE ideas SET benchmark_id=?,benchmark_definition_json=? WHERE id=?',

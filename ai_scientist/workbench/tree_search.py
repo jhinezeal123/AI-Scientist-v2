@@ -1,4 +1,4 @@
-"""Run the upstream AgentManager with Codex and one persistent Kaggle terminal."""
+"""Run the upstream AgentManager with owned, isolated Kaggle branch terminals."""
 import asyncio
 from dataclasses import asdict, is_dataclass, replace
 import hashlib
@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import shlex
 import time
+import threading
 
 import jsonschema
 from omegaconf import OmegaConf
@@ -56,7 +57,8 @@ class RemoteSearchAgent:
         self.owner, self.task_desc, self.cfg, self.journal = owner, task_desc, cfg, journal
         self.stage_name = stage_name
         self.best_stage1_node, self.best_stage2_node, self.best_stage3_node = best_stage1_node, best_stage2_node, best_stage3_node
-        self.num_workers = 1  # One persistent shell owns cwd/env; no local GPU pool.
+        self.configured_workers = getattr(getattr(owner, 'options', None), 'num_workers', 1)
+        self.num_workers = self.configured_workers
         self.timeout = max(1, owner.deadline - time.monotonic())
         self._hyperparam_tuning_state = {'tried_hyperparams':set()}
         self._ablation_state = {'completed_ablations':set()}
@@ -73,6 +75,13 @@ class RemoteSearchAgent:
             self.best_stage1_node = self.journal.nodes[0]
         if self.journal.nodes and self.stage_name.startswith('4_'):
             self.best_stage3_node = self.journal.nodes[0]
+        if self.configured_workers > 1:
+            main = int(self.stage_name.split('_')[0])
+            generated = sum(1 for stage in self.owner.node_stages.values() if int(stage.split('_')[0]) == main)
+            self.num_workers = min(self.configured_workers, max(1, self.owner.options.stage_iterations[main-1] - generated))
+            from .parallel_search import execute_batch
+            execute_batch(self, select_parallel_nodes(self))
+            return
         selected = select_parallel_nodes(self)[0]
         # The upstream manager copies stage baselines. Relink the selected copy
         # to this journal's canonical object so the exporter sees its children.
@@ -136,6 +145,7 @@ class TreeSearchRun:
         self.deadline = time.monotonic() + min(getattr(service.config, 'working_seconds', 900), descriptor['ttl_seconds'] - 60)
         self.loop = asyncio.get_running_loop()
         self.tracker = TokenTracker()
+        self.persist_lock = threading.RLock()
         self.calls, self.cache, self.nodes, self.stage_results, self.node_stages = [], {}, {}, {}, {}
         self.manager = None
         self.status = 'running'
@@ -143,6 +153,7 @@ class TreeSearchRun:
         from .research import ResearchPipeline
         settings = approved['body'].get('research')
         self.pipeline = ResearchPipeline(self, settings) if settings is not None else None
+        self.phases = getattr(service.run_worker(key).runtime, 'run_phases', None)
 
     def check_running(self):
         if self.key in self.service.stop_requests or self.service.closed:
@@ -160,24 +171,29 @@ class TreeSearchRun:
             if not is_dataclass(request) or 'images' not in request.__dataclass_fields__:
                 raise ValueError('Configured research runtime cannot receive images')
             request = replace(request, images=tuple(images))
-        result, payload = asyncio.run_coroutine_threadsafe(self.service.run_worker(self.key).run(request), self.loop).result()
+        worker = self.service.run_worker(self.key, branch=self.branch) if getattr(self, 'branch', None) else self.service.run_worker(self.key)
+        result, payload = asyncio.run_coroutine_threadsafe(worker.run(request), self.loop).result()
         usage = getattr(result, 'usage', {}) or {}
         measured = all(type(usage.get(key)) is int and usage[key] >= 0 for key in ('input_tokens', 'output_tokens'))
-        if measured:
-            self.tracker.add_tokens(self.service.config.codex_model, usage['input_tokens'], usage['output_tokens'],
-                                    0, usage.get('cached_input_tokens', 0))
-        self.calls.append({'role': role, 'session_id': getattr(result, 'session_id', None),
-                           'usage': usage if measured else None})
-        write_json(self.root / 'token_tracker.json', {
-            'usage_status': 'complete' if all(call['usage'] is not None for call in self.calls) else 'partial' if any(call['usage'] for call in self.calls) else 'unavailable',
-            'models': {name: {'tokens': {**dict(counts), 'reasoning': None}, 'cost (USD)': None}
-                       for name, counts in self.tracker.token_counts.items()}, 'calls': self.calls})
+        with self.persist_lock:
+            if measured:
+                self.tracker.add_tokens(self.service.config.codex_model, usage['input_tokens'], usage['output_tokens'],
+                                        0, usage.get('cached_input_tokens', 0))
+            self.calls.append({'role': role, 'session_id': getattr(result, 'session_id', None),
+                               'usage': usage if measured else None})
+            write_json(self.root / 'token_tracker.json', {
+                'usage_status': 'complete' if all(call['usage'] is not None for call in self.calls) else 'partial' if any(call['usage'] for call in self.calls) else 'unavailable',
+                'models': {name: {'tokens': {**dict(counts), 'reasoning': None}, 'cost (USD)': None}
+                           for name, counts in self.tracker.token_counts.items()}, 'calls': self.calls})
         return payload
 
     def query(self, *, system_message, user_message, func_spec=None, **kwargs):
         self.check_running()
         from .research_images import detach_images, validate_images
-        user_message, inline = detach_images(user_message, self.root / 'research/image-input')
+        image_root = self.root / 'research/image-input'
+        if getattr(self, 'branch', None):
+            image_root = image_root / self.branch
+        user_message, inline = detach_images(user_message, image_root)
         images = validate_images((*kwargs.get('image_paths', ()), *inline))
         spec = (asdict(func_spec) if isinstance(func_spec, FunctionSpec) else func_spec) if func_spec else None
         data = {'approved': {**self.approved, 'snapshot': self.service.store.library(self.key[0]).agent_snapshot(self.approved['snapshot'])},
@@ -211,8 +227,9 @@ class TreeSearchRun:
         node_root = self.logs / 'nodes' / node.id
         node_root.mkdir(parents=True)
         self.service.records.update(*self.key, phase=stage_name)
-        record = self.service.record(*self.key)
-        self.service.records.update(*self.key, agent_called=record['agent_called'] + 1)
+        with self.persist_lock:
+            record = self.service.record(*self.key)
+            self.service.records.update(*self.key, agent_called=record['agent_called'] + 1)
         self.service.records.append_log(*self.key, f'Giai đoạn {stage_name}: {action} · node {node.id}\n', 'backend')
         remote = self.descriptor['remote_directory']
         # Reset only the two backend-owned implementation/result folders, never
@@ -357,14 +374,14 @@ class TreeSearchRun:
         # save_run operates on Paths; allow these objects in the original config.
         cfg = OmegaConf.create(OmegaConf.to_container(cfg), flags={'allow_objects': True})
         cfg.log_dir, cfg.workspace_dir = self.logs, self.root
-        cfg.agent.num_workers = 1
+        cfg.agent.num_workers = self.options.num_workers
         cfg.agent.multi_seed_eval.num_seeds = 0
         if self.pipeline:
             cfg.agent.multi_seed_eval.seeds = self.pipeline.plan.seeds
             cfg.agent.multi_seed_eval.num_seeds = len(self.pipeline.plan.seeds)
             cfg.agent.multi_seed_eval.stages = self.pipeline.plan.seed_stages
             cfg.agent.search.exclude_seed_nodes = True
-        cfg.agent.scale_experiments = False
+        cfg.agent.scale_experiments = self.options.scale_experiments
         cfg.agent.stages.count_generated_nodes = True
         for index, maximum in enumerate(self.options.stage_iterations, 1):
             cfg.agent.stages[f'stage{index}_max_iters'] = maximum
@@ -385,6 +402,8 @@ class TreeSearchRun:
         write_json(self.root / 'token_tracker.json', {'usage_status': 'unavailable', 'models': {}, 'calls': []})
 
     def finish_search(self, cfg):
+        if self.phases:
+            self.phases.begin('tree_export', self.deadline)
         # Keep original stage journals as evidence; the unified viewer combines
         # every node once using its original ID and parent relationship.
         cfg.unified_stage_paths = {}
@@ -428,6 +447,8 @@ class TreeSearchRun:
         limitations = ['Giới hạn node được chọn lúc thực thi: ' + item for item in payload.limitations]
         if not success:
             limitations.append('Chưa có bản thử thành công ở đủ bốn giai đoạn.')
+        if self.phases:
+            self.phases.finish('tree_export', {'selected_node_id': best.id})
         if self.pipeline:
             # Restore the selected implementation before optional SSH finishing
             # steps; the last ablation/seed can differ from the selected node.
@@ -463,10 +484,23 @@ class TreeSearchRun:
         with use_query_provider(self.query):
             self.prepare_manager(cfg)
             try:
-                self.manager.run(exec_callback=None, step_callback=self.save_stage)
+                if self.phases:
+                    while self.manager.current_stage:
+                        number = self.manager.parse_stage_names(self.manager.current_stage.name)[0]
+                        phase = {1: 'draft', 2: 'tuning', 3: 'research', 4: 'ablation'}[number]
+                        self.phases.perform(phase, lambda: self.run_visible_stage(number), self.deadline)
+                else:
+                    self.manager.run(exec_callback=None, step_callback=self.save_stage)
             finally:
                 self.checkpoint(self.manager)
             return self.finish_search(cfg)
+
+    def run_visible_stage(self, number):
+        self.manager.run_main_stage(None, self.save_stage)
+        nodes = [dict(item, summary=item['summary'][:300])
+                 for name, records in self.stage_results.items() if int(name.split('_')[0]) == number
+                 for item in records if self.node_stages.get(item['id']) == name]
+        return {'stage_number': number, 'configured_workers': self.options.num_workers, 'nodes': nodes}
 
     async def execute(self):
         try:

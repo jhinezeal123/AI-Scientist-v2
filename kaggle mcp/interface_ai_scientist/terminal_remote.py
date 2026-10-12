@@ -188,7 +188,15 @@ class Terminal:
         raise ValueError('Unknown terminal action')
 
 
-def serve(root):
+def serve(root, *, branch=None):
+    if branch is not None:
+        if not re.fullmatch(r'[a-f0-9]{32}', branch):
+            raise ValueError('Invalid experiment branch')
+        parent = Path(root).resolve()
+        root = parent / 'branches' / branch
+        if (not root.resolve().is_relative_to(parent)
+                or any(p.is_symlink() for p in (root, root.parent))):
+            raise ValueError('Refusing linked experiment branch')
     terminal = Terminal(root)
     send({'type': 'ready', 'protocol': 1})
     try:

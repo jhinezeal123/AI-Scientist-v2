@@ -99,6 +99,12 @@ def create_n8n_router():
     def detail(project: str, identity: str, request: Request):
         return owner(request, project).view(project, identity)
 
+    @router.get('/projects/{project}/idea-archive')
+    def idea_archive(project: str, request: Request):
+        service = owner(request, project)
+        from .idea_archive import IdeaArchive
+        return [{k: v for k, v in row.items() if k != 'input'} for row in IdeaArchive(service.projects).list(project)[-100:]]
+
     @router.post('/projects/{project}/workflows/{identity}/start')
     async def start(project: str, identity: str, request: Request):
         return await owner(request, project, 'research').start(project, identity)

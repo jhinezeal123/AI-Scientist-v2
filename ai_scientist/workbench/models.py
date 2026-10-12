@@ -187,6 +187,8 @@ class SearchOptions(StrictModel):
     num_drafts: int = Field(default=1, ge=1)
     debug_prob: float = Field(default=0.5, ge=0, le=1)
     max_debug_depth: int = Field(default=3, ge=0)
+    num_workers: int = Field(default=1, ge=1, le=4)
+    scale_experiments: bool = False
 
     @model_validator(mode='after')
     def positive_iterations(self):

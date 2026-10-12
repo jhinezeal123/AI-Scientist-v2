@@ -9,12 +9,14 @@ from .n8n_client import N8nClient
 from .n8n_callbacks import StepCallbacks
 from .preset_stage_executor import PresetStageExecutor
 from .research_steps import ResearchSteps
+from .run_phases import RunPhases, RUN_PHASES, enabled as phase_enabled
+from .research_candidates import generate_candidates, assess_candidates, select_candidate
 from .stage_runtime import StageRuntime
 from .store import canonical, digest, StoreConflict
 from .workflow_models import WorkflowSpec
 from .workflow_store import WorkflowStore
 
-PHASES = ('ideation', 'proposal', 'approval', 'run_approval', 'execution', 'collect')
+PHASES = ('ideation', 'literature', 'idea_selection', 'proposal', 'approval', 'run_approval', 'execution', *RUN_PHASES, 'collect')
 
 
 class N8nResearchWorkflows:
@@ -29,6 +31,7 @@ class N8nResearchWorkflows:
         self.executor = PresetStageExecutor(self)
         self.agent_turns = N8nAgentTurns(self.client, self.executor)
         self.callbacks = StepCallbacks(self.store, self.client)
+        self.run_phases = RunPhases(self)
         self.tasks, self.workers, self.locks = {}, {}, {}
         self.closed = False
 
@@ -103,7 +106,9 @@ class N8nResearchWorkflows:
         project, run = key
         for row in self.list(project):
             if not row['archived'] and (row['state'].get('run_id') == run or run in row['state']['runs']):
-                return StageRuntime(self, project, row['id'])
+                runtime = StageRuntime(self, project, row['id'])
+                runtime.run_phases = self.run_phases.bind(runtime, run)
+                return runtime
         return self.planner.worker.runtime
 
     def preflight(self, project, spec):
@@ -193,8 +198,11 @@ class N8nResearchWorkflows:
             if step in {'proposal','approval'} and proposal_round != state.get('proposal_round',0):
                 raise StoreConflict('This proposal discussion round is stale')
             if job is None:
-                predecessor = PHASES.index(step)-1
-                previous_key = self.step_key(iteration, PHASES[predecessor], state.get('proposal_round',0)) if predecessor>=0 else f'{iteration-1}:collect'
+                spec = WorkflowSpec.model_validate(row['spec'])
+                preceding = [phase for phase in PHASES[:PHASES.index(step)]
+                             if phase not in RUN_PHASES or phase_enabled(spec, phase)]
+                predecessor = len(preceding)-1
+                previous_key = self.step_key(iteration, preceding[-1], state.get('proposal_round',0)) if preceding else f'{iteration-1}:collect'
                 if step == 'proposal' and proposal_round:
                     previous_key = self.step_key(iteration,'approval',proposal_round-1)
                     if not state.get('step_jobs',{}).get(previous_key,{}).get('view',{}).get('revise_proposal'):
@@ -202,7 +210,7 @@ class N8nResearchWorkflows:
                             raise StoreConflict('Only a human message can request another proposal turn')
                         # A restarted execution begins with ideation again. The
                         # saved human intent still authorizes this planning turn.
-                        previous_key = self.step_key(iteration,'ideation')
+                        previous_key = self.step_key(iteration,'idea_selection')
                 if predecessor >= 0 and state.get('step_jobs', {}).get(previous_key, {}).get('status') != 'DONE':
                     raise StoreConflict('Complete the preceding research operation first')
                 # A next-step request from the same execution confirms receipt
@@ -223,6 +231,7 @@ class N8nResearchWorkflows:
         proposal = next((p for p in self.projects.proposals(project) if p['id']==state.get('proposal_id')),None)
         needs_clarification = bool(proposal and proposal['body']['needs_clarification'])
         return {'project_id': project, 'workflow_id': identity, 'generation': generation,
+                'search_enabled':WorkflowSpec.model_validate(self.store.get(project, identity)['spec']).search.enabled,
                 'iteration': state['iteration'] if status == 'DONE' else iteration, 'step': step,
                 'pending': status == 'RUNNING', 'failed': status == 'FAILED',
                 'continue': state['iteration'] < WorkflowSpec.model_validate(self.store.get(project, identity)['spec']).max_runs,
@@ -242,10 +251,15 @@ class N8nResearchWorkflows:
             runtime.context()
             if iteration >= runtime.spec.max_runs:
                 raise StoreConflict('Operator run limit reached')
-            operation = {'ideation': self.steps.prepare_idea, 'proposal': self.steps.prepare_proposal,
+            operation = {'ideation': generate_candidates, 'literature': assess_candidates,
+                         'idea_selection': select_candidate, 'proposal': self.steps.prepare_proposal,
                          'approval': self.steps.approve_proposal, 'run_approval': self.approve_run,
-                         'execution': self.steps.execute_run, 'collect': self.steps.collect_run}[step]
-            await operation(runtime)
+                         'execution': self.steps.execute_run, 'collect': self.steps.collect_run}.get(step)
+            if step in RUN_PHASES:
+                result = await self.run_phases.advance(runtime, step)
+                self.store.change(project, identity, lambda s: s['step_jobs'][key].update(phase_result=result))
+            else:
+                await operation(runtime)
             if step == 'collect' and self.store.get(project, identity)['state']['iteration'] >= runtime.spec.max_runs:
                 self.store.change(project, identity, lambda s: s.update(status='DONE', stage='review'))
         except RuntimeUncertain as exc:
@@ -258,6 +272,7 @@ class N8nResearchWorkflows:
             self.store.change(project, identity, lambda s: s.update(status='UNKNOWN' if uncertain else 'PAUSED', error=error)
                               if s.get('generation') == generation else None)
         view = self.step_view(project, identity, generation, iteration, step, status, error, proposal_round)
+        view.update(self.store.get(project, identity)['state'].get('step_jobs', {}).get(key, {}).get('phase_result', {}))
         self._complete_step(project, identity, generation, key, status, view)
         self.callbacks.schedule(project, identity, key)
 

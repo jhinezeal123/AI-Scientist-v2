@@ -64,6 +64,43 @@ additional Team templates are supplied. n8n cannot answer human gates or modify
 Slack, Remote or presets. Changing canvas order does not bypass backend grant
 validation, call/run budgets or exact run approvals.
 
+## Idea archive and experiment manager
+
+Project → Workflow keeps the existing summary, report, plotting, citation, VLM,
+PDF and review controls. **Experiment manager** is a visible section above the
+stage preset controls, rather than a checkbox inside the limits disclosure.
+Enable it to configure Draft/Tuning/Research/Ablation node limits, 1–4 concurrent
+branches, initial drafts and optional experiment scaling. Old grants retain one
+worker and scaling off. Scaling uses the same approved data, benchmark and budget.
+
+When Ideathon is assigned to an agent, set the candidate count (1–20). Generation
+reads up to forty previous project candidates; exact repeated hypothesis text is
+rejected. Literature/novelty assesses each distinct candidate when enabled. The
+configured ideation agent selects one eligible candidate; all others remain in
+**Archive idea**, including rejected and unselected entries. Human Ideathon uses
+one human-supplied idea and saves it in the same archive. Candidate generation,
+novelty assessment and selection are separate n8n operations.
+
+The authoritative archive is in the project SQLite database; each workflow also
+exports `automation/<workflow>/ideation/<iteration>/archive.json`. The selection
+uses a stable identity and can be recovered without duplicating the saved idea.
+Finite literature search and model judgment do not guarantee semantic uniqueness.
+
+The research canvas now includes real phase operations for opening the notebook,
+Draft, Tuning, Research, Ablation, a single experiment when search is off, tree
+export, seed statistics, summaries, reports, citations, figures, VLM before and
+after writeup, PDF/reflections and scientific review. The backend waits for n8n
+permission before each requested experiment phase; n8n then waits for its
+completion webhook. Unrequested phases return `skipped=true` and run no model.
+Multi-seed repetitions remain at the upstream manager's stage boundaries; the
+separate multi-seed operation validates and summarizes their statistics.
+
+Parallel branches share one Kaggle notebook's CPU/GPU and the saved time/call
+budgets. Every branch has its own SSH connection, shell, remote `branches/<id>/`
+folder, local provider workspace and RuntimeWorker. Results and metrics are
+collected and verified independently. The upstream manager selects the result.
+Stopping or closing a run cancels its provider jobs and closes its branch shells.
+
 ## Literature, citations and VLM
 
 Project → Workflow exposes three independent scientific options:

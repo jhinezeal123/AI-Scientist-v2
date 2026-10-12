@@ -378,10 +378,12 @@ def shell(state):
     raise SystemExit(result.returncode)
 
 
-def bridge(state):
+def bridge(state, branch=None):
     """Keep one native SSH connection for the backend's terminal protocol."""
     source = Path(__file__).with_name('terminal_remote.py').read_text(encoding='utf-8')
-    source += '\nserve(' + repr(state['remote_root']) + ')\n'
+    if branch is not None and not re.fullmatch(r'[a-f0-9]{32}', branch):
+        raise ValueError('Invalid experiment branch')
+    source += '\nserve(' + repr(state['remote_root']) + ', branch=' + repr(branch) + ')\n'
     encoded = base64.b64encode(source.encode('utf-8')).decode('ascii')
     command = 'python3 -u -c ' + shlex.quote('import base64;exec(base64.b64decode(' + repr(encoded) + '))')
     result = subprocess.run([shutil.which('ssh') or 'ssh', *ssh_options(state), '-T',
@@ -486,6 +488,7 @@ def main():
     parser.add_argument('--state', type=Path)
     parser.add_argument('--session')
     parser.add_argument('--kernel-ref')
+    parser.add_argument('--branch')
     parser.add_argument('--ttl', type=int, default=480)
     parser.add_argument('--accelerator', type=accelerator_name, choices=ACCELERATORS, default='cpu',
                         help='GPU/gpu/NvidiaT4 select T4 x2; TPU/tpu selects TPU v5e-8')
@@ -551,4 +554,9 @@ def main():
     if args.action == 'status':
         print(json.dumps(status(state)))
         return
-    globals()[args.action](state)
+    if args.branch and args.action != 'bridge':
+        parser.error('Branch is only available for an existing SSH bridge')
+    if args.action == 'bridge':
+        bridge(state, args.branch)
+    else:
+        globals()[args.action](state)

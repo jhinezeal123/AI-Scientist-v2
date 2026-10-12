@@ -192,3 +192,51 @@ def test_configured_workflow_reuses_original_four_stage_manager(tmp_path,monkeyp
             await planner.close()
             await worker.close(2)
     asyncio.run(check())
+
+
+def test_parallel_branches_overlap_keep_separate_files_and_one_kaggle_session(tmp_path, monkeypatch):
+    import threading
+    from test_working import Terminal
+    class ParallelRuntime(SearchRuntime):
+        def __init__(self):
+            super().__init__()
+            self.search_options=SearchOptions(num_workers=2,num_drafts=2,stage_iterations=[2,2,2,2],debug_prob=0,scale_experiments=True)
+            self.active=0;self.peak=0;self.lock=threading.Lock();self.first_pair=threading.Barrier(2)
+        def run(self,request,progress,cancelled):
+            if request.role!='mvp1_search_node':
+                return super().run(request,progress,cancelled)
+            with self.lock:
+                self.active+=1;self.peak=max(self.peak,self.active)
+            try:
+                self.first_pair.wait(timeout=5)
+                return super().run(request,progress,cancelled)
+            finally:
+                with self.lock:self.active-=1
+    async def check():
+        monkeypatch.chdir(tmp_path)
+        runtime=ParallelRuntime()
+        store,project,run,worker,planner,working,_,bootstrap,donor=fixture(tmp_path,runtime=runtime)
+        planner.bindings.request_type=RuntimeRequest
+        working.config.codex_model='gpt-fixture'
+        branches=[]
+        def open_branch(session,branch,output):
+            terminal=Terminal(output);branches.append((session,branch,terminal));return terminal
+        donor.open_branch=open_branch
+        try:
+            await working.start(project,run)
+            await working.tasks[project,run]
+            detail=working.detail(project,run)
+            assert detail['state']=='COMPLETED',detail
+            assert runtime.peak==2
+            assert len(bootstrap.calls)==len(donor.opens)==1
+            assert len(branches)==8 and len({branch for _,branch,_ in branches})==8
+            assert all(session==run and terminal.closed for session,_,terminal in branches)
+            assert len({id(terminal.files) for _,_,terminal in branches})==8
+            assert not working.branch_terminals
+            node_calls=[call for call in runtime.calls if call.role=='mvp1_search_node']
+            assert len({str(call.workdir) for call in node_calls})==8
+            state=json.loads((working.view.root(project,run)/'logs/0-run/search-state.json').read_text(encoding='utf-8'))
+            assert all(sum(1 for call in node_calls if call.stage==stage)==2 for stage in ('draft','tuning','research','ablation'))
+        finally:
+            await working.close(2);await planner.close();await worker.close(2)
+    asyncio.run(check())

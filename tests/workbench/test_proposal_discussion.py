@@ -7,6 +7,7 @@ import uuid
 import pytest
 
 from ai_scientist.workbench.store import StoreConflict
+from ai_scientist.workbench.run_phases import RUN_PHASES
 from tests.workbench.test_n8n_workflows import setup, wait_for, FixtureAdapter, repository
 from tests.workbench.test_stage_workflows import run_async
 
@@ -45,6 +46,8 @@ async def test_only_human_messages_replan_and_old_approval_cannot_be_reused(repo
         idea=await input('ideation')
         owner.store.answer(project,identity,idea['id'],{'title':'Checksum','text':'Test checksum cases'})
         await done('ideation')
+        for phase in ('literature','idea_selection'):
+            await call(phase); await done(phase)
         await call('proposal');proposal_result=await done('proposal')
         assert proposal_result['needs_clarification'] is ambiguous
         assert proposal_result['approval_allowed'] is not ambiguous
@@ -80,6 +83,8 @@ async def test_only_human_messages_replan_and_old_approval_cannot_be_reused(repo
                 await owner.start(project,identity)
                 generation=owner.store.get(project,identity)['state']['generation']
                 await call('ideation');await done('ideation')
+                for phase in ('literature','idea_selection'):
+                    await call(phase);await done(phase)
             await call('proposal',round+1);await done('proposal',round+1)
             assert len(contexts)==round+2
             assert contexts[-1][-1]['role']=='user' and contexts[-1][-1]['text']==message['message']
@@ -89,7 +94,7 @@ async def test_only_human_messages_replan_and_old_approval_cannot_be_reused(repo
         owner.store.answer(project,identity,ready['id'],{'approve':True,'reason':'Reviewed v3'})
         final=await done('approval',2)
         assert not final['revise_proposal']
-        for stage in ('run_approval','execution','collect'):
+        for stage in ('run_approval','execution',*RUN_PHASES,'collect'):
             await call(stage,2)
             if stage=='run_approval':
                 gate=await input(stage)
@@ -128,6 +133,9 @@ async def test_agent_approval_still_requires_human_clarification(repository):
         idea=await wait_for(lambda:next((v for v in owner.store.inputs(project,identity) if v['state']=='PENDING'),None))
         owner.store.answer(project,identity,idea['id'],{'title':'Checksum','text':'Checksum tests'})
         await wait_for(lambda:owner.tasks[(identity,'0:ideation')].done())
+        for phase in ('literature','idea_selection'):
+            await owner.step(project,identity,generation,0,phase)
+            await wait_for(lambda:owner.tasks[(identity,'0:'+phase)].done())
         await owner.step(project,identity,generation,0,'proposal')
         await wait_for(lambda:owner.tasks[(identity,'0:proposal')].done())
         await owner.step(project,identity,generation,0,'approval')

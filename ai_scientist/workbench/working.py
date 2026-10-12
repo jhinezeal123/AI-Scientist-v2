@@ -55,6 +55,8 @@ class WorkingService:
                          if getattr(config, 'donor_root', None) else None)
         self.tasks, self.terminals, self.stop_requests = {}, {}, set()
         self.workers = {}
+        self.worker_lock = threading.RLock()
+        self.branch_terminals = {}
         self.runtime_for_run = None
         self.queue_task = None
         self.closed = False
@@ -66,15 +68,25 @@ class WorkingService:
     def record(self, project_id, run_id):
         return self.records.get(project_id, run_id)
 
-    def run_worker(self, key):
+    def run_worker(self, key, branch=None):
         """Each run owns its process, persisted state and cancellation signal."""
-        if key not in self.workers:
-            template = self.planner.worker
-            runtime = self.runtime_for_run(key) if self.runtime_for_run else template.runtime
-            self.workers[key] = RuntimeWorker(runtime,
-                self.view.root(*key) / 'working-agent' / 'runtime-state.json',
-                uncertain_error=template.uncertain_error)
-        return self.workers[key]
+        identity = (*key, branch) if branch else key
+        with self.worker_lock:
+            if self.closed or key in self.stop_requests:
+                raise StoreConflict('Working was stopped; no new provider job can be admitted')
+            if identity not in self.workers:
+                template = self.planner.worker
+                runtime = self.runtime_for_run(key) if self.runtime_for_run else template.runtime
+                folder = self.view.root(*key) / 'working-agent'
+                if branch:
+                    folder = folder / branch
+                self.workers[identity] = RuntimeWorker(runtime, folder / 'runtime-state.json',
+                    uncertain_error=template.uncertain_error)
+            return self.workers[identity]
+
+    def workers_for(self, key):
+        with self.worker_lock:
+            return [worker for identity, worker in self.workers.items() if identity[:2] == key]
 
     def _pending(self):
         pending = []
@@ -585,6 +597,9 @@ class WorkingService:
                                                   on_command=save_command, fetch_artifact=fetch_artifact)
                 request = self._request(key, approved, descriptor, workdir)
                 deadline = time.monotonic() + request.timeout_seconds
+                phases = getattr(stage_runtime, 'run_phases', None)
+                if phases and not is_etc:
+                    await asyncio.to_thread(phases.begin, 'single_execution', deadline)
                 result, payload = await self.run_worker(key).run(request)
                 await asyncio.to_thread(gateway.close)
                 gateway = None
@@ -620,6 +635,9 @@ class WorkingService:
                 from .single_run import save_node, finish_research
                 node, journal = await asyncio.to_thread(save_node, root, approved, payload, commands, run_id)
                 if not is_etc:
+                    if phases:
+                        phases.finish('single_execution', {'artifacts': ['journal.json', 'working-manifest.json']},
+                                      '' if payload.succeeded else 'Approved experiment failed')
                     payload, manifest = await finish_research(self, key, approved, descriptor, terminal, payload, manifest, node, journal, deadline)
                     if (approved['body'].get('research') or {}).get('plots') or (approved['body'].get('research') or {}).get('writeup', 'none') != 'none':
                         manifest = await asyncio.to_thread(self._collect_etc, key, terminal, root, approved)
@@ -686,9 +704,12 @@ class WorkingService:
             if terminal:
                 await asyncio.to_thread(terminal.close)
                 self.terminals.pop(key, None)
+            with self.worker_lock:
+                branches = [terminal for identity, terminal in self.branch_terminals.items() if identity[:2] == key]
+            for branch in branches:
+                await asyncio.to_thread(branch.close)
             await self._finish_stop(key, receipt)
-            if key in self.workers:
-                await self.workers[key].close(2)
+            await asyncio.gather(*(worker.close(2) for worker in self.workers_for(key)))
 
     async def _request_stop(self, key, terminal=None):
         self.records.append_log(*key, 'Backend đang dừng phiên Kaggle…\n', 'backend')
@@ -826,8 +847,8 @@ class WorkingService:
         task = self.tasks.get(key)
         if task and not task.done():
             self.records.update(*key, state='STOPPING', phase='stopping')
-            if key in self.workers:
-                self.workers[key].cancelled.set()
+            for worker in self.workers_for(key):
+                worker.cancelled.set()
             return {'run_id': run_id, 'state': 'STOPPING'}
         self.tasks[key] = asyncio.create_task(self._recover_stop(key))
         return {'run_id': run_id, 'state': 'STOPPING'}
@@ -1025,8 +1046,8 @@ class WorkingService:
             if not task.done():
                 self.stop_requests.add(key)
                 record = self.record(*key)
-                if key in self.workers:
-                    self.workers[key].cancelled.set()
+                for worker in self.workers_for(key):
+                    worker.cancelled.set()
         running = [task for task in self.tasks.values() if not task.done()]
         if running:
             done, pending = await asyncio.wait(running, timeout=timeout)
@@ -1040,6 +1061,6 @@ class WorkingService:
             for task in done:
                 if not task.cancelled():
                     task.exception()
-        for terminal in list(self.terminals.values()):
+        for terminal in [*self.terminals.values(), *self.branch_terminals.values()]:
             await asyncio.to_thread(terminal.close)
         await asyncio.gather(*(worker.close(timeout) for worker in self.workers.values()))

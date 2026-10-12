@@ -1,4 +1,4 @@
-"""Approved research finishing steps using upstream prompts/functions and one SSH."""
+"""Approved research finishing steps using upstream prompts and the selected SSH."""
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -72,10 +72,14 @@ class ResearchPipeline:
         self.state['components'][name] = {'status':status, 'reason':reason, 'artifacts':list(artifacts)}
         self.save()
 
-    def step(self, name, operation):
+    def step(self, name, operation, *, phase=None):
         if self.state['components'][name]['status'] == 'not_requested':
             return
         self.owner.check_running()
+        phases = getattr(self.owner, 'phases', None)
+        phase = phase or ('vision_paper' if name == 'vision' else name)
+        if phases:
+            phases.begin(phase, self.owner.deadline)
         self.set(name, 'running')
         self.owner.service.records.update(*self.owner.key, phase='research_' + name)
         self.owner.service.records.append_log(*self.owner.key, f'Research: {name}…\n', 'backend')
@@ -91,6 +95,11 @@ class ResearchPipeline:
         except BaseException:
             self.set(name, 'interrupted', 'Working đã bị dừng hoặc hết thời gian; không tự chạy lại.')
             raise
+        finally:
+            if phases:
+                component = self.state['components'][name]
+                phases.finish(phase, component,
+                    component.get('reason') or 'Research phase interrupted' if component['status'] != 'completed' else '')
 
     def interrupted(self, status='interrupted', reason='Working dừng trước khi hoàn tất; không replay khi restart.'):
         self.state['status'] = status
@@ -441,7 +450,7 @@ class ResearchPipeline:
                 self.limitations.append(f'{name} thiếu summary đã xác minh.')
             else:
                 if name == 'writeup':
-                    self.step('vision',lambda:self.vision(paper=False))
+                    self.step('vision',lambda:self.vision(paper=False), phase='vision_plots')
                 self.step(name,operation)
         self.step('vision',self.vision)
         self.step('review',self.review)
@@ -479,7 +488,7 @@ class ResearchPipeline:
                      or self.state.get('dependencies', {}).get('journal_evidence', {}).get('status') == 'completed')
             if ready:
                 if name == 'writeup':
-                    self.step('vision',lambda:self.vision(paper=False))
+                    self.step('vision',lambda:self.vision(paper=False), phase='vision_plots')
                 self.step(name, operation)
             else:
                 self.set(name, 'blocked', 'Chưa đủ bằng chứng thí nghiệm để tạo đầu ra này.')

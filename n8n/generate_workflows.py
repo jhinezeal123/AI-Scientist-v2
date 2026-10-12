@@ -54,6 +54,14 @@ class Graph:
                   {'content': text, 'width': width, 'height': height, 'color': 4}, x, y)
 
     def group(self, identity, name, members, description):
+        selected = [node for node in self.body['nodes'] if node['name'] in members]
+        # Collapsed groups anchor at their left edge. Keep those edges close;
+        # expanded groups retain the detailed operation layout inside them.
+        index = len(self.body.get('nodeGroups', []))
+        dx = 288 + index*528 - min(node['position'][0] for node in selected)
+        dy = -80 - min(node['position'][1] for node in selected)
+        for node in selected:
+            node['position'] = [node['position'][0]+dx, node['position'][1]+dy]
         self.body.setdefault('nodeGroups', []).append({'id': identity, 'name': name,
             'nodeIds': [node['id'] for node in self.body['nodes'] if node['name'] in members],
             'description': description})
@@ -63,12 +71,23 @@ def research():
     g = Graph('workbenchResearch', 'Workbench · Project autoresearch')
     trigger = g.webhook('Research request', 'workbench-research', 0, -240)
     previous = trigger
+    manager_choice = single_done = None
     groups = []
-    for index, (step, label) in enumerate((('ideation', 'Ideathon + literature and novelty'),
-        ('proposal', 'Lập proposal'), ('approval', 'Trao đổi / duyệt proposal'),
-        ('run_approval', 'Configured run approval'), ('execution', 'Start approved Kaggle run'),
-        ('collect', 'Observe run and collect result'))):
-        x = 280 + index*700 + (700 if index>=3 else 0)
+    operations = [
+        ('ideation', 'Sinh ứng viên · Lưu archive'), ('literature', 'Literature · Novelty từng ứng viên'),
+        ('idea_selection', 'Chọn idea từ archive'), ('proposal', 'Lập proposal'),
+        ('approval', 'Trao đổi / duyệt proposal'), ('run_approval', 'Cấu hình và duyệt run'),
+        ('execution', 'Mở phiên Kaggle đã duyệt'), ('draft', 'Draft · Các baseline song song'),
+        ('tuning', 'Tuning · Các cấu hình song song'), ('research', 'Research · Cải tiến và mở rộng'),
+        ('ablation', 'Ablation · So sánh thành phần'), ('single_execution', 'Chạy một thí nghiệm'),
+        ('tree_export', 'Chọn kết quả · Lưu cây thí nghiệm'), ('multi_seed', 'Tổng hợp đánh giá nhiều seed'),
+        ('summary', 'Tổng hợp kết quả từng stage'), ('report', 'Tạo báo cáo nghiên cứu'),
+        ('citations', 'Thu thập citation · BibTeX'), ('plots', 'Tổng hợp figures'),
+        ('vision_plots', 'VLM · Đánh giá hình trước viết bài'), ('writeup', 'Viết bài · Compile PDF · Reflection'),
+        ('vision_paper', 'VLM · Hình và PDF cuối'), ('review', 'Review khoa học'),
+        ('collect', 'Thu kết quả · Đóng vòng nghiên cứu')]
+    for index, (step, label) in enumerate(operations):
+        x = 280 + index*700 + (700 if index>=5 else 0)
         body = '={{ {project_id: $("Research request").first().json.body.project_id, workflow_id: $("Research request").first().json.body.workflow_id, generation: $("Research request").first().json.body.generation, iteration: $json.iteration ?? $("Research request").first().json.body.iteration, step: "'+step+'", execution_id: $execution.id} }}'
         resume_url = '$execution.resumeUrl.split("?")[0] + "/'+step+'" + ($execution.resumeUrl.includes("?") ? "?" + $execution.resumeUrl.split("?")[1] + "&" : "?") + "wb_generation=" + $("Research request").first().json.body.generation + "&wb_iteration=" + ($json.iteration ?? $("Research request").first().json.body.iteration)'
         resume_url += ' + "&wb_round=" + ($json.proposal_round ?? 0)'
@@ -84,7 +103,7 @@ def research():
             x+=220
         else:
             op = g.http(label, BASE+'/step', body, x, 0)
-            g.connect(previous,op)
+            g.connect(manager_choice if step=='single_execution' else previous, op, 1 if step=='single_execution' else 0)
         wait_name='Chờ bạn nhắn / quyết định duyệt' if step=='approval' else step+' · chờ webhook'
         wait = g.node(wait_name, 'wait', {'resume': 'webhook',
             'incomingAuthentication': 'headerAuth', 'httpMethod': 'POST', 'responseMode': 'onReceived',
@@ -124,7 +143,24 @@ return $input.all().map(item => {{
             groups[-1][1].extend([unclear,clarification])
         g.connect(op, wait)
         g.connect(wait, complete)
+        old_previous = previous
         previous = complete
+        if step=='execution':
+            manager_choice=g.condition('Experiment manager bật?', 'search_enabled', x+660, 0)
+            g.connect(complete,manager_choice)
+            groups[-1][1].append(manager_choice)
+            previous=manager_choice
+        elif step=='single_execution':
+            single_done=complete
+            previous=old_previous
+            for node in g.body['nodes'][-3:]:
+                node['position'][1]=260
+        elif step=='multi_seed':
+            merged=g.node('Thí nghiệm đã hoàn tất','noOp',{},x+660,0)
+            g.connect(complete,merged)
+            g.connect(single_done,merged)
+            groups[-1][1].append(merged)
+            previous=merged
         if step=='approval':
             revise=g.condition('Bạn nhắn lại?', 'revise_proposal', x+660, 0)
             accepted=g.node('Proposal đã chốt','noOp',{},x+880,80)
@@ -133,22 +169,23 @@ return $input.all().map(item => {{
             g.connect(revise,accepted,1)
             groups[-1][1].extend([revise,accepted])
             previous=accepted
-    again = g.condition('Another approved iteration?', 'continue', 5180, 0)
+    again = g.condition('Another approved iteration?', 'continue', x+700, 0)
     g.connect(previous, again)
-    restart = g.node('Continue research', 'noOp', {}, 5400, -96)
+    restart = g.node('Continue research', 'noOp', {}, x+920, -96)
     g.connect(again, restart)
-    g.connect(restart, 'Ideathon + literature and novelty')
-    done = g.node('Project workflow complete', 'noOp', {}, 5400, 96)
+    g.connect(restart, operations[0][1])
+    done = g.node('Project workflow complete', 'noOp', {}, x+920, 96)
     g.connect(again, done, 1)
     groups[-1][1].extend([again, restart, done])
-    groups[1][1].extend(groups[2][1])
-    del groups[2]
-    titles = ['Ideathon / Novelty', 'Thiết kế proposal', 'Cấu hình run', 'Thực thi', 'Kết quả / Lặp']
-    descriptions = ['Tạo idea, tìm tài liệu và phản biện độ mới.',
-        'Lập và duyệt proposal từ mục tiêu, context và phạm vi đã lưu.', 'Cấu hình và duyệt bắt đầu run theo Hybrid / Full agent.',
-        'Bắt đầu run Kaggle với preset và budget đã lưu.', 'Thu kết quả, hoàn tất hoặc chuyển sang vòng tiếp theo.']
-    for i, ((stage, members), title, description) in enumerate(zip(groups, titles, descriptions), 1):
-        g.group('stage-'+stage, f'{i:02} · {title}', members, description)
+    sections = [
+        ('ideation', 'Ideathon / Novelty', ['ideation','literature','idea_selection'], 'Sinh nhiều ứng viên, lưu archive, kiểm tra novelty và chọn một idea.'),
+        ('proposal', 'Thiết kế proposal', ['proposal','approval'], 'Lập proposal, làm rõ yêu cầu và duyệt ứng viên hiện tại.'),
+        ('run_approval', 'Cấu hình run', ['run_approval'], 'Duyệt đúng run, tài nguyên và phạm vi đã lưu.'),
+        ('execution', 'Thực thi thí nghiệm', ['execution','draft','tuning','research','ablation','single_execution','tree_export','multi_seed'], 'Các nhánh song song có shell và thư mục riêng. Mở rộng nằm trong budget và dữ liệu đã duyệt.'),
+        ('collect', 'Kết quả / Viết bài / Lặp', ['summary','report','citations','plots','vision_plots','writeup','vision_paper','review','collect'], 'Summary, report, citation, figures, VLM, PDF và review dùng cấu hình đã chọn trong Workbench.')]
+    for i, (identity, title, phases, description) in enumerate(sections, 1):
+        members = [member for phase, nodes in groups if phase in phases for member in nodes]
+        g.group('stage-'+identity, f'{i:02} · {title}', members, description)
     g.note('## Project autoresearch\nConfigured ideathon → literature / novelty reflection → proposal → configured approvals → approved Kaggle run.\nHybrid and full-agent settings come from the saved project grant.\nSet goal, presets, Library context and limits in the project Workflow tab. Start there to issue a saved grant.', -80, -400, 1100)
     g.note('## Every agent request uses the Agent loop workflow\nThe model chooses one action; Workbench executes it in the approved SSH session and verifies its receipt.\nLiterature search/reflection, citation gathering, VLM images and paper reviews use dedicated stage presets through this loop.\nRun finishing: summaries → references → plots → LaTeX with visual reflections → image/caption/reference and duplicate checks → text review.', 2800, -400, 1100)
     return g.body

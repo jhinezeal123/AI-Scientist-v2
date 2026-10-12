@@ -82,12 +82,14 @@ ACTION_SCHEMA = {'type': 'object', 'additionalProperties': False,
         'text': {'type': 'string', 'minLength': 1, 'maxLength': 18000}}}
 
 
-def review_idea(runtime, idea):
+def review_idea(runtime, idea, *, candidate_id=None):
     """Use upstream reflection instructions, with explicit evidence and final decision."""
     from ai_scientist.perform_ideation_temp_free import idea_reflection_prompt
     from .tree_search import write_json
     state = runtime.owner.store.get(runtime.project, runtime.workflow)['state']
     root = runtime.owner.projects.directory(runtime.project) / 'automation' / runtime.workflow / 'literature' / str(state['iteration'])
+    if candidate_id:
+        root = root / candidate_id
     root.mkdir(parents=True, exist_ok=True)
     path = root / 'review.json'
     if path.exists():

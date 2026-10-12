@@ -28,13 +28,13 @@
       }
     },
     {
-      "id": "Ideathon_+_literature_and_novelty",
-      "name": "Ideathon + literature and novelty",
+      "id": "Sinh_ứng_viên_·_Lưu_archive",
+      "name": "Sinh ứng viên · Lưu archive",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        280,
-        0
+        288,
+        -80
       ],
       "parameters": {
         "method": "POST",
@@ -61,8 +61,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        500,
-        0
+        508,
+        -80
       ],
       "parameters": {
         "resume": "webhook",
@@ -87,11 +87,145 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        720,
-        0
+        728,
+        -80
       ],
       "parameters": {
-        "jsCode": "const started = $(\"Ideathon + literature and novelty\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+        "jsCode": "const started = $(\"Sinh \\u1ee9ng vi\\u00ean \\u00b7 L\\u01b0u archive\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Literature_·_Novelty_từng_ứng_viên",
+      "name": "Literature · Novelty từng ứng viên",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        988,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"literature\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/literature\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "literature_·_chờ_webhook",
+      "name": "literature · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1208,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "literature"
+        }
+      },
+      "webhookId": "research-literature",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "literature_·_complete",
+      "name": "literature · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1428,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Literature \\u00b7 Novelty t\\u1eebng \\u1ee9ng vi\\u00ean\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Chọn_idea_từ_archive",
+      "name": "Chọn idea từ archive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1688,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"idea_selection\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/idea_selection\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "idea_selection_·_chờ_webhook",
+      "name": "idea_selection · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1908,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "idea_selection"
+        }
+      },
+      "webhookId": "research-idea_selection",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "idea_selection_·_complete",
+      "name": "idea_selection · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Ch\\u1ecdn idea t\\u1eeb archive\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
       }
     },
     {
@@ -100,8 +234,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        980,
-        0
+        816,
+        80
       ],
       "parameters": {
         "method": "POST",
@@ -128,8 +262,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1200,
-        0
+        1036,
+        80
       ],
       "parameters": {
         "resume": "webhook",
@@ -154,8 +288,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1420,
-        0
+        1256,
+        80
       ],
       "parameters": {
         "jsCode": "const started = $(\"L\\u1eadp proposal\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
@@ -167,8 +301,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1680,
-        0
+        1516,
+        80
       ],
       "parameters": {
         "conditions": {
@@ -201,8 +335,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1900,
-        -160
+        1736,
+        -80
       ],
       "parameters": {
         "method": "POST",
@@ -229,8 +363,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1900,
-        160
+        1736,
+        240
       ],
       "parameters": {
         "method": "POST",
@@ -257,8 +391,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        2120,
-        0
+        1956,
+        80
       ],
       "parameters": {
         "resume": "webhook",
@@ -283,8 +417,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2340,
-        0
+        2176,
+        80
       ],
       "parameters": {
         "jsCode": "const decision = $(\"Agent yêu cầu làm rõ?\").first(0, $runIndex) ?? $(\"Agent yêu cầu làm rõ?\").first(1, $runIndex);\nconst started = {...decision.json, step: \"approval\"};\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
@@ -296,8 +430,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2560,
-        0
+        2396,
+        80
       ],
       "parameters": {
         "conditions": {
@@ -330,19 +464,19 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        2780,
-        80
+        2616,
+        160
       ],
       "parameters": {}
     },
     {
-      "id": "Configured_run_approval",
-      "name": "Configured run approval",
+      "id": "Cấu_hình_và_duyệt_run",
+      "name": "Cấu hình và duyệt run",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3080,
-        0
+        1344,
+        -80
       ],
       "parameters": {
         "method": "POST",
@@ -369,8 +503,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        3300,
-        0
+        1564,
+        -80
       ],
       "parameters": {
         "resume": "webhook",
@@ -395,21 +529,21 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3520,
-        0
+        1784,
+        -80
       ],
       "parameters": {
-        "jsCode": "const started = $(\"Configured run approval\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+        "jsCode": "const started = $(\"C\\u1ea5u h\\u00ecnh v\\u00e0 duy\\u1ec7t run\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
       }
     },
     {
-      "id": "Start_approved_Kaggle_run",
-      "name": "Start approved Kaggle run",
+      "id": "Mở_phiên_Kaggle_đã_duyệt",
+      "name": "Mở phiên Kaggle đã duyệt",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3780,
-        0
+        1872,
+        -80
       ],
       "parameters": {
         "method": "POST",
@@ -436,8 +570,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        4000,
-        0
+        2092,
+        -80
       ],
       "parameters": {
         "resume": "webhook",
@@ -462,21 +596,1071 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4220,
-        0
+        2312,
+        -80
       ],
       "parameters": {
-        "jsCode": "const started = $(\"Start approved Kaggle run\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+        "jsCode": "const started = $(\"M\\u1edf phi\\u00ean Kaggle \\u0111\\u00e3 duy\\u1ec7t\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
       }
     },
     {
-      "id": "Observe_run_and_collect_result",
-      "name": "Observe run and collect result",
+      "id": "Experiment_manager_bật?",
+      "name": "Experiment manager bật?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2532,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Experiment manager bật?",
+              "leftValue": "={{ $json.search_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Draft_·_Các_baseline_song_song",
+      "name": "Draft · Các baseline song song",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        4480,
-        0
+        2572,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"draft\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/draft\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "draft_·_chờ_webhook",
+      "name": "draft · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2792,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "draft"
+        }
+      },
+      "webhookId": "research-draft",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "draft_·_complete",
+      "name": "draft · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3012,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Draft \\u00b7 C\\u00e1c baseline song song\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Tuning_·_Các_cấu_hình_song_song",
+      "name": "Tuning · Các cấu hình song song",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3272,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"tuning\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/tuning\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "tuning_·_chờ_webhook",
+      "name": "tuning · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3492,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "tuning"
+        }
+      },
+      "webhookId": "research-tuning",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "tuning_·_complete",
+      "name": "tuning · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Tuning \\u00b7 C\\u00e1c c\\u1ea5u h\\u00ecnh song song\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Research_·_Cải_tiến_và_mở_rộng",
+      "name": "Research · Cải tiến và mở rộng",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3972,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"research\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/research\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "research_·_chờ_webhook",
+      "name": "research · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4192,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "research"
+        }
+      },
+      "webhookId": "research-research",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "research_·_complete",
+      "name": "research · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4412,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Research \\u00b7 C\\u1ea3i ti\\u1ebfn v\\u00e0 m\\u1edf r\\u1ed9ng\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Ablation_·_So_sánh_thành_phần",
+      "name": "Ablation · So sánh thành phần",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4672,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"ablation\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/ablation\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "ablation_·_chờ_webhook",
+      "name": "ablation · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4892,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "ablation"
+        }
+      },
+      "webhookId": "research-ablation",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "ablation_·_complete",
+      "name": "ablation · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5112,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Ablation \\u00b7 So s\\u00e1nh th\\u00e0nh ph\\u1ea7n\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Chạy_một_thí_nghiệm",
+      "name": "Chạy một thí nghiệm",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5372,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"single_execution\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/single_execution\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "single_execution_·_chờ_webhook",
+      "name": "single_execution · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5592,
+        180
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "single_execution"
+        }
+      },
+      "webhookId": "research-single_execution",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "single_execution_·_complete",
+      "name": "single_execution · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5812,
+        180
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Ch\\u1ea1y m\\u1ed9t th\\u00ed nghi\\u1ec7m\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Chọn_kết_quả_·_Lưu_cây_thí_nghiệm",
+      "name": "Chọn kết quả · Lưu cây thí nghiệm",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6072,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"tree_export\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/tree_export\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "tree_export_·_chờ_webhook",
+      "name": "tree_export · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6292,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "tree_export"
+        }
+      },
+      "webhookId": "research-tree_export",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "tree_export_·_complete",
+      "name": "tree_export · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6512,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Ch\\u1ecdn k\\u1ebft qu\\u1ea3 \\u00b7 L\\u01b0u c\\u00e2y th\\u00ed nghi\\u1ec7m\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Tổng_hợp_đánh_giá_nhiều_seed",
+      "name": "Tổng hợp đánh giá nhiều seed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6772,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"multi_seed\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/multi_seed\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "multi_seed_·_chờ_webhook",
+      "name": "multi_seed · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6992,
+        -80
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "multi_seed"
+        }
+      },
+      "webhookId": "research-multi_seed",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "multi_seed_·_complete",
+      "name": "multi_seed · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7212,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"T\\u1ed5ng h\\u1ee3p \\u0111\\u00e1nh gi\\u00e1 nhi\\u1ec1u seed\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Thí_nghiệm_đã_hoàn_tất",
+      "name": "Thí nghiệm đã hoàn tất",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        7432,
+        -80
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "Tổng_hợp_kết_quả_từng_stage",
+      "name": "Tổng hợp kết quả từng stage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"summary\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/summary\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "summary_·_chờ_webhook",
+      "name": "summary · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2620,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "summary"
+        }
+      },
+      "webhookId": "research-summary",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "summary_·_complete",
+      "name": "summary · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"T\\u1ed5ng h\\u1ee3p k\\u1ebft qu\\u1ea3 t\\u1eebng stage\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Tạo_báo_cáo_nghiên_cứu",
+      "name": "Tạo báo cáo nghiên cứu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3100,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"report\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/report\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "report_·_chờ_webhook",
+      "name": "report · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3320,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "report"
+        }
+      },
+      "webhookId": "research-report",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "report_·_complete",
+      "name": "report · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3540,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"T\\u1ea1o b\\u00e1o c\\u00e1o nghi\\u00ean c\\u1ee9u\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Thu_thập_citation_·_BibTeX",
+      "name": "Thu thập citation · BibTeX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3800,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"citations\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/citations\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "citations_·_chờ_webhook",
+      "name": "citations · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4020,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "citations"
+        }
+      },
+      "webhookId": "research-citations",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "citations_·_complete",
+      "name": "citations · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4240,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Thu th\\u1eadp citation \\u00b7 BibTeX\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Tổng_hợp_figures",
+      "name": "Tổng hợp figures",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4500,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"plots\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/plots\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "plots_·_chờ_webhook",
+      "name": "plots · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4720,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "plots"
+        }
+      },
+      "webhookId": "research-plots",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "plots_·_complete",
+      "name": "plots · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4940,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"T\\u1ed5ng h\\u1ee3p figures\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "VLM_·_Đánh_giá_hình_trước_viết_bài",
+      "name": "VLM · Đánh giá hình trước viết bài",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5200,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"vision_plots\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/vision_plots\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "vision_plots_·_chờ_webhook",
+      "name": "vision_plots · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5420,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "vision_plots"
+        }
+      },
+      "webhookId": "research-vision_plots",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "vision_plots_·_complete",
+      "name": "vision_plots · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5640,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"VLM \\u00b7 \\u0110\\u00e1nh gi\\u00e1 h\\u00ecnh tr\\u01b0\\u1edbc vi\\u1ebft b\\u00e0i\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Viết_bài_·_Compile_PDF_·_Reflection",
+      "name": "Viết bài · Compile PDF · Reflection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5900,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"writeup\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/writeup\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "writeup_·_chờ_webhook",
+      "name": "writeup · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6120,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "writeup"
+        }
+      },
+      "webhookId": "research-writeup",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "writeup_·_complete",
+      "name": "writeup · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6340,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Vi\\u1ebft b\\u00e0i \\u00b7 Compile PDF \\u00b7 Reflection\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "VLM_·_Hình_và_PDF_cuối",
+      "name": "VLM · Hình và PDF cuối",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6600,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"vision_paper\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/vision_paper\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "vision_paper_·_chờ_webhook",
+      "name": "vision_paper · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6820,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "vision_paper"
+        }
+      },
+      "webhookId": "research-vision_paper",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "vision_paper_·_complete",
+      "name": "vision_paper · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7040,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"VLM \\u00b7 H\\u00ecnh v\\u00e0 PDF cu\\u1ed1i\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Review_khoa_học",
+      "name": "Review khoa học",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7300,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"review\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/review\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "review_·_chờ_webhook",
+      "name": "review · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        7520,
+        16
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "review"
+        }
+      },
+      "webhookId": "research-review",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "review_·_complete",
+      "name": "review · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7740,
+        16
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Review khoa h\\u1ecdc\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Thu_kết_quả_·_Đóng_vòng_nghiên_cứu",
+      "name": "Thu kết quả · Đóng vòng nghiên cứu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8000,
+        16
       ],
       "parameters": {
         "method": "POST",
@@ -503,8 +1687,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        4700,
-        0
+        8220,
+        16
       ],
       "parameters": {
         "resume": "webhook",
@@ -529,11 +1713,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4920,
-        0
+        8440,
+        16
       ],
       "parameters": {
-        "jsCode": "const started = $(\"Observe run and collect result\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+        "jsCode": "const started = $(\"Thu k\\u1ebft qu\\u1ea3 \\u00b7 \\u0110\\u00f3ng v\\u00f2ng nghi\\u00ean c\\u1ee9u\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
       }
     },
     {
@@ -542,8 +1726,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        5180,
-        0
+        8700,
+        16
       ],
       "parameters": {
         "conditions": {
@@ -576,8 +1760,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        5400,
-        -96
+        8920,
+        -80
       ],
       "parameters": {}
     },
@@ -587,14 +1771,14 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        5400,
-        96
+        8920,
+        112
       ],
       "parameters": {}
     },
     {
-      "id": "Note_26",
-      "name": "Note 26",
+      "id": "Note_79",
+      "name": "Note 79",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -609,8 +1793,8 @@
       }
     },
     {
-      "id": "Note_27",
-      "name": "Note 27",
+      "id": "Note_80",
+      "name": "Note 80",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -630,14 +1814,14 @@
       "main": [
         [
           {
-            "node": "Ideathon + literature and novelty",
+            "node": "Sinh ứng viên · Lưu archive",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Ideathon + literature and novelty": {
+    "Sinh ứng viên · Lưu archive": {
       "main": [
         [
           {
@@ -660,6 +1844,72 @@
       ]
     },
     "ideation · complete": {
+      "main": [
+        [
+          {
+            "node": "Literature · Novelty từng ứng viên",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Literature · Novelty từng ứng viên": {
+      "main": [
+        [
+          {
+            "node": "literature · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "literature · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "literature · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "literature · complete": {
+      "main": [
+        [
+          {
+            "node": "Chọn idea từ archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chọn idea từ archive": {
+      "main": [
+        [
+          {
+            "node": "idea_selection · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "idea_selection · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "idea_selection · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "idea_selection · complete": {
       "main": [
         [
           {
@@ -787,14 +2037,14 @@
       "main": [
         [
           {
-            "node": "Configured run approval",
+            "node": "Cấu hình và duyệt run",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Configured run approval": {
+    "Cấu hình và duyệt run": {
       "main": [
         [
           {
@@ -820,14 +2070,14 @@
       "main": [
         [
           {
-            "node": "Start approved Kaggle run",
+            "node": "Mở phiên Kaggle đã duyệt",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Start approved Kaggle run": {
+    "Mở phiên Kaggle đã duyệt": {
       "main": [
         [
           {
@@ -853,14 +2103,538 @@
       "main": [
         [
           {
-            "node": "Observe run and collect result",
+            "node": "Experiment manager bật?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Observe run and collect result": {
+    "Experiment manager bật?": {
+      "main": [
+        [
+          {
+            "node": "Draft · Các baseline song song",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Chạy một thí nghiệm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft · Các baseline song song": {
+      "main": [
+        [
+          {
+            "node": "draft · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "draft · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "draft · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "draft · complete": {
+      "main": [
+        [
+          {
+            "node": "Tuning · Các cấu hình song song",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tuning · Các cấu hình song song": {
+      "main": [
+        [
+          {
+            "node": "tuning · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tuning · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "tuning · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tuning · complete": {
+      "main": [
+        [
+          {
+            "node": "Research · Cải tiến và mở rộng",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research · Cải tiến và mở rộng": {
+      "main": [
+        [
+          {
+            "node": "research · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "research · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "research · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "research · complete": {
+      "main": [
+        [
+          {
+            "node": "Ablation · So sánh thành phần",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ablation · So sánh thành phần": {
+      "main": [
+        [
+          {
+            "node": "ablation · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ablation · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "ablation · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chạy một thí nghiệm": {
+      "main": [
+        [
+          {
+            "node": "single_execution · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "single_execution · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "single_execution · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ablation · complete": {
+      "main": [
+        [
+          {
+            "node": "Chọn kết quả · Lưu cây thí nghiệm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chọn kết quả · Lưu cây thí nghiệm": {
+      "main": [
+        [
+          {
+            "node": "tree_export · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tree_export · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "tree_export · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tree_export · complete": {
+      "main": [
+        [
+          {
+            "node": "Tổng hợp đánh giá nhiều seed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tổng hợp đánh giá nhiều seed": {
+      "main": [
+        [
+          {
+            "node": "multi_seed · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "multi_seed · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "multi_seed · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "multi_seed · complete": {
+      "main": [
+        [
+          {
+            "node": "Thí nghiệm đã hoàn tất",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "single_execution · complete": {
+      "main": [
+        [
+          {
+            "node": "Thí nghiệm đã hoàn tất",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Thí nghiệm đã hoàn tất": {
+      "main": [
+        [
+          {
+            "node": "Tổng hợp kết quả từng stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tổng hợp kết quả từng stage": {
+      "main": [
+        [
+          {
+            "node": "summary · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "summary · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "summary · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "summary · complete": {
+      "main": [
+        [
+          {
+            "node": "Tạo báo cáo nghiên cứu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tạo báo cáo nghiên cứu": {
+      "main": [
+        [
+          {
+            "node": "report · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "report · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "report · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "report · complete": {
+      "main": [
+        [
+          {
+            "node": "Thu thập citation · BibTeX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Thu thập citation · BibTeX": {
+      "main": [
+        [
+          {
+            "node": "citations · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "citations · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "citations · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "citations · complete": {
+      "main": [
+        [
+          {
+            "node": "Tổng hợp figures",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tổng hợp figures": {
+      "main": [
+        [
+          {
+            "node": "plots · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "plots · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "plots · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "plots · complete": {
+      "main": [
+        [
+          {
+            "node": "VLM · Đánh giá hình trước viết bài",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VLM · Đánh giá hình trước viết bài": {
+      "main": [
+        [
+          {
+            "node": "vision_plots · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "vision_plots · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "vision_plots · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "vision_plots · complete": {
+      "main": [
+        [
+          {
+            "node": "Viết bài · Compile PDF · Reflection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Viết bài · Compile PDF · Reflection": {
+      "main": [
+        [
+          {
+            "node": "writeup · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "writeup · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "writeup · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "writeup · complete": {
+      "main": [
+        [
+          {
+            "node": "VLM · Hình và PDF cuối",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VLM · Hình và PDF cuối": {
+      "main": [
+        [
+          {
+            "node": "vision_paper · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "vision_paper · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "vision_paper · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "vision_paper · complete": {
+      "main": [
+        [
+          {
+            "node": "Review khoa học",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review khoa học": {
+      "main": [
+        [
+          {
+            "node": "review · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "review · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "review · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "review · complete": {
+      "main": [
+        [
+          {
+            "node": "Thu kết quả · Đóng vòng nghiên cứu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Thu kết quả · Đóng vòng nghiên cứu": {
       "main": [
         [
           {
@@ -915,7 +2689,7 @@
       "main": [
         [
           {
-            "node": "Ideathon + literature and novelty",
+            "node": "Sinh ứng viên · Lưu archive",
             "type": "main",
             "index": 0
           }
@@ -934,11 +2708,17 @@
       "id": "stage-ideation",
       "name": "01 · Ideathon / Novelty",
       "nodeIds": [
-        "Ideathon_+_literature_and_novelty",
+        "Sinh_ứng_viên_·_Lưu_archive",
         "ideation_·_chờ_webhook",
-        "ideation_·_complete"
+        "ideation_·_complete",
+        "Literature_·_Novelty_từng_ứng_viên",
+        "literature_·_chờ_webhook",
+        "literature_·_complete",
+        "Chọn_idea_từ_archive",
+        "idea_selection_·_chờ_webhook",
+        "idea_selection_·_complete"
       ],
-      "description": "Tạo idea, tìm tài liệu và phản biện độ mới."
+      "description": "Sinh nhiều ứng viên, lưu archive, kiểm tra novelty và chọn một idea."
     },
     {
       "id": "stage-proposal",
@@ -955,40 +2735,87 @@
         "Bạn_nhắn_lại?",
         "Proposal_đã_chốt"
       ],
-      "description": "Lập và duyệt proposal từ mục tiêu, context và phạm vi đã lưu."
+      "description": "Lập proposal, làm rõ yêu cầu và duyệt ứng viên hiện tại."
     },
     {
       "id": "stage-run_approval",
       "name": "03 · Cấu hình run",
       "nodeIds": [
-        "Configured_run_approval",
+        "Cấu_hình_và_duyệt_run",
         "run_approval_·_chờ_webhook",
         "run_approval_·_complete"
       ],
-      "description": "Cấu hình và duyệt bắt đầu run theo Hybrid / Full agent."
+      "description": "Duyệt đúng run, tài nguyên và phạm vi đã lưu."
     },
     {
       "id": "stage-execution",
-      "name": "04 · Thực thi",
+      "name": "04 · Thực thi thí nghiệm",
       "nodeIds": [
-        "Start_approved_Kaggle_run",
+        "Mở_phiên_Kaggle_đã_duyệt",
         "execution_·_chờ_webhook",
-        "execution_·_complete"
+        "execution_·_complete",
+        "Experiment_manager_bật?",
+        "Draft_·_Các_baseline_song_song",
+        "draft_·_chờ_webhook",
+        "draft_·_complete",
+        "Tuning_·_Các_cấu_hình_song_song",
+        "tuning_·_chờ_webhook",
+        "tuning_·_complete",
+        "Research_·_Cải_tiến_và_mở_rộng",
+        "research_·_chờ_webhook",
+        "research_·_complete",
+        "Ablation_·_So_sánh_thành_phần",
+        "ablation_·_chờ_webhook",
+        "ablation_·_complete",
+        "Chạy_một_thí_nghiệm",
+        "single_execution_·_chờ_webhook",
+        "single_execution_·_complete",
+        "Chọn_kết_quả_·_Lưu_cây_thí_nghiệm",
+        "tree_export_·_chờ_webhook",
+        "tree_export_·_complete",
+        "Tổng_hợp_đánh_giá_nhiều_seed",
+        "multi_seed_·_chờ_webhook",
+        "multi_seed_·_complete",
+        "Thí_nghiệm_đã_hoàn_tất"
       ],
-      "description": "Bắt đầu run Kaggle với preset và budget đã lưu."
+      "description": "Các nhánh song song có shell và thư mục riêng. Mở rộng nằm trong budget và dữ liệu đã duyệt."
     },
     {
       "id": "stage-collect",
-      "name": "05 · Kết quả / Lặp",
+      "name": "05 · Kết quả / Viết bài / Lặp",
       "nodeIds": [
-        "Observe_run_and_collect_result",
+        "Tổng_hợp_kết_quả_từng_stage",
+        "summary_·_chờ_webhook",
+        "summary_·_complete",
+        "Tạo_báo_cáo_nghiên_cứu",
+        "report_·_chờ_webhook",
+        "report_·_complete",
+        "Thu_thập_citation_·_BibTeX",
+        "citations_·_chờ_webhook",
+        "citations_·_complete",
+        "Tổng_hợp_figures",
+        "plots_·_chờ_webhook",
+        "plots_·_complete",
+        "VLM_·_Đánh_giá_hình_trước_viết_bài",
+        "vision_plots_·_chờ_webhook",
+        "vision_plots_·_complete",
+        "Viết_bài_·_Compile_PDF_·_Reflection",
+        "writeup_·_chờ_webhook",
+        "writeup_·_complete",
+        "VLM_·_Hình_và_PDF_cuối",
+        "vision_paper_·_chờ_webhook",
+        "vision_paper_·_complete",
+        "Review_khoa_học",
+        "review_·_chờ_webhook",
+        "review_·_complete",
+        "Thu_kết_quả_·_Đóng_vòng_nghiên_cứu",
         "collect_·_chờ_webhook",
         "collect_·_complete",
         "Another_approved_iteration?",
         "Continue_research",
         "Project_workflow_complete"
       ],
-      "description": "Thu kết quả, hoàn tất hoặc chuyển sang vòng tiếp theo."
+      "description": "Summary, report, citation, figures, VLM, PDF và review dùng cấu hình đã chọn trong Workbench."
     }
   ]
 }

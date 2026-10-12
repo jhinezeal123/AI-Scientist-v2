@@ -31,7 +31,7 @@ async def test_completion_before_wait_is_ready_retries_notification_only(reposit
         deliveries.append((url, result))
         if len(deliveries) == 1:
             raise HTTPError(url, 404, 'Wait not ready', {}, None)
-    monkeypatch.setattr(owner.steps, 'prepare_idea', instant)
+    monkeypatch.setattr('ai_scientist.workbench.n8n_workflows.generate_candidates', instant)
     monkeypatch.setattr(owner.client, 'resume', resume)
     await owner.step(project, identity, 1, 0, 'ideation', '101', URL)
     await wait_for(lambda: owner.store.get(project, identity)['state']['step_jobs']['0:ideation'].get('callback', {}).get('delivery') == 'DELIVERED')
@@ -53,7 +53,7 @@ async def test_delivery_failure_is_visible_and_retry_never_repeats_operation(rep
         operations.append(runtime.workflow)
     def unavailable(*_):
         raise OSError('n8n unavailable')
-    monkeypatch.setattr(owner.steps, 'prepare_idea', instant)
+    monkeypatch.setattr('ai_scientist.workbench.n8n_workflows.generate_candidates', instant)
     monkeypatch.setattr(owner.client, 'resume', unavailable)
     await owner.step(project, identity, 1, 0, 'ideation', '101', URL)
     await wait_for(lambda: owner.view(project, identity)['n8n']['callback_failed'])
@@ -72,7 +72,7 @@ async def test_backend_recovery_and_pause_notify_failure_without_advancing(repos
     async def holding(runtime):
         import asyncio
         await asyncio.Event().wait()
-    monkeypatch.setattr(owner.steps, 'prepare_idea', holding)
+    monkeypatch.setattr('ai_scientist.workbench.n8n_workflows.generate_candidates', holding)
     monkeypatch.setattr(owner.client, 'resume', lambda url, result: received.append(result))
     await owner.step(project, identity, 1, 0, 'ideation', '101', URL)
     if stop == 'pause':
@@ -92,7 +92,7 @@ async def test_completed_job_registration_and_persisted_delivery_recovery(reposi
     received = []
     async def instant(runtime):
         pass
-    monkeypatch.setattr(owner.steps, 'prepare_idea', instant)
+    monkeypatch.setattr('ai_scientist.workbench.n8n_workflows.generate_candidates', instant)
     await owner.step(project, identity, 1, 0, 'ideation')
     await wait_for(lambda: owner.store.get(project, identity)['state']['step_jobs']['0:ideation']['status'] == 'DONE')
     def unavailable(*_):

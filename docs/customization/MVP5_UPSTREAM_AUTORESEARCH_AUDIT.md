@@ -15,11 +15,15 @@ Project Workflow đã có Hybrid/Full agent, actor/preset riêng, giới hạn v
 lưu Semantic Scholar API key một lần. Bằng chứng và trạng thái được lưu cùng
 project/run. Chi tiết sử dụng ở `n8n/README.md`.
 
-Các nhận xét "bản hiện tại" ở phần đối chiếu bên dưới là snapshot **trước**
-thay đổi này. Canvas n8n vẫn điều phối operations và vòng provider/action;
-thuật toán tìm kiếm/thí nghiệm và các vòng khoa học vẫn là domain operations
-Python, chưa được chuyển thành từng node riêng trên canvas. Semantic Scholar
-công khai đang trả 429 trong lần thử thật; cần API key hoặc chờ dịch vụ.
+Cập nhật 13/10/2026: đã thêm generation/archive/selection theo project;
+experiment manager có cấu hình worker và scaling trên UI; từng main stage và
+bước hậu xử lý có operation/webhook riêng trên n8n. Các nhánh song song dùng
+cùng notebook với thư mục, shell và RuntimeWorker riêng. Summary, plots, citation,
+VLM, PDF và review đã có trên Workbench; không phải các cấu hình còn thiếu.
+
+Các phần đối chiếu bên dưới giữ lại snapshot lịch sử trước những thay đổi này.
+Thuật toán lựa chọn node/substage, thực thi và xác minh bằng chứng vẫn là domain
+operations Python; n8n điều phối thời điểm bắt đầu và hoàn tất từng phase.
 
 ## 1. Kết luận về bản hiện tại
 

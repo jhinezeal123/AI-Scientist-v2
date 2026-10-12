@@ -14,6 +14,9 @@ class StageBinding(StrictModel):
     model: str | None = Field(default=None, max_length=256)
     ask: bool = False
 
+class IdeationOptions(StrictModel):
+    candidates: int = Field(default=1, ge=1, le=20)
+
 class WorkflowSpec(StrictModel):
     goal: str = Field(min_length=1, max_length=10000)
     mode: Literal['training_research', 'etc'] = 'training_research'
@@ -32,6 +35,7 @@ class WorkflowSpec(StrictModel):
     account: str = Field(min_length=1, max_length=128)
     research: ResearchPlan = Field(default_factory=ResearchPlan)
     search: SearchOptions = Field(default_factory=SearchOptions)
+    ideation: IdeationOptions = Field(default_factory=IdeationOptions)
 
     @model_validator(mode='before')
     @classmethod

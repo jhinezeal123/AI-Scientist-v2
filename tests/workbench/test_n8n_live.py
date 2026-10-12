@@ -104,7 +104,7 @@ def test_actual_n8n_canvas_human_gates_and_remote_action_loop(repository, monkey
                         pending=until(lambda:next((v for v in owner.store.inputs(project,identity)
                             if v['stage']=='approval' and v['state']=='PENDING' and v['prompt'].get('proposal_round')==round+1),None))
                         assert pending['prompt']['approval_allowed'] and owner.working.admissions==0
-                api(base+'/inputs/'+pending['id'], {'result': {'title': 'Checksum', 'text': 'Verify checksum'}
+                api(base+'/inputs/'+pending['id'], {'result': {'title': 'Checksum', 'text': f'Verify checksum iteration {iteration}'}
                     if stage == 'ideation' else {'approve': True, 'reason': 'Reviewed exact candidate'}})
         until(lambda: owner.store.get(project, identity)['state']['status'] == 'DONE')
         assert gates == ['ideation', 'approval', 'run_approval']*2
@@ -206,3 +206,80 @@ def test_actual_n8n_canvas_human_gates_and_remote_action_loop(repository, monkey
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+def test_actual_n8n_controls_real_manager_phases_and_parallel_branch_completion(repository, monkeypatch):
+    import uuid
+    from test_working import fixture, Terminal
+    from test_stage_search import SearchRuntime
+    from ai_scientist.workbench.n8n_workflows import N8nResearchWorkflows
+    from ai_scientist.workbench.workflow_models import WorkflowSpec, STAGES
+    from ai_scientist.workbench.models import SearchOptions
+    root=Path(os.environ['N8N_QA_ROOT'])
+    runtime=SearchRuntime()
+    runtime.search_options=SearchOptions(num_workers=2,num_drafts=2,stage_iterations=[2,2,2,2],debug_prob=0,scale_experiments=True)
+    runtime.spec=SimpleNamespace(execution_seconds=300)
+    store,project,original,worker,planner,working,_,bootstrap,donor=fixture(repository,runtime=runtime)
+    planner.bindings.request_type=RuntimeRequest
+    working.config.codex_model='gpt-fixture'
+    approved=store.approved_snapshot(project,original)
+    idea=store.save_idea(project,'Actual n8n controls four manager stages and finishing phases',research={'summary':True,'report':True})
+    context=store.context_snapshot(project,idea['id'],[r['id'] for r in approved['snapshot']['resources']])
+    proposal=store.save_proposal(project,idea['id'],{**approved['body'],'budget':{'execution_seconds':300,'output_bytes':1000000},'research':{'summary':True,'report':True}},context)
+    run=asyncio.run(planner.approve(project,proposal,1,context['context_sha256']))['id']
+    transport=N8nClient(repository,base_url='http://127.0.0.1:5680');transport.token=(root/'bridge-token.txt').read_text().strip()
+    # The preapproved fixture isolates execution orchestration from provider setup.
+    owner=N8nResearchWorkflows(planner,working,SimpleNamespace(),client=transport)
+    owner.preflight=lambda *_:None
+    spec=WorkflowSpec(goal='Measure fixture stages',benchmark_id='fixture-benchmark',account='fixture-account',
+        execution_seconds=300,ttl_seconds=1800,output_bytes=1000000,require_run_approval=False,
+        resource_ids=[r['id'] for r in approved['snapshot']['resources']],
+        stages={stage:{'actor':'agent','harness':'codex','model':'gpt-fixture'} for stage in STAGES},
+        allow_agent_approval=True,search=runtime.search_options,research={'summary':True,'report':True})
+    identity=uuid.uuid4().hex
+    from ai_scientist.workbench.store import digest, canonical
+    owner.store.create(project,project,identity,spec,
+        {resource['id']:digest(canonical(resource)) for resource in store.resources(project) if resource['id'] in spec.resource_ids})
+    owner.store.change(project,identity,lambda state:state.update(status='RUNNING',generation=1,
+        idea_id=idea['id'],proposal_id=proposal,run_id=run,
+        approvals=[{'proposal_id':proposal,'version':1,'context_sha256':context['context_sha256'],'actor':'agent'}]))
+    runtime.run_phases=owner.run_phases.bind(StageRuntime(owner,project,identity),run)
+    branches=[]
+    def open_branch(session,branch,output):
+        term=Terminal(output);branches.append(term);return term
+    donor.open_branch=open_branch
+    @asynccontextmanager
+    async def lifespan(_):
+        yield
+        await owner.close();await working.close(2);await planner.close();await worker.close(2)
+    app=FastAPI(lifespan=lifespan);app.state.research_workflows=owner
+    app.include_router(create_n8n_router())
+    server=uvicorn.Server(uvicorn.Config(app,host='127.0.0.1',port=8001,log_level='error'))
+    thread=threading.Thread(target=server.run,daemon=True);thread.start()
+    def until(operation,seconds=180):
+        end=time.monotonic()+seconds
+        while time.monotonic()<end:
+            result=operation()
+            if result:return result
+            time.sleep(.1)
+        raise AssertionError(owner.store.get(project,identity)['state'])
+    try:
+        until(lambda:server.started,10)
+        transport.dispatch('research',{'project_id':project,'workflow_id':identity,'generation':1,'iteration':0})
+        until(lambda:owner.store.get(project,identity)['state']['status']=='DONE')
+        state=owner.store.get(project,identity)['state']
+        for phase in ('draft','tuning','research','ablation','tree_export','summary','report'):
+            job=state['step_jobs']['0:'+phase]
+            assert job['status']=='DONE' and not job['view']['skipped']
+            assert any(event['kind']=='run_phase_completed' and event['stage']==phase for event in state['events'])
+        assert '0:single_execution' not in state['step_jobs']
+        assert len(branches)==8 and all(term.closed for term in branches)
+        assert len(bootstrap.calls)==len(donor.opens)==1
+        assert working.detail(project,run)['state']=='COMPLETED'
+        execution=state['n8n_execution_id']
+        def finished():
+            with sqlite3.connect(root/'profile/.n8n/database.sqlite') as con:
+                return con.execute('select status from execution_entity where id=?',(execution,)).fetchone()==('success',)
+        until(finished,20)
+    finally:
+        server.should_exit=True;thread.join(timeout=15)

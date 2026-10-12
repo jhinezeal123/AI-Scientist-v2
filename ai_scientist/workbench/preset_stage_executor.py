@@ -42,8 +42,8 @@ class PresetStageExecutor:
         self.owner.store.change(runtime.project, runtime.workflow,
             lambda s: s.setdefault('invocations', {}).__setitem__(invocation, {'status': 'RUNNING', 'stage': stage, 'request_id': request_id}))
         from _ai_scientist_agent_management.models import AgentSpec
-        agent = AgentSpec(id=stage, harness=binding.harness, model=binding.model)
-        workspace = self.owner.projects.directory(runtime.project) / 'agents/worktrees' / ('w' + runtime.workflow) / stage
+        agent = AgentSpec(id=stage+'-'+str(call), harness=binding.harness, model=binding.model)
+        workspace = self.owner.projects.directory(runtime.project) / 'agents/worktrees' / ('w' + runtime.workflow) / stage / ('call-'+str(call))
         if any(p.is_symlink() or getattr(p, 'is_junction', lambda: False)() for p in (workspace, *workspace.parents)
                if p.is_relative_to(self.owner.projects.directory(runtime.project))):
             raise ValueError('Refusing redirected agent workspace')
