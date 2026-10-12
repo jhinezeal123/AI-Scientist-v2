@@ -1,32 +1,16 @@
 import {useEffect,useState} from 'react';
 import AgentAccess from './AgentAccess';
+import WorkflowHumanStep from './WorkflowHumanStep';
 import ExperimentSettings from './ExperimentSettings';
 import IdeaArchive from './IdeaArchive';
 import {agentCall} from './agentApi';
 import {listPresets,Preset} from './agentPresets';
-import {defaults,Flow,HumanInput,stages,WorkflowSpec,WorkflowOptions,workflowBase,saveWorkflow} from './projectWorkflows';
+import {defaults,Flow,stages,WorkflowSpec,WorkflowOptions,workflowBase,saveWorkflow} from './projectWorkflows';
 
 const statusNames:Record<string,string>={PAUSED:'Đã dừng',RUNNING:'Đang chạy',WAITING:'Chờ bạn',DONE:'Hoàn tất',UNKNOWN:'Cần đối soát',ARCHIVED:'Lịch sử Team cũ'};
 const eventNames:Record<string,string>={proposal_clarification_required:'Proposal cần làm rõ · Duyệt bị khóa',user_requested_proposal_revision:'Bạn nhắn lại · Lập lại proposal',idea_candidate_generated:'Đã lưu ứng viên',idea_candidate_assessed:'Đã đánh giá ứng viên',idea_candidate_selected:'Đã chọn idea',run_phase_started:'Đang thực hiện',run_phase_completed:'Đã hoàn tất',run_phase_failed:'Không hoàn tất'};
 const phaseNames:Record<string,string>=Object.fromEntries([...stages,['idea_selection','Chọn idea'],['single_execution','Thí nghiệm đơn'],['tree_export','Chọn kết quả và lưu cây'],['multi_seed','Thống kê nhiều seed'],['vision_plots','VLM trước viết bài'],['vision_paper','VLM hình và PDF cuối']]);
 
-function HumanStep({input,disabled,answer}:{input:HumanInput;disabled:boolean;answer:(result:unknown)=>void}){
-  const [title,setTitle]=useState(''),[text,setText]=useState(''),[reason,setReason]=useState(''),[json,setJson]=useState('{}');
-  const [messageId]=useState(()=>crypto.randomUUID().replaceAll('-',''));
-  const proposal=input.prompt.kind==='proposal';
-  const candidate=input.prompt.candidate as {version?:number;body?:{paraphrase?:string;objective?:string;implementation_steps?:string[]}}|undefined;
-  const review=input.prompt.kind==='review'||input.stage==='approval';
-  return <article className="workflow-human"><span className="eyebrow">CHỜ BẠN</span><h3>{proposal?'Thiết kế proposal':input.stage==='run_approval'?'Duyệt bắt đầu run':stages.find(([s])=>s===input.stage)?.[1]||input.stage}</h3>
-    {proposal?<><p>Proposal v{candidate?.version} · {candidate?.body?.paraphrase}</p>{candidate?.body?.objective&&<p>{candidate.body.objective}</p>}
-      {input.prompt.questions?.length? <><p className="alert">Agent cần bạn làm rõ trước khi duyệt.</p><ul>{input.prompt.questions.map((question,i)=><li key={i}>{question}</li>)}</ul></>:null}
-      <details><summary>Xem proposal đầy đủ</summary><pre>{JSON.stringify(candidate?.body,null,2)}</pre></details>
-      <label>Nhắn lại cho agent<textarea rows={3} value={text} onChange={e=>setText(e.target.value)} placeholder="Làm rõ yêu cầu hoặc yêu cầu chỉnh proposal…"/></label>
-      <button disabled={disabled||!text.trim()} onClick={()=>answer({message:text.trim(),request_id:messageId})}>Gửi và lập lại proposal</button>
-      <p className="muted">Gửi tin nhắn sẽ thay thế proposal hiện tại. Chỉ proposal mới đủ rõ mới có thể được duyệt.</p>
-      <div className="actions"><button className="primary" disabled={disabled||!input.prompt.approval_allowed||!!text.trim()} onClick={()=>answer({approve:true,reason:'Operator approved this exact candidate'})}>Duyệt proposal và tiếp tục</button><button disabled={disabled||!input.prompt.approval_allowed} onClick={()=>answer({approve:false,reason:'Operator rejected this candidate'})}>Từ chối</button></div>
-    </>:review?<><details open><summary>Xem nội dung cần duyệt</summary><pre>{JSON.stringify(input.prompt.candidate||input.prompt.prompt,null,2)}</pre></details><label>Ghi chú<input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Có thể để trống"/></label><div className="actions"><button className="primary" disabled={disabled} onClick={()=>answer({approve:true,reason:reason.trim()||'Operator approved this exact candidate'})}>Duyệt và tiếp tục</button><button disabled={disabled} onClick={()=>answer({approve:false,reason:reason.trim()||'Operator rejected this candidate'})}>Từ chối</button></div></>:input.stage==='ideation'?<><label>Tên idea<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>Giả thuyết và mục tiêu<textarea rows={4} value={text} onChange={e=>setText(e.target.value)}/></label><button className="primary" disabled={disabled||!title.trim()||!text.trim()} onClick={()=>answer({title,text})}>Gửi idea</button></>:<><details><summary>Yêu cầu</summary><pre>{JSON.stringify(input.prompt,null,2)}</pre></details><label>Kết quả<textarea rows={5} value={json} onChange={e=>setJson(e.target.value)}/></label><button disabled={disabled} onClick={()=>answer(JSON.parse(json))}>Gửi và tiếp tục</button></>}
-  </article>;
-}
 
 function Workflow({projectId,canResearch,canAdmin}:{projectId:string;canResearch:boolean;canAdmin:boolean}){
   const [options,setOptions]=useState<WorkflowOptions|null>(null),[presets,setPresets]=useState<Preset[]>([]),[spec,setSpec]=useState<WorkflowSpec>(()=>defaults());
@@ -70,7 +54,7 @@ function Workflow({projectId,canResearch,canAdmin}:{projectId:string;canResearch
       <p>Bước hiện tại: {flow.state.stage==='run_approval'?'Duyệt run':stages.find(([s])=>s===flow.state.stage)?.[1]||flow.state.stage}</p>{n8n?.execution_url&&<a href={n8n.execution_url} target="_blank" rel="noreferrer">Theo dõi lần chạy trong n8n ↗</a>}
       {flow.n8n?.callback_failed&&<div className="alert error"><p>Tác vụ đã dừng hoặc có kết quả, nhưng chưa gửi được thông báo cho n8n.</p>{canResearch&&<button disabled={busy||!n8n?.ready} onClick={()=>void action(async()=>setFlow(await agentCall<Flow>(base+'/'+flow.id+'/callbacks/retry','POST')))}>Gửi lại thông báo cho n8n</button>}</div>}
       {flow.state.error&&<p className="alert error">{flow.state.error}</p>}{canResearch&&flow.state.status==='UNKNOWN'&&<button disabled={busy} onClick={()=>void action(async()=>setFlow(await agentCall<Flow>(base+'/'+flow.id+'/reconcile','POST')))}>Đối soát trước khi tiếp tục</button>}
-      {flow.inputs?.filter(i=>i.state==='PENDING').map(input=><HumanStep key={input.id} input={input} disabled={busy||!canResearch||flow.state.status!=='WAITING'} answer={result=>void action(async()=>setFlow(await agentCall<Flow>(base+'/'+flow.id+'/inputs/'+input.id,'POST',{result})))}/>)}
+      {flow.inputs?.filter(i=>i.state==='PENDING').map(input=><WorkflowHumanStep key={input.id} input={input} disabled={busy||!canResearch||flow.state.status!=='WAITING'} answer={result=>void action(async()=>setFlow(await agentCall<Flow>(base+'/'+flow.id+'/inputs/'+input.id,'POST',{result})))}/>)}
       <div className="actions">{[...flow.state.runs,...(flow.state.run_id?[flow.state.run_id]:[])].map(run=><a key={run} href={`/?project=${projectId}&run=${run}`}>Mở run {run.slice(0,8)} ↗</a>)}</div>
       <details><summary>Preset đã lưu và hoạt động</summary>{Object.entries(flow.spec.stages).filter(([,b])=>b.actor==='agent').map(([s,b])=><p key={s}>{stages.find(([id])=>id===s)?.[1]} · {b.harness} · {b.model||'Mặc định'}</p>)}{flow.state.events.slice(-20).reverse().map((event,i)=><p key={i}>{new Date(event.at).toLocaleTimeString()} · {phaseNames[event.stage]||event.stage} · {eventNames[event.kind]||event.kind}{event.execution_id&&<> · <a target="_blank" rel="noreferrer" href={`http://127.0.0.1:5678/workflow/workbenchAgent/executions/${event.execution_id}`}>n8n ↗</a></>}</p>)}</details>
     </>}
