@@ -23,13 +23,26 @@ def sandbox_command(executable, workspace, policy, repository, argv, protected=(
         raise ValueError('Terminal requires an installed Codex OS sandbox; no unrestricted fallback')
     filesystem = {':root':'read',str(workspace.resolve()):'read'}
     # Provider stores and research data never enter the command's readable scope.
-    private = [repository / '.workbench/projects',
+    from .project_storage import data_root
+    root = data_root(repository, workspace)
+    projects = repository / '.workbench/projects'
+    private = [
         Path.home()/'.dsh', Path.home()/'.claude', Path.home()/'.claude.json',
         Path.home()/'.codex/auth.json', Path.home()/'.codex/config.toml', Path.home()/'.codex/sessions',
         repository/'kaggle mcp/profiles', *map(Path,protected)]
     providers=repository/'.workbench/agents/providers'
-    runtimes=repository/'.workbench/agents/runtimes'
+    runtimes=root/'runtimes'
     private.append(providers)
+    if root == repository / '.workbench/agents':
+        private.append(projects)
+    elif projects.exists():
+        for project in projects.iterdir():
+            if project != root.parent:
+                private.append(project)
+            else:
+                private.extend(p for p in project.iterdir() if p != root)
+                private.extend(p for p in root.iterdir() if p.name not in {'worktrees', 'runtimes'})
+        private.extend([repository/'.workbench/agents/worktrees', repository/'.workbench/agents/runtimes'])
     if provider_home:
         home=Path(provider_home).resolve(strict=True)
         if home.parent!=runtimes.resolve():
@@ -42,7 +55,7 @@ def sandbox_command(executable, workspace, policy, repository, argv, protected=(
     for entry in workspace.iterdir():
         if entry.name.startswith('.') or entry.name.lower() in {'profiles','credentials.json','kaggle.json','cookies.json','secrets'}:
             private.append(entry)
-    worktree_root=repository/'.workbench/agents/worktrees'
+    worktree_root=root/'worktrees'
     if worktree_root.exists():
         for rig_path in worktree_root.iterdir():
             if workspace.parent!=rig_path:
@@ -76,7 +89,7 @@ def execute(control, rig_id, seat_id, argv, *, request_id, timeout=30, protected
         finally:
             workspace=control.workspaces.path(rig_id,seat_id)
             key=hashlib.sha256(json.dumps([rig_id,seat_id,request_id]).encode()).hexdigest()
-            home=control.workspaces.repository/'.workbench/agents/runtimes'/('terminal-'+key)
+            home=control.workspaces.root.parent/'runtimes'/('terminal-'+key)
             if workspace.exists() and home.exists():
                 protect_scope(control.workspaces.repository,[workspace,home])
 
@@ -100,7 +113,7 @@ def _execute(control, rig_id, seat_id, argv, *, request_id, timeout=30, protecte
         # Windows. A tiny Python shim enters the real seat cwd after OS startup;
         # it does not grant that code directory any additional write permission.
         key=hashlib.sha256(json.dumps([rig_id,seat_id,request_id]).encode()).hexdigest()
-        runtime_home=control.workspaces.repository/'.workbench/agents/runtimes'/('terminal-'+key)
+        runtime_home=control.workspaces.root.parent/'runtimes'/('terminal-'+key)
         if any(p.is_symlink() or getattr(p,'is_junction',lambda:False)() for p in (runtime_home,*runtime_home.parents) if p.is_relative_to(control.workspaces.repository)):
             raise ValueError('Refusing linked terminal runtime storage')
         runtime_home.mkdir(parents=True,exist_ok=True)

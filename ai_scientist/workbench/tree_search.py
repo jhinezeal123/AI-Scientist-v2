@@ -150,12 +150,16 @@ class TreeSearchRun:
         if time.monotonic() >= self.deadline:
             raise SearchInterrupted('Working search deadline reached')
 
-    def call_agent(self, role, prompt, workdir):
+    def call_agent(self, role, prompt, workdir, images=()):
         self.check_running()
         request = self.service.planner.bindings.request_type(self.key[1], role, prompt, workdir,
             timeout_seconds=max(1, int(self.deadline - time.monotonic())), max_output_bytes=3_000_000)
         if is_dataclass(request) and 'stage' in request.__dataclass_fields__:
             request = replace(request, stage=getattr(self, 'agent_stage', None))
+        if images:
+            if not is_dataclass(request) or 'images' not in request.__dataclass_fields__:
+                raise ValueError('Configured research runtime cannot receive images')
+            request = replace(request, images=tuple(images))
         result, payload = asyncio.run_coroutine_threadsafe(self.service.run_worker(self.key).run(request), self.loop).result()
         usage = getattr(result, 'usage', {}) or {}
         measured = all(type(usage.get(key)) is int and usage[key] >= 0 for key in ('input_tokens', 'output_tokens'))
@@ -172,10 +176,15 @@ class TreeSearchRun:
 
     def query(self, *, system_message, user_message, func_spec=None, **kwargs):
         self.check_running()
+        from .research_images import detach_images, validate_images
+        user_message, inline = detach_images(user_message, self.root / 'research/image-input')
+        images = validate_images((*kwargs.get('image_paths', ()), *inline))
         spec = (asdict(func_spec) if isinstance(func_spec, FunctionSpec) else func_spec) if func_spec else None
         data = {'approved': {**self.approved, 'snapshot': self.service.store.library(self.key[0]).agent_snapshot(self.approved['snapshot'])},
                 'system_message': system_message, 'user_message': user_message, 'function': spec,
-                'search_evidence': self.stage_results}
+                'search_evidence': self.stage_results, 'stage':getattr(self,'agent_stage',None)}
+        if images:
+            data['image_attachments'] = [{'name':p.name, 'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in images]
         if self.research_context:
             data['research_evidence'] = self.research_context
         if spec and spec['name'] == 'select_best_implementation':
@@ -186,7 +195,7 @@ class TreeSearchRun:
         if digest in self.cache:
             return self.cache[digest]
         write_json(self.querydir / 'query-request.json', data)
-        payload = self.call_agent('mvp1_search_query', load_prompt('search.query', workdir=self.querydir), self.querydir)
+        payload = self.call_agent('mvp1_search_query', load_prompt('search.query', workdir=self.querydir), self.querydir, images)
         response = json.loads(payload.response) if spec else payload.response
         if spec:
             jsonschema.validate(response, spec['json_schema'])
@@ -266,6 +275,12 @@ class TreeSearchRun:
         node.vlm_feedback_summary = [payload.summary, *payload.limitations]
         node.datasets_successfully_tested = payload.datasets_tested
         node.metric = self.verified_metric(payload.metric, node_root, names)
+        if self.pipeline and self.pipeline.plan.vlm:
+            from .research_evidence import analyze_plots
+            images = [node_root/item['path'] for item in manifest['files']
+                      if item['path'].lower().endswith(('.png','.jpg','.jpeg','.webp'))]
+            self.service.records.append_log(*self.key,f'VLM: đang xem hình node {node.id}…\n','backend')
+            analyze_plots(self,node,images)
         if evaluation_seed is not None:
             if payload.metric is None:
                 raise ValueError('Seed evaluation requires a verified metric')

@@ -277,7 +277,13 @@ def get_response_from_llm(
     if msg_history is None:
         msg_history = []
 
-    if "claude" in model:
+    if getattr(client, 'workbench_research', False):
+        new_msg_history = msg_history + [{'role':'user','content':msg}]
+        response = client.chat.completions.create(model=model,
+            messages=[{'role':'system','content':system_message},*new_msg_history])
+        content = response.choices[0].message.content
+        new_msg_history += [{'role':'assistant','content':content}]
+    elif "claude" in model:
         new_msg_history = msg_history + [
             {
                 "role": "user",

@@ -20,6 +20,15 @@ def project_files(root, directory):
 
 
 def remove_project_files(directory):
+    worktrees = directory/'agents/worktrees'
+    if worktrees.exists():
+        from .runtime import _agent_gateway_class
+        import importlib
+        gateway = _agent_gateway_class()
+        Workspaces = importlib.import_module(gateway.__module__.rsplit('.',1)[0]+'.workspaces').Workspaces
+        manager = Workspaces(directory.parents[2], data_root=directory/'agents')
+        for gitfile in worktrees.glob('*/*/.git'):
+            manager.git(manager.repository, 'worktree', 'remove', '--force', str(gitfile.parent))
     # A locked artifact leaves project.sqlite available so the user can retry.
     database_files = {'project.sqlite', 'project.sqlite-wal', 'project.sqlite-shm'}
     for child in directory.iterdir():

@@ -2,6 +2,7 @@ import {FormEvent, useEffect, useRef, useState} from 'react';
 import {api, ApiError, connectionFailure, Context, History, Idea, ideaTitle, Project, Resource, Proposal, Benchmark, RunMode, ResearchPlan, modeLabel} from './api';
 import ProposalPanel from './ProposalPanel';
 import RunPanel from './RunPanel';
+import ProjectWorkflow from './ProjectWorkflow';
 import IdeaCards from './IdeaCards';
 import FileImport from './FileImport';
 import SourceCards from './SourceCards';
@@ -20,7 +21,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState(initialPage.get('project') || lastProject());
   const [projectName, setProjectName] = useState('');
-  const [tab, setTab] = useState<ProjectSession['tab']>(()=>initialPage.get('view')==='library' ? 'Library'
+  const [tab, setTab] = useState<ProjectSession['tab']>(()=>['agents','workflow'].includes(initialPage.get('view')||'') ? 'Workflow' : initialPage.get('view')==='library' ? 'Library'
     : initialPage.has('run') || initialPage.get('view')==='run' ? 'Run' : readProjectSession(projectId).tab);
   const [resources, setResources] = useState<Resource[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
@@ -74,7 +75,8 @@ export default function App() {
   useEffect(() => {
     rememberProject(projectId);
     const saved=readProjectSession(projectId);
-    if (firstRestore.current && initialPage.get('view')==='library')saved.tab='Library';
+    if (firstRestore.current && ['agents','workflow'].includes(initialPage.get('view')||''))saved.tab='Workflow';
+    else if (firstRestore.current && initialPage.get('view')==='library')saved.tab='Library';
     else if (firstRestore.current && (initialPage.has('run') || initialPage.get('view')==='run')) {
       saved.tab='Run';saved.runId=initialPage.get('run') || '';
     }
@@ -95,7 +97,8 @@ export default function App() {
     else url.searchParams.delete('project');
     if (projectId && tab==='Run' && runId)url.searchParams.set('run',runId);
     else url.searchParams.delete('run');
-    if (url.searchParams.get('view')==='library')url.searchParams.delete('view');
+    if (tab==='Workflow')url.searchParams.set('view','workflow');
+    else if (['library','agents','workflow'].includes(url.searchParams.get('view')||''))url.searchParams.delete('view');
     if (url.href!==window.location.href)window.history.replaceState(null,'',url);
   },[sessionProject,projectId,tab,ideaId,selected,runId,mode]);
 
@@ -265,11 +268,11 @@ export default function App() {
         <small>Ba loại idea dùng chung Library. Idea và run đã lưu giữ mode riêng.</small></div>}
       <form className="new-project" onSubmit={createProject}><label>Tên project mới<input value={projectName} required maxLength={120} onChange={e => setProjectName(e.target.value)}/></label>
         <button disabled={busy || unavailable || !projectName.trim()}>Tạo project</button></form>
-      <nav aria-label="Workbench">{(['Library', 'Idea', 'Run'] as const).map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
+      <nav aria-label="Workbench">{(['Library', 'Idea', 'Run', 'Workflow'] as const).map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</nav>
       <div className="rail-footer">Một project · nguồn riêng biệt<br/>Dữ liệu được lưu trên máy này.</div>
     </aside>
     <main>
-      <header><div><span className="eyebrow">{project?.name || 'BẮT ĐẦU'}</span><h1>{tab === 'Library' ? 'Nguồn cho project' : tab === 'Idea' ? 'Ý tưởng triển khai' : 'Theo dõi lần chạy'}</h1></div>
+      <header><div><span className="eyebrow">{project?.name || 'BẮT ĐẦU'}</span><h1>{tab === 'Library' ? 'Nguồn cho project' : tab === 'Idea' ? 'Ý tưởng triển khai' : tab === 'Workflow' ? 'Workflow nghiên cứu' : 'Theo dõi lần chạy'}</h1></div>
         {project && <span className="mono project-id">{project.id.slice(0,8)}</span>}</header>
       {error && <div role="alert" className="alert error">{error}<button aria-label="Đóng lỗi" onClick={() => setError('')}>×</button></div>}
       {notice && <div role="status" className="alert">{notice}</div>}
@@ -278,6 +281,7 @@ export default function App() {
         <button type="button" onClick={refresh}>Kết nối lại</button></div>}
       {!project ? <section className="panel welcome"><h2>Tạo project đầu tiên</h2><p>Lưu đề bài, nguồn dữ liệu và idea cùng một project. Bắt đầu bằng form bên trái.</p></section> : <>
         {loading && <p role="status" className="muted">Đang đọc project…</p>}
+        {tab === 'Workflow' && <ProjectWorkflow key={project.id} projectId={project.id}/>}
         {tab === 'Library' && <div className="columns">
           <section className="panel"><div className="panel-head"><h2>Library <span className="muted">{resources.length} nguồn</span></h2></div>
             <p className="muted">Nguồn được lưu thành file riêng theo phiên bản. Agent nhận đường dẫn và tự tìm, đọc phần cần thiết.</p>

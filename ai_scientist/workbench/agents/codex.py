@@ -39,6 +39,7 @@ class HeadlessCliRuntime:
 
     def run(self, request: RuntimeRequest, progress: Callable[[RuntimeProgress], None], cancelled: Callable[[], bool]) -> RuntimeResult:
         if cancelled(): raise RuntimeCancelled("Agent request cancelled before start")
+        if request.images: raise ValueError('Headless JSON runtime does not support VLM images; select a vision-capable preset')
         if not request.workdir.is_dir(): raise ValueError("Agent working directory does not exist")
         payload=json.dumps({"request_id":request.request_id,"role":request.role,"prompt":request.prompt,
                             "workdir":str(request.workdir)},ensure_ascii=False).encode()
@@ -208,6 +209,9 @@ class CodexCliRuntime:
                 # setting. Select the existing sandbox explicitly for tool use.
                 args.extend(['--config', 'windows.sandbox="elevated"'])
         if schema_path is not None:args.extend(["--output-schema",str(schema_path)])
+        from ai_scientist.workbench.research_images import validate_images
+        for path in validate_images(request.images):
+            args.extend(['--image',str(path.resolve())])
         args.append(prompt)
         options = {"start_new_session": os.name != "nt"}
         if os.name == "nt": options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -351,6 +355,7 @@ class ApiAgentRuntime:
     def run(self, request: RuntimeRequest, progress: Callable[[RuntimeProgress], None], cancelled: Callable[[], bool]) -> RuntimeResult:
         if cancelled(): raise RuntimeCancelled("Agent request cancelled before start")
         key=os.environ.get(self.api_key_env)
+        if request.images: raise ValueError('Configured JSON API does not support VLM images; select a vision-capable preset')
         if not key: raise RuntimeError("Configured agent API credential is unavailable")
         payload=json.dumps({"request_id":request.request_id,"role":request.role,"prompt":request.prompt}).encode()
         req=urllib.request.Request(self.endpoint,data=payload,headers={"Content-Type":"application/json","Authorization":f"Bearer {key}"})

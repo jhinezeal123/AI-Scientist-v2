@@ -14,7 +14,7 @@ def session_response(result, request):
     return response
 
 
-def create_auth_router():
+def create_auth_router(*, include_legacy_teams=False):
     router = APIRouter(prefix='/api/agent-management', tags=['Agent access'], route_class=ConflictRoute)
 
     @router.get('/identity')
@@ -40,11 +40,12 @@ def create_auth_router():
         response.delete_cookie(COOKIE, path='/api/agent-management')
         return response
 
-    @router.post('/teams/{rig_id}/seats/{seat_id}/credential')
-    def agent_credential(rig_id: str, seat_id: str, request: Request):
-        authenticate(request, 'admin', rig_id, human=True)
-        team_store = gateway(request).platform.store
-        result = DeviceAccess(control_store(request)).agent_token(rig_id, seat_id, team_store=team_store)
-        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+    if include_legacy_teams:
+        @router.post('/teams/{rig_id}/seats/{seat_id}/credential')
+        def agent_credential(rig_id: str, seat_id: str, request: Request):
+            authenticate(request, 'admin', rig_id, human=True)
+            team_store = gateway(request).team_platform(rig_id).store
+            result = DeviceAccess(control_store(request)).agent_token(rig_id, seat_id, team_store=team_store)
+            return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
     return router

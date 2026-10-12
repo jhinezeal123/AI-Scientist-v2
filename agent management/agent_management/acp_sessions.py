@@ -194,7 +194,8 @@ class AcpHarness:
         lifecycle = agent.get("sessionCapabilities", {})
         return Capabilities(plan=True, tool_approval=True,
                             resume=bool(agent.get("loadSession")) or isinstance(lifecycle.get("resume"), dict),
-                            list_sessions=isinstance(lifecycle.get("list"), dict))
+                            list_sessions=isinstance(lifecycle.get("list"), dict),
+                            images=bool(agent.get('promptCapabilities',{}).get('image')))
 
     def probe(self):
         try:
@@ -253,7 +254,7 @@ class AcpHarness:
     def open_channel(self, *args):
         return RpcChannel(*args)
 
-    def send(self, handle, message, *, request_id, timeout, emit, started):
+    def send(self, handle, message, *, request_id, timeout, emit, started, images=()):
         messages, order = {}, []
         legacy_chunks = []
         foreground = {"stop": None}
@@ -313,6 +314,8 @@ class AcpHarness:
                              handle.interrupted.is_set, handler, started, environment)
         try:
             initialized = self.initialize(channel)
+            if images and not self.capabilities.images:
+                raise ValueError('Agent ACP này không quảng cáo image prompt capability; chọn preset VLM khác')
             emit(json.dumps({"type": "capabilities", "protocol": self.spec.protocol_version,
                              "capabilities": asdict(self.capabilities)}) + "\n")
             if handle.provider_session:
@@ -353,8 +356,9 @@ class AcpHarness:
                         "configId": model_option["id"], "value": handle.seat.model})
             active["collect"] = True
             instruction = message + "\nReturn only JSON matching this schema:\n" + json.dumps(RESULT_SCHEMA)
+            from ai_scientist.workbench.research_images import image_blocks
             accepted = channel.rpc("session/prompt", {"sessionId": active["session"],
-                "prompt": [{"type": "text", "text": instruction}]})
+                "prompt": [{"type": "text", "text": instruction}, *image_blocks(images)]})
             if self.spec.protocol_version == 2:
                 if not isinstance(accepted.get("messageId"), str):
                     raise ValueError("ACP v2 prompt was not acknowledged with a messageId")

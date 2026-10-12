@@ -49,6 +49,11 @@ class ResearchPlan(StrictModel):
     plots: bool = False
     writeup: Literal['none', 'icbinb', 'normal'] = 'none'
     review: bool = False
+    literature: bool = False
+    literature_rounds: int = Field(default=5, ge=2, le=20)
+    citations: bool = False
+    citation_rounds: int = Field(default=20, ge=1, le=40)
+    vlm: bool = False
     seeds: list[int] = Field(default_factory=list)
     seed_stages: list[int] = Field(default_factory=lambda: [2, 3])
     reflections: int = Field(default=1, ge=0)

@@ -4,11 +4,14 @@ from pydantic import Field, model_validator
 from .models import StrictModel, ResearchPlan, SearchOptions
 
 STAGES = ('ideation', 'proposal', 'approval', 'execution', 'draft', 'tuning', 'research', 'ablation', 'analysis',
-          'summary', 'report', 'plots', 'writeup', 'review')
+          'summary', 'report', 'plots', 'writeup', 'review', 'literature', 'citations', 'vision')
 
 class StageBinding(StrictModel):
     actor: Literal['human', 'agent'] = 'agent'
-    seat: str = Field(min_length=1, max_length=64)
+    seat: str = Field(default='default', min_length=1, max_length=64)
+    preset_id: str | None = Field(default=None, max_length=64)
+    harness: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=256)
     ask: bool = False
 
 class WorkflowSpec(StrictModel):
@@ -19,6 +22,7 @@ class WorkflowSpec(StrictModel):
     desired_output: str = Field(default='', max_length=10000)
     stages: dict[str, StageBinding]
     allow_agent_approval: bool = False
+    require_run_approval: bool = True
     max_runs: int = Field(default=1, ge=1, le=100)
     ttl_seconds: int = Field(default=600, ge=180, le=43200)
     execution_seconds: int = Field(default=480, ge=60, le=43080)
@@ -29,6 +33,18 @@ class WorkflowSpec(StrictModel):
     research: ResearchPlan = Field(default_factory=ResearchPlan)
     search: SearchOptions = Field(default_factory=SearchOptions)
 
+    @model_validator(mode='before')
+    @classmethod
+    def previous_bindings(cls, value):
+        # Existing grants keep their actors and have the new capabilities off.
+        if isinstance(value, dict) and isinstance(value.get('stages'), dict):
+            stages = dict(value['stages'])
+            for stage, source in (('literature','analysis'), ('citations','writeup'), ('vision','analysis')):
+                if stage not in stages and source in stages:
+                    stages[stage] = stages[source]
+            value = {**value, 'stages': stages}
+        return value
+
     def active_stages(self):
         stages = ['ideation','proposal','approval']
         stages += ['draft','tuning','research','ablation','analysis'] if self.search.enabled else ['execution']
@@ -36,6 +52,8 @@ class WorkflowSpec(StrictModel):
             stages += [s for s in ('summary','report','plots','review') if getattr(self.research,s)]
             if self.research.writeup!='none':
                 stages.append('writeup')
+            stages += [s for s, enabled in (('literature',self.research.literature),
+                       ('citations',self.research.citations),('vision',self.research.vlm)) if enabled]
         return stages
 
     @model_validator(mode='after')

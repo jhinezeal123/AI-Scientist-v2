@@ -37,9 +37,7 @@ def platform(request):
 
 def access(request, scope='read', rig_id=None, *, human=False):
     principal = authenticate(request, scope, rig_id, human=human)
-    owner = gateway(request)
-    resolve = getattr(owner, 'team_platform', None)
-    control = resolve(rig_id) if rig_id and resolve else platform(request)
+    control = gateway(request).team_platform(rig_id) if rig_id else platform(request)
     return control, principal
 
 

@@ -24,7 +24,8 @@ def client(repository, monkeypatch):
     gateway=Gateway(SimpleNamespace(executable='',model=None),repository)
     app=FastAPI()
     app.state.runtime=SimpleNamespace(runtime=gateway)
-    app.include_router(api.create_management_router())
+    app.state.legacy_teams = True
+    app.include_router(api.create_management_router(include_legacy_teams=True))
     app.middleware('http')(support.remote_boundary)
     with TestClient(app,headers={'Authorization':'Bearer fixture-only-key'}) as client:
         yield client,gateway
@@ -125,7 +126,7 @@ def test_https_reverse_proxy_does_not_expose_bootstrap_or_legacy_api(client,monk
     with TestClient(local.app,base_url='https://private.example',headers={'Authorization':'Bearer fixture-only-key'}) as device:
         assert device.get('/api/agent-management/teams').status_code==403
         assert device.get('/api/projects').status_code==403
-        pairing=remote.DeviceAccess(gateway.platform.store).pairing(scopes=['read'],rig_ids=['team'])
+        pairing=remote.RemoteDevices(gateway.platform.store).pairing(scopes=['read'],rig_ids=['team'])
         response=device.post('/api/agent-management/pair/exchange',json={**{k:pairing[k] for k in ('pairing_id','code')},'name':'Remote browser'})
         assert response.status_code==200
         assert 'Secure' in response.headers['set-cookie']

@@ -3,27 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.routing import APIRoute
+from fastapi.responses import StreamingResponse
 from pydantic import Field
 
-from .api_support import platform, access, ConflictRoute, remote_boundary
-from .models import RigSpec, HarnessSpec, TaskRequest, StrictModel, templates
-from .remote import DeviceAccess, COOKIE, loopback, remote_surface, transport_guard, digest
+from .models import RigSpec, TaskRequest, StrictModel
+from .api_support import access, ConflictRoute
 from .research_bridge import ResearchCommand
 from .resources import CodingResource
-
-
-
-
-
-
-
-
 
 
 class CreateTeam(StrictModel):
@@ -55,17 +44,6 @@ class FileBody(StrictModel):
     sha256: str | None = None
 
 
-class Pair(StrictModel):
-    scopes: list[str] = Field(default_factory=lambda: ['read', 'task', 'message', 'workspace', 'permission'])
-    rig_ids: list[str] = Field(min_length=1, max_length=100)
-
-
-class Exchange(StrictModel):
-    pairing_id: str = Field(max_length=64)
-    code: str = Field(max_length=256)
-    name: str = Field(min_length=1, max_length=120)
-
-
 class Decision(StrictModel):
     option_id: str = Field(max_length=128)
 
@@ -93,15 +71,6 @@ class BundleBody(StrictModel):
     bundle: dict
 
 
-class SlackConfig(StrictModel):
-    enabled: bool
-    channel: str | None = Field(default=None,max_length=128)
-
-
-class SlackMessage(StrictModel):
-    text: str = Field(min_length=1,max_length=10000)
-
-
 def workspace(control, rig_id, seat_id):
     rig = control.store.rig(rig_id)
     seat = next((s for s in rig.seats if s.id == seat_id), None)
@@ -115,25 +84,20 @@ def workspace(control, rig_id, seat_id):
 def create_team_router():
     router = APIRouter(prefix='/api/agent-management', tags=['Teams'], route_class=ConflictRoute)
 
-
-    @router.get('/templates')
-    def catalog(request: Request):
-        access(request)
-        return templates()
-
-
-
-
     @router.get('/teams')
     def teams(request: Request):
         control, who = access(request)
-        return [r for r in control.store.rigs() if '*' in who.rig_ids or r['id'] in who.rig_ids]
+        return [r for r in request.app.state.runtime.runtime.all_teams() if '*' in who.rig_ids or r['id'] in who.rig_ids]
 
     @router.post('/teams')
     def create(body: CreateTeam, request: Request):
         control, _ = access(request, 'admin', human=True)
         if body.spec.project_id:
             request.app.state.store.project(body.spec.project_id)
+            control = request.app.state.runtime.runtime.project_platform(body.spec.project_id)
+        if any(r['id'] == body.id for r in request.app.state.runtime.runtime.all_teams()):
+            existing = request.app.state.runtime.runtime.team_platform(body.id)
+            return existing.create(body.id, body.spec)
         return control.create(body.id, body.spec)
 
     @router.get('/teams/{rig_id}')
@@ -161,6 +125,8 @@ def create_team_router():
     @router.put('/teams/{rig_id}')
     def topology(rig_id: str, body: ChangeTeam, request: Request):
         control, _ = access(request, 'admin', rig_id, human=True)
+        if body.spec.project_id != control.store.rig(rig_id).project_id:
+            raise ValueError('Team cannot be moved to another project')
         for seat in body.spec.seats:
             control.registry.resolve(seat.harness)
         control.store.update_spec(rig_id, body.spec, body.revision)
@@ -383,6 +349,7 @@ def create_team_router():
         from .bundles import import_bundle
         if body.bundle.get('payload',{}).get('spec',{}).get('project_id'):
             request.app.state.store.project(body.bundle['payload']['spec']['project_id'])
+            control = request.app.state.runtime.runtime.project_platform(body.bundle['payload']['spec']['project_id'])
         return import_bundle(control,body.id,body.bundle)
 
     @router.get('/teams/{rig_id}/telemetry')
@@ -433,68 +400,11 @@ def create_team_router():
     async def research_reconcile(rig_id: str,request_id: str,request: Request,retry: bool=False):
         return await bridge(request,rig_id,mutation=True).reconcile(rig_id,request_id,retry=retry)
 
-
-    @router.get('/integrations/slack')
-    def slack(request: Request):
-        control,_=access(request,'admin',human=True)
-        from .resources import Integrations
-        return Integrations(control.store).slack()
-
-    @router.put('/integrations/slack')
-    def slack_config(body: SlackConfig,request: Request):
-        control,_=access(request,'admin',human=True)
-        from .resources import Integrations
-        return Integrations(control.store).configure_slack(**body.model_dump())
-
-    @router.post('/integrations/slack/messages')
-    def slack_send(body: SlackMessage,request: Request):
-        control,_=access(request,'admin',human=True)
-        from .resources import Integrations
-        return Integrations(control.store).send_slack(body.text,authorized=True)
-
     @router.post('/teams/{rig_id}/permissions/{permission_id}')
     def decide(rig_id: str, permission_id: str, body: Decision, request: Request):
         control, _ = access(request, 'permission', rig_id, human=True)
         if permission_id not in {r['id'] for r in control.permissions.pending(rig_id)}:
             raise KeyError(permission_id)
         return control.permissions.decide(permission_id, body.option_id)
-
-    @router.post('/pair')
-    def pair(body: Pair, request: Request):
-        control, _ = access(request, 'admin', human=True)
-        for rig_id in body.rig_ids:
-            if rig_id != '*':
-                control.store.rig(rig_id)
-        return DeviceAccess(control.store).pairing(scopes=body.scopes, rig_ids=body.rig_ids)
-
-    @router.post('/pair/exchange')
-    def exchange(body: Exchange, request: Request):
-        transport_guard(request)
-        result = DeviceAccess(platform(request).store).exchange(body.pairing_id, body.code, body.name)
-        response = JSONResponse({k:v for k,v in result.items() if k != 'token'})
-        response.set_cookie(COOKIE, result['token'], max_age=30*86400, httponly=True,
-            secure=request.url.scheme=='https', samesite='strict', path='/api/agent-management')
-        response.headers['Cache-Control'] = 'no-store'
-        return response
-
-    @router.get('/devices')
-    def devices(request: Request):
-        control, _ = access(request, 'admin', human=True)
-        return DeviceAccess(control.store).devices()
-
-    @router.post('/logout')
-    def logout(request: Request):
-        control,who=access(request,human=True)
-        if who.id!='local-operator':
-            DeviceAccess(control.store).revoke(who.id)
-        response=JSONResponse({'signed_out':True},headers={'Cache-Control':'no-store'})
-        response.delete_cookie(COOKIE,path='/api/agent-management')
-        return response
-
-    @router.delete('/devices/{device_id}')
-    def revoke(device_id: str, request: Request):
-        control, _ = access(request, 'admin', human=True)
-        DeviceAccess(control.store).revoke(device_id)
-        return {'revoked': device_id}
 
     return router

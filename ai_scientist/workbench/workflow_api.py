@@ -14,7 +14,7 @@ class HumanAnswer(StrictModel):
 
 def create_workflow_router():
     _agent_gateway_class()
-    from _ai_scientist_agent_management.team_api import access, ConflictRoute
+    from _ai_scientist_agent_management.api_support import access, ConflictRoute
     router = APIRouter(prefix='/api/agent-management', tags=['Research workflows'], route_class=ConflictRoute)
 
     def service(request, rig, scope='read'):

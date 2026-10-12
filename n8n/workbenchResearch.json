@@ -1,0 +1,994 @@
+{
+  "id": "workbenchResearch",
+  "name": "Workbench · Project autoresearch",
+  "active": false,
+  "nodes": [
+    {
+      "id": "Research_request",
+      "name": "Research request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -240
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "workbench-research",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "workbench-research",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "Ideathon_+_literature_and_novelty",
+      "name": "Ideathon + literature and novelty",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"ideation\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/ideation\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "ideation_·_chờ_webhook",
+      "name": "ideation · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "ideation"
+        }
+      },
+      "webhookId": "research-ideation",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "ideation_·_complete",
+      "name": "ideation · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Ideathon + literature and novelty\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Lập_proposal",
+      "name": "Lập proposal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"proposal\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/proposal\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "proposal_·_chờ_webhook",
+      "name": "proposal · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "proposal"
+        }
+      },
+      "webhookId": "research-proposal",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "proposal_·_complete",
+      "name": "proposal · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"L\\u1eadp proposal\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Agent_yêu_cầu_làm_rõ?",
+      "name": "Agent yêu cầu làm rõ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Agent yêu cầu làm rõ?",
+              "leftValue": "={{ $json.needs_clarification }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Khóa_duyệt_·_Yêu_cầu_bạn_làm_rõ",
+      "name": "Khóa duyệt · Yêu cầu bạn làm rõ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"approval\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/approval\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "Trao_đổi_/_duyệt_proposal",
+      "name": "Trao đổi / duyệt proposal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"approval\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/approval\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "Chờ_bạn_nhắn_/_quyết_định_duyệt",
+      "name": "Chờ bạn nhắn / quyết định duyệt",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2120,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "approval"
+        }
+      },
+      "webhookId": "research-approval",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "approval_·_complete",
+      "name": "approval · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const decision = $(\"Agent yêu cầu làm rõ?\").first(0, $runIndex) ?? $(\"Agent yêu cầu làm rõ?\").first(1, $runIndex);\nconst started = {...decision.json, step: \"approval\"};\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Bạn_nhắn_lại?",
+      "name": "Bạn nhắn lại?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2560,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Bạn nhắn lại?",
+              "leftValue": "={{ $json.revise_proposal }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Proposal_đã_chốt",
+      "name": "Proposal đã chốt",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2780,
+        80
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "Configured_run_approval",
+      "name": "Configured run approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"run_approval\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/run_approval\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "run_approval_·_chờ_webhook",
+      "name": "run_approval · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "run_approval"
+        }
+      },
+      "webhookId": "research-run_approval",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "run_approval_·_complete",
+      "name": "run_approval · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Configured run approval\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Start_approved_Kaggle_run",
+      "name": "Start approved Kaggle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3780,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"execution\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/execution\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "execution_·_chờ_webhook",
+      "name": "execution · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4000,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "execution"
+        }
+      },
+      "webhookId": "research-execution",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "execution_·_complete",
+      "name": "execution · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Start approved Kaggle run\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Observe_run_and_collect_result",
+      "name": "Observe run and collect result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/agent-management/n8n/step",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {project_id: $(\"Research request\").first().json.body.project_id, workflow_id: $(\"Research request\").first().json.body.workflow_id, generation: $(\"Research request\").first().json.body.generation, iteration: $json.iteration ?? $(\"Research request\").first().json.body.iteration, step: \"collect\", proposal_round: $json.proposal_round ?? 0, execution_id: $execution.id, resume_url: $execution.resumeUrl.split(\"?\")[0] + \"/collect\" + ($execution.resumeUrl.includes(\"?\") ? \"?\" + $execution.resumeUrl.split(\"?\")[1] + \"&\" : \"?\") + \"wb_generation=\" + $(\"Research request\").first().json.body.generation + \"&wb_iteration=\" + ($json.iteration ?? $(\"Research request\").first().json.body.iteration) + \"&wb_round=\" + ($json.proposal_round ?? 0)} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "collect_·_chờ_webhook",
+      "name": "collect · chờ webhook",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4700,
+        0
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "webhookSuffix": "collect"
+        }
+      },
+      "webhookId": "research-collect",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "collect_·_complete",
+      "name": "collect · complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4920,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const started = $(\"Observe run and collect result\").first().json;\nreturn $input.all().map(item => {\n  const result = item.json.body;\n  const query = item.json.query || {};\n  if (String(query.wb_generation) !== String(started.generation)\n      || String(query.wb_iteration) !== String(started.iteration))\n    throw new Error('Completion notification belongs to another research iteration');\n  if (String(query.wb_round ?? '0') !== String(started.request_round)\n      || result?.request_round !== started.request_round)\n    throw new Error('Completion notification belongs to another proposal discussion round');\n  if (!result || result.project_id !== started.project_id || result.workflow_id !== started.workflow_id\n      || result.generation !== started.generation || result.step !== started.step)\n    throw new Error('Completion notification does not match this research step');\n  if (result.status === 'FAILED') throw new Error(result.error || 'Research step failed');\n  if (result.status !== 'DONE' || result.pending || result.failed)\n    throw new Error('Research step has not completed');\n  if (result.iteration !== started.iteration + (started.step === 'collect' ? 1 : 0))\n    throw new Error('Completion notification belongs to another research iteration');\n  return {json: result};\n});"
+      }
+    },
+    {
+      "id": "Another_approved_iteration?",
+      "name": "Another approved iteration?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5180,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Another approved iteration?",
+              "leftValue": "={{ $json.continue }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Continue_research",
+      "name": "Continue research",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        5400,
+        -96
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "Project_workflow_complete",
+      "name": "Project workflow complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        5400,
+        96
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "Note_26",
+      "name": "Note 26",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -400
+      ],
+      "parameters": {
+        "content": "## Project autoresearch\nConfigured ideathon → literature / novelty reflection → proposal → configured approvals → approved Kaggle run.\nHybrid and full-agent settings come from the saved project grant.\nSet goal, presets, Library context and limits in the project Workflow tab. Start there to issue a saved grant.",
+        "width": 1100,
+        "height": 170,
+        "color": 4
+      }
+    },
+    {
+      "id": "Note_27",
+      "name": "Note 27",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2800,
+        -400
+      ],
+      "parameters": {
+        "content": "## Every agent request uses the Agent loop workflow\nThe model chooses one action; Workbench executes it in the approved SSH session and verifies its receipt.\nLiterature search/reflection, citation gathering, VLM images and paper reviews use dedicated stage presets through this loop.\nRun finishing: summaries → references → plots → LaTeX with visual reflections → image/caption/reference and duplicate checks → text review.",
+        "width": 1100,
+        "height": 170,
+        "color": 4
+      }
+    }
+  ],
+  "connections": {
+    "Research request": {
+      "main": [
+        [
+          {
+            "node": "Ideathon + literature and novelty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ideathon + literature and novelty": {
+      "main": [
+        [
+          {
+            "node": "ideation · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ideation · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "ideation · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ideation · complete": {
+      "main": [
+        [
+          {
+            "node": "Lập proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lập proposal": {
+      "main": [
+        [
+          {
+            "node": "proposal · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "proposal · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "proposal · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "proposal · complete": {
+      "main": [
+        [
+          {
+            "node": "Agent yêu cầu làm rõ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent yêu cầu làm rõ?": {
+      "main": [
+        [
+          {
+            "node": "Khóa duyệt · Yêu cầu bạn làm rõ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trao đổi / duyệt proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Khóa duyệt · Yêu cầu bạn làm rõ": {
+      "main": [
+        [
+          {
+            "node": "Chờ bạn nhắn / quyết định duyệt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trao đổi / duyệt proposal": {
+      "main": [
+        [
+          {
+            "node": "Chờ bạn nhắn / quyết định duyệt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chờ bạn nhắn / quyết định duyệt": {
+      "main": [
+        [
+          {
+            "node": "approval · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "approval · complete": {
+      "main": [
+        [
+          {
+            "node": "Bạn nhắn lại?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bạn nhắn lại?": {
+      "main": [
+        [
+          {
+            "node": "Lập proposal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Proposal đã chốt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proposal đã chốt": {
+      "main": [
+        [
+          {
+            "node": "Configured run approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configured run approval": {
+      "main": [
+        [
+          {
+            "node": "run_approval · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "run_approval · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "run_approval · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "run_approval · complete": {
+      "main": [
+        [
+          {
+            "node": "Start approved Kaggle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start approved Kaggle run": {
+      "main": [
+        [
+          {
+            "node": "execution · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "execution · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "execution · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "execution · complete": {
+      "main": [
+        [
+          {
+            "node": "Observe run and collect result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Observe run and collect result": {
+      "main": [
+        [
+          {
+            "node": "collect · chờ webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "collect · chờ webhook": {
+      "main": [
+        [
+          {
+            "node": "collect · complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "collect · complete": {
+      "main": [
+        [
+          {
+            "node": "Another approved iteration?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Another approved iteration?": {
+      "main": [
+        [
+          {
+            "node": "Continue research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Project workflow complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue research": {
+      "main": [
+        [
+          {
+            "node": "Ideathon + literature and novelty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodeGroups": [
+    {
+      "id": "stage-ideation",
+      "name": "01 · Ideathon / Novelty",
+      "nodeIds": [
+        "Ideathon_+_literature_and_novelty",
+        "ideation_·_chờ_webhook",
+        "ideation_·_complete"
+      ],
+      "description": "Tạo idea, tìm tài liệu và phản biện độ mới."
+    },
+    {
+      "id": "stage-proposal",
+      "name": "02 · Thiết kế proposal",
+      "nodeIds": [
+        "Lập_proposal",
+        "proposal_·_chờ_webhook",
+        "proposal_·_complete",
+        "Agent_yêu_cầu_làm_rõ?",
+        "Khóa_duyệt_·_Yêu_cầu_bạn_làm_rõ",
+        "Trao_đổi_/_duyệt_proposal",
+        "Chờ_bạn_nhắn_/_quyết_định_duyệt",
+        "approval_·_complete",
+        "Bạn_nhắn_lại?",
+        "Proposal_đã_chốt"
+      ],
+      "description": "Lập và duyệt proposal từ mục tiêu, context và phạm vi đã lưu."
+    },
+    {
+      "id": "stage-run_approval",
+      "name": "03 · Cấu hình run",
+      "nodeIds": [
+        "Configured_run_approval",
+        "run_approval_·_chờ_webhook",
+        "run_approval_·_complete"
+      ],
+      "description": "Cấu hình và duyệt bắt đầu run theo Hybrid / Full agent."
+    },
+    {
+      "id": "stage-execution",
+      "name": "04 · Thực thi",
+      "nodeIds": [
+        "Start_approved_Kaggle_run",
+        "execution_·_chờ_webhook",
+        "execution_·_complete"
+      ],
+      "description": "Bắt đầu run Kaggle với preset và budget đã lưu."
+    },
+    {
+      "id": "stage-collect",
+      "name": "05 · Kết quả / Lặp",
+      "nodeIds": [
+        "Observe_run_and_collect_result",
+        "collect_·_chờ_webhook",
+        "collect_·_complete",
+        "Another_approved_iteration?",
+        "Continue_research",
+        "Project_workflow_complete"
+      ],
+      "description": "Thu kết quả, hoàn tất hoặc chuyển sang vòng tiếp theo."
+    }
+  ]
+}

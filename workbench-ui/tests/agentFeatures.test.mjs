@@ -15,7 +15,36 @@ async function compile(file,imports={}){
   return encode(code);
 }
 const shared=await compile('agentApi.ts');
-beforeEach(()=>{globalThis.sessionStorage={getItem:()=>null};});
+const remote=await import(await compile('remoteApi.ts',{'./agentApi':shared}));
+const workflows=await import(await compile('projectWorkflows.ts',{'./agentApi':shared}));
+beforeEach(()=>{
+  const values=new Map();
+  globalThis.sessionStorage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+});
+
+test('device administration survives unavailable project lookup',async()=>{
+  const devices=[{id:'device',name:'Fixture'}],requests=[];
+  globalThis.fetch=async url=>{requests.push(url);return {ok:true,json:async()=>devices};};
+  const result=await remote.readRemoteSettings(async()=>{throw new Error('Projects unavailable');},true);
+  assert.equal(result.projects.status,'rejected');
+  assert.deepEqual(result.devices,{status:'fulfilled',value:devices});
+  assert.deepEqual(requests,['/api/agent-management/devices']);
+});
+
+test('lost save response retries the same project grant without changing preset configuration',async()=>{
+  const spec={...workflows.defaults('chosen-preset'),goal:'Verify checksum',account:'fixture'};
+  const requests=[];
+  globalThis.fetch=async(url,options)=>{requests.push({url,options});if(requests.length===1)throw new Error('Lost response');return {ok:true,json:async()=>({id:'saved-grant',spec})};};
+  await assert.rejects(workflows.saveWorkflow('project',spec),/Lost response/);
+  const saved=await workflows.saveWorkflow('project',spec);
+  assert.equal(saved.id,'saved-grant');
+  assert.equal(requests.length,2);
+  assert.equal(requests[0].url,'/api/agent-management/projects/project/workflows');
+  assert.equal(requests[0].options.method,'POST');
+  assert.deepEqual(JSON.parse(requests[0].options.body),JSON.parse(requests[1].options.body));
+  assert.match(JSON.parse(requests[0].options.body).request_id,/^[a-f0-9]{32}$/);
+  assert.deepEqual(spec.stages.proposal,{actor:'agent',preset_id:'chosen-preset'});
+});
 
 test('provider catalog loads without executing provider probes and saves configuration through the preset API',async()=>{
   const presets=await import(await compile('agentPresets.ts',{'./agentApi':shared}));

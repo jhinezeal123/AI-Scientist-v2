@@ -32,9 +32,56 @@ class AgentGateway:
         self._platform = None
         self._control_store = None
         self._harness_catalog = None
-        self._project_platforms = {}
         self._lock = RLock()
         self.protected_paths = ()
+        self.projects = None
+        self._project_platforms = {}
+
+    def project_platform(self, project_id):
+        if self.projects is None:
+            raise ValueError('Project storage is unavailable')
+        with self._lock:
+            directory = self.projects.directory(project_id)
+            root = directory / 'agents'
+            if root.is_symlink() or getattr(root, 'is_junction', lambda: False)():
+                raise ValueError('Refusing redirected project agent storage')
+            if project_id not in self._project_platforms:
+                from .orchestrator import TeamPlatform
+                self._project_platforms[project_id] = TeamPlatform(
+                    AgentStore(root / 'agent-management.sqlite'), self.workspace_root,
+                    codex=self.codex_runtime, protected=self.protected_paths,
+                    data_root=root, catalog=self.platform.store,provider_setup=self.harness_catalog.provider_setup)
+                self._project_platforms[project_id].context.projects = self.projects
+            control = self._project_platforms[project_id]
+            from .project_storage import migrate_team
+            for team in self.platform.store.rigs():
+                if team['spec'].get('project_id') == project_id:
+                    migrate_team(self.platform.store, control.store, team['id'], control.workspaces)
+            return control
+
+    def all_teams(self):
+        result = []
+        if self.projects is not None:
+            legacy = {r['spec'].get('project_id') for r in self.platform.store.rigs()}
+            for project in self.projects.list_projects():
+                if project['id'] in legacy or (self.projects.directory(project['id']) / 'agents/agent-management.sqlite').exists():
+                    result.extend(self.project_platform(project['id']).store.rigs())
+        return result + self.platform.store.rigs()
+
+    def team_platform(self, rig_id):
+        with self._lock:
+            for team in self.all_teams():
+                if team['id'] == rig_id:
+                    project = team['spec'].get('project_id')
+                    return self.project_platform(project) if project and self.projects else self.platform
+        raise KeyError(rig_id)
+
+    def release_project(self, project_id):
+        # ProjectStore already holds PATH_LOCK during validated deletion.
+        # Acquiring the catalog lock here would invert the lookup lock order.
+        control = self._project_platforms.pop(project_id, None)
+        if control is not None:
+            control.close()
 
     @property
     def store(self) -> AgentStore:
@@ -74,6 +121,8 @@ class AgentGateway:
     def close(self):
         if self._harness_catalog is not None and self._harness_catalog._provider_setup is not None:
             self._harness_catalog._provider_setup.close()
+        for control in self._project_platforms.values():
+            control.close()
         if self._platform is not None:
             return self._platform.close()
 

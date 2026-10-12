@@ -335,7 +335,7 @@ def get_reflection_page_info(reflection_pdf, page_limit):
 
 
 def get_citation_addition(
-    client, model, context, current_round, total_rounds, idea_text
+    client, model, context, current_round, total_rounds, idea_text, *, search=None
 ):
     report, citations = context
     msg_history = []
@@ -447,7 +447,7 @@ This JSON will be automatically parsed, so ensure the format is precise."""
         json_output = extract_json_between_markers(text)
         assert json_output is not None, "Failed to extract JSON from LLM output"
         query = json_output["Query"]
-        papers = search_for_papers(query, result_limit=5)
+        papers = (search or search_for_papers)(query, result_limit=5)
     except Exception:
         print("EXCEPTION in get_citation_addition (initial search):")
         print(traceback.format_exc())

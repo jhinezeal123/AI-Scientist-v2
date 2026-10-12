@@ -36,6 +36,8 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
                                uncertain_error=getattr(loaded, "uncertain_error", None))
         app.state.worker = worker
         app.state.runtime = loaded
+        if hasattr(loaded.runtime, 'projects'):
+            loaded.runtime.projects = store
         store.recover_planning()
         store.recover_implementation()
         store.recover_submission()
@@ -52,8 +54,11 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
                 if getattr(config, 'allow_new_run_after_idle_check', False):
                     service.idle_check = app.state.working.check_idle
                 await app.state.working.recover()
-                from .research_workflows import ResearchWorkflows
-                app.state.research_workflows = ResearchWorkflows(service, app.state.working, loaded.runtime)
+                from .n8n_workflows import N8nResearchWorkflows
+                from .n8n_migration import migrate_remote_scopes
+                if hasattr(type(loaded.runtime), 'control_store'):
+                    migrate_remote_scopes(store, loaded.runtime.control_store)
+                app.state.research_workflows = N8nResearchWorkflows(service, app.state.working, loaded.runtime)
                 app.state.working.runtime_for_run = app.state.research_workflows.runtime_for_run
                 app.state.research_workflows.recover()
                 try:
@@ -79,13 +84,11 @@ def create_app(config, *, bindings=None, kaggle_connection=connect_kaggle):
     app.include_router(library_router(store, config.workspace_root))
     app.include_router(settings_router())
     _agent_gateway_class()
-    from _ai_scientist_agent_management.http_api import create_router
-    app.include_router(create_router())
     from _ai_scientist_agent_management.api import create_management_router
     from _ai_scientist_agent_management.api_support import remote_boundary
     app.include_router(create_management_router())
-    from .workflow_api import create_workflow_router
-    app.include_router(create_workflow_router())
+    from .n8n_api import create_n8n_router
+    app.include_router(create_n8n_router())
     app.middleware('http')(remote_boundary)
 
     @app.get("/health")

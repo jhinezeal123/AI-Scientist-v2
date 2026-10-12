@@ -50,7 +50,7 @@ class StageRuntime:
                            'path':name,'bytes':len(data),'excerpt':excerpt,'truncated':len(excerpt.encode('utf-8'))<len(data)})
         return chunks
 
-    def invoke(self, stage, prompt, schema, *, timeout=300, cancelled=lambda: False, _repair=0):
+    def invoke(self, stage, prompt, schema, *, timeout=300, cancelled=lambda: False, _repair=0, images=()):
         self.check(cancelled)
         context = self.context()
         if context:
@@ -59,7 +59,17 @@ class StageRuntime:
         binding = self.spec.stages[stage]
         if binding.actor == 'human':
             return self.human(stage, {'kind': 'input', 'prompt': prompt, 'schema': schema}, deadline, cancelled)
-        control = self.owner.gateway.platform
+        turns = getattr(self.owner, 'agent_turns', None)
+        if turns is not None:
+            payload = turns.invoke(self, stage, prompt, schema, deadline, cancelled, images=images) if images else turns.invoke(self, stage, prompt, schema, deadline, cancelled)
+            if binding.ask:
+                verdict = self.human(stage, {'kind': 'review', 'candidate': payload, 'schema': schema}, deadline, cancelled)
+                if not verdict.get('approve'):
+                    raise ValueError('Human rejected the stage result')
+            return payload
+        if images:
+            raise ValueError('Archived Team runtime does not support VLM image input; use a project n8n workflow')
+        control = self.owner.control(self.row['rig_id'])
         from _ai_scientist_agent_management.models import TaskRequest
         instruction = json.dumps({'stage': stage, 'goal': self.spec.goal, 'workflow_id': self.workflow,
             'operator_grant': {'approval_actor': self.spec.stages['approval'].actor,
@@ -159,9 +169,15 @@ class StageRuntime:
             if deadline <= time.monotonic():
                 raise TimeoutError('Delegated execution budget exhausted')
         if request.role in {'mvp0_working', 'mvp1_search_node'}:
-            payload = self.remote_turn(request, stage, inputs, schema, deadline, cancelled)
+            turns = getattr(self.owner, 'agent_turns', None)
+            payload = (turns.remote(self, request, stage, inputs, schema, deadline, cancelled) if turns and self.spec.stages[stage].actor == 'agent'
+                       else self.remote_turn(request, stage, inputs, schema, deadline, cancelled))
+            if turns and self.spec.stages[stage].actor == 'agent' and self.spec.stages[stage].ask:
+                verdict = self.human(stage, {'kind':'review','candidate':payload,'schema':schema},deadline,cancelled)
+                if not verdict.get('approve'):
+                    raise ValueError('Human rejected the stage result')
         else:
-            payload = self.invoke(stage, inputs, schema, timeout=max(1, int(deadline-time.monotonic())), cancelled=cancelled)
+            payload = self.invoke(stage, inputs, schema, timeout=max(1, int(deadline-time.monotonic())), cancelled=cancelled, images=request.images)
         return RuntimeResult(text=json.dumps(payload), usage={})
 
     def remote_turn(self, request, stage, inputs, final_schema, deadline, cancelled):

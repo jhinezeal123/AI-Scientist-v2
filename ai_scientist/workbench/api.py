@@ -198,7 +198,9 @@ def library_router(store, workspace_root):
                 working = getattr(request.app.state, 'working', None)
                 if working and any(key[0] == project_id and not task.done() for key, task in working.tasks.items()):
                     raise HTTPException(409, 'Working của project chưa kết thúc; chờ xác nhận Kaggle dừng trước khi xóa')
-                return await asyncio.to_thread(call, store.delete_project, project_id, body.name)
+                gateway = getattr(getattr(request.app.state, 'runtime', None), 'runtime', None)
+                release = (lambda: gateway.release_project(project_id)) if hasattr(gateway, 'release_project') else None
+                return await asyncio.to_thread(call, store.delete_project, project_id, body.name, release)
         return await asyncio.to_thread(call, store.delete_project, project_id, body.name)
 
     @router.get("/projects/{project_id}/resources")

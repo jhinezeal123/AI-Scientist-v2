@@ -33,6 +33,7 @@ class Capabilities:
     file_edits: bool = True  # Structured, validated edits applied by the workspace service.
     terminal: bool = False
     usage: bool = False
+    images: bool = False
 
 
 @dataclass
@@ -58,7 +59,7 @@ class HarnessAdapter(Protocol):
     def probe(self) -> dict: ...
     def start(self, seat: AgentSpec, workspace: Path) -> SessionHandle: ...
     def send(self, handle: SessionHandle, message: str, *, request_id: str,
-             timeout: int, emit: Callable, started: Callable) -> TurnResult: ...
+             timeout: int, emit: Callable, started: Callable, images=()) -> TurnResult: ...
     def approve(self, handle: SessionHandle, permission_id: str, decision: str): ...
     def interrupt(self, handle: SessionHandle): ...
     def resume(self, handle: SessionHandle, provider_session: str) -> SessionHandle: ...
@@ -75,7 +76,8 @@ class NativeHarness:
     @property
     def capabilities(self):
         return Capabilities(resume=self.spec.kind in {"native_codex", "native_claude"},
-                            fork=self.spec.kind == "native_claude" or self.codex_fork_supported(), usage=self.spec.kind != "cli_json")
+                            fork=self.spec.kind == "native_claude" or self.codex_fork_supported(), usage=self.spec.kind != "cli_json",
+                            images=self.spec.kind in {"native_codex","native_claude"})
 
     def codex_fork_supported(self):
         if self.spec.kind!='native_codex':
@@ -158,7 +160,11 @@ class NativeHarness:
     def approve(self, handle, permission_id, decision):
         raise ValueError("Native tool requests are disabled; edits use the seat policy")
 
-    def send(self, handle, message, *, request_id, timeout, emit, started):
+    def send(self, handle, message, *, request_id, timeout, emit, started, images=()):
+        from ai_scientist.workbench.research_images import validate_images, image_blocks
+        images = validate_images(images)
+        if images and not self.capabilities.images:
+            raise ValueError('Preset này chưa hỗ trợ ảnh VLM; chọn Codex, Claude hoặc ACP có image capability')
         executable = self.executable()
         model = handle.seat.model or (getattr(self.codex, "model", None) if self.spec.kind == "native_codex" else None)
         prompt = ("Return only the requested JSON object. Do not call local tools, install software, access credentials or independently create research sessions. "
@@ -183,6 +189,8 @@ class NativeHarness:
                 args += ["--enable", "skip_host_skill_discovery"]
                 if model:
                     args += ["--model", model]
+                for path in images:
+                    args += ['--image', str(path.resolve())]
                 if getattr(self.codex, "reasoning_effort", None):
                     args += ["--config", 'model_reasoning_effort="' + self.codex.reasoning_effort + '"']
                 args += ["-"]
@@ -198,6 +206,11 @@ class NativeHarness:
                     if handle.fork:
                         args += ["--fork-session"]
                 body = prompt.encode()
+                if images:
+                    args += ['--input-format','stream-json']
+                    blocks = [{'type':'text','text':prompt}]
+                    blocks += [{'type':'image','source':{'type':'base64','media_type':b['mimeType'],'data':b['data']}} for b in image_blocks(images)]
+                    body = (json.dumps({'type':'user','message':{'role':'user','content':blocks}}) + '\n').encode()
             else:
                 args = [executable, *self.spec.args]
                 body = json.dumps({"request_id": request_id, "prompt": prompt, "model": model,

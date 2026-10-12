@@ -36,21 +36,7 @@ def interrupt_saved_pipeline(root):
     write_json(root / 'research/pipeline.json',state)
 
 
-class CodexResearchClient:
-    """The small chat client surface used by upstream llm.get_response_from_llm."""
-    def __init__(self, owner):
-        self.owner = owner
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
-
-    def create(self, *, messages, **kwargs):
-        response = self.owner.query(system_message={
-            'Role': 'Fulfil the original research module request below using only verified experiment evidence.',
-            'Messages': messages,
-        }, user_message=None)
-        # Upstream make_llm_call's tracker expects these response attributes.
-        # Actual token counts come from owner.call_agent, not fabricated usage.
-        return SimpleNamespace(model=self.owner.service.config.codex_model, created=int(time.time()),
-                               choices=[SimpleNamespace(message=SimpleNamespace(content=response))])
+from .research_client import CodexResearchClient
 
 
 class ResearchPipeline:
@@ -64,6 +50,7 @@ class ResearchPipeline:
         execution = 'execution' if getattr(owner, 'single_run', False) else 'tree'
         requested = {execution:True, 'multi_seed':bool(self.plan.seeds) and not getattr(owner, 'single_run', False), 'summary':self.plan.summary,
                      'report':self.plan.report, 'plots':self.plan.plots,
+                     'citations':self.plan.citations, 'vision':self.plan.vlm,
                      'writeup':self.plan.writeup != 'none', 'review':self.plan.review}
         self.state = {'format':1, 'run_id':owner.key[1], 'context_sha256':owner.approved['context_sha256'],
                       'plan':self.plan.model_dump(), 'status':'running',
@@ -311,18 +298,25 @@ class ResearchPipeline:
         latex = (local / 'template.tex').read_text(encoding='utf-8')
         # Do not carry the template's example references/claims into a new paper.
         latex = re.sub(r'(\\begin\{filecontents\}\{references.bib\}).*?(\\end\{filecontents\})',r'\1\n\2',latex,flags=re.DOTALL)
+        if self.plan.citations and self.state['components']['citations']['status'] != 'completed':
+            raise ValueError('Citation gathering chưa hoàn tất; chưa thể viết bài với references đã xác minh')
+        citations = (self.root/'references.bib').read_text(encoding='utf-8') if self.plan.citations else ''
         context = module.writeup_prompt.format(idea_text=(self.owner.root/'idea.md').read_text(encoding='utf-8'),
                     summaries=json.dumps(summaries,ensure_ascii=False),
                     aggregator_code=aggregator.read_text(encoding='utf-8') if aggregator.is_file() else '',
                     plot_list=', '.join(names),latex_writeup=latex,
-                    plot_descriptions='Only verified filenames/data are available. No visual review was performed.')
+                    plot_descriptions=json.dumps(self.plot_reviews(),ensure_ascii=False) if self.plan.vlm else 'No visual review was performed.')
+        context += '\nVerified bibliography (use these citation keys only):\n' + citations
         system = module.writeup_system_message_template.format(page_limit=pages)
         response,history = get_response_from_llm(context,self.client,self.owner.service.config.codex_model,system)
         self.compile_draft(response,local)
-        for _ in range(self.plan.reflections):
+        for reflection in range(self.plan.reflections):
             feedback = (local/'compile.log').read_text(encoding='utf-8')[-12000:]
+            if self.plan.vlm and (self.root/'paper.pdf').is_file():
+                from .research_evidence import review_pdf
+                feedback += '\nActual visual review:\n' + json.dumps(review_pdf(self,selection=True,reflection=reflection+1),ensure_ascii=False)
             response,history = get_response_from_llm(
-                'Revise the complete LaTeX draft using the compiler output below. Use only verified results and selected Library references; do not invent citations or claim visual review. '
+                'Revise the complete LaTeX draft using the compiler and visual feedback below. Use only verified results and the supplied bibliography; do not invent citations. '
                 'Return the entire file in a latex fence, or say I am done if the compiled draft needs no change.\n' + feedback,
                 self.client,self.owner.service.config.codex_model,system,msg_history=history[-2:])
             if 'I am done' in response and '```latex' not in response:
@@ -372,7 +366,19 @@ class ResearchPipeline:
         match = re.search(r'```latex\s*(.*?)```',response,re.DOTALL)
         if not match:
             raise ValueError('Writeup chưa trả toàn bộ LaTeX trong latex fence')
-        (local/'template.tex').write_text(match.group(1).strip(),encoding='utf-8')
+        latex = match.group(1).strip()
+        if self.plan.citations:
+            from .research_evidence import citation_keys
+            bib = (self.root/'references.bib').read_text(encoding='utf-8')
+            used = set()
+            for keys in re.findall(r'\\cite\w*\*?(?:\[[^\]]*\])*\{([^}]+)\}',latex):
+                used.update(key.strip() for key in keys.split(','))
+            if used - citation_keys(bib):
+                raise ValueError('Draft chứa citation chưa xác minh: ' + ', '.join(sorted(used-citation_keys(bib))))
+            latex = re.sub(r'\\begin\{filecontents\*?\}\{references.bib\}.*?\\end\{filecontents\*?\}',
+                           lambda _: '\\begin{filecontents}{references.bib}\n'+bib+'\n\\end{filecontents}',latex,flags=re.DOTALL)
+            (local/'references.bib').write_text(bib,encoding='utf-8')
+        (local/'template.tex').write_text(latex,encoding='utf-8')
         for path in local.iterdir():
             if path.suffix in {'.tex','.sty','.bst','.bib'}:
                 self.send('output/research/latex/' + path.name,path.read_bytes())
@@ -381,7 +387,7 @@ class ResearchPipeline:
         (local/'template.pdf').unlink(missing_ok=True)
         (self.root/'paper.pdf').unlink(missing_ok=True)
         remote = self.owner.descriptor['remote_directory'] + '/output/research/latex'
-        self.remote_exec('cd ' + shlex.quote(remote) + " && rm -f template.pdf references.bib")
+        self.remote_exec('cd ' + shlex.quote(remote) + " && rm -f template.pdf" + ('' if self.plan.citations else ' references.bib'))
         diagnostics = []
         def runner(command, **kwargs):
             if command[0]=='pdflatex':
@@ -426,6 +432,7 @@ class ResearchPipeline:
         self.step('multi_seed',self.finish_seeds)
         self.step('summary',self.summarize)
         self.step('report',self.report)
+        self.step('citations',self.citations)
         for name,operation in (('plots',self.plots),('writeup',self.writeup)):
             if self.state['components'][name]['status']=='not_requested':
                 continue
@@ -433,7 +440,10 @@ class ResearchPipeline:
                 self.set(name,'blocked','Cần summary thí nghiệm đã lưu trước khi tạo đầu ra này.')
                 self.limitations.append(f'{name} thiếu summary đã xác minh.')
             else:
+                if name == 'writeup':
+                    self.step('vision',lambda:self.vision(paper=False))
                 self.step(name,operation)
+        self.step('vision',self.vision)
         self.step('review',self.review)
         succeeded = all(item['status'] in {'completed','not_requested'} for item in self.state['components'].values())
         self.state['status'] = 'completed' if succeeded else 'failed'
@@ -461,15 +471,19 @@ class ResearchPipeline:
                 self.limitations.append('Thiếu bằng chứng journal cho plots/PDF.')
             self.save()
         self.step('report', self.report)
+        self.step('citations', self.citations)
         for name, operation in (('plots', self.plots), ('writeup', self.writeup)):
             if self.state['components'][name]['status'] == 'not_requested':
                 continue
             ready = (self.state['components']['summary']['status'] == 'completed'
                      or self.state.get('dependencies', {}).get('journal_evidence', {}).get('status') == 'completed')
             if ready:
+                if name == 'writeup':
+                    self.step('vision',lambda:self.vision(paper=False))
                 self.step(name, operation)
             else:
                 self.set(name, 'blocked', 'Chưa đủ bằng chứng thí nghiệm để tạo đầu ra này.')
+        self.step('vision',self.vision)
         if self.plan.review and not self.plan.report and self.plan.writeup == 'none':
             # A text review can use the factual execution journal directly.
             from ai_scientist.perform_llm_review import perform_review
@@ -488,3 +502,34 @@ class ResearchPipeline:
         self.state['status'] = 'completed' if complete else 'failed'
         self.save()
         return complete, self.limitations
+
+    def citations(self):
+        from .research_evidence import gather_citations
+        return gather_citations(self)
+
+    def plot_reviews(self):
+        paths = list(self.owner.logs.glob('nodes/*/vlm-review.json'))
+        paths += [p for p in (self.root/'vlm-review.json',self.owner.root/'vlm-review.json') if p.is_file()]
+        return {str(path.relative_to(self.owner.root)):json.loads(path.read_text(encoding='utf-8')) for path in paths}
+
+    def vision(self, paper=True):
+        from .research_evidence import analyze_plots, review_pdf
+        from .tree_search import write_json
+        for node_id,(root,manifest,_) in self.owner.nodes.items():
+            if not (root/'vlm-review.json').is_file():
+                images = [root/i['path'] for i in manifest['files'] if i['path'].lower().endswith(('.png','.jpg','.jpeg','.webp'))]
+                node = SimpleNamespace(exp_dir=str(root),datasets_successfully_tested=[])
+                analyze_plots(self.owner,node,images)
+        artifacts = list(self.plot_reviews())
+        figures = list((self.owner.root/'figures').glob('*.png'))
+        if figures and not (self.root/'vlm-review.json').is_file():
+            node = SimpleNamespace(exp_dir=str(self.root),datasets_successfully_tested=[])
+            analyze_plots(self.owner,node,figures)
+            artifacts.append('research/vlm-review.json')
+        if self.plan.writeup != 'none' and paper:
+            review_pdf(self)
+            artifacts.append('research/vlm-paper-review.json')
+        if not artifacts:
+            raise ValueError('VLM chưa có hình thực tế để đánh giá')
+        write_json(self.root/'visual-reviews.json', {'artifacts':artifacts})
+        return [*artifacts,'research/visual-reviews.json']

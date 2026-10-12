@@ -318,7 +318,7 @@ class ProjectStore:
             projects = [self.project(project_id) for project_id in tuple(self._directories)]
         return sorted(projects, key=lambda project: project["created_at"], reverse=True)
 
-    def delete_project(self, project_id, expected_name):
+    def delete_project(self, project_id, expected_name, before_remove=None):
         from .project_deletion import project_files, remove_project_files
         with PATH_LOCK:
             directory = self.directory(project_id)
@@ -331,6 +331,11 @@ class ProjectStore:
                     raise StoreConflict('Tên project không khớp; tải lại và xác nhận đúng project')
                 if connection.execute("SELECT 1 FROM ideas WHERE state='PLANNING'").fetchone():
                     raise StoreConflict('Chờ agent lập proposal xong trước khi xóa project')
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE name='research_workflows'").fetchone():
+                    import json
+                    if any(json.loads(row[0])['status'] in {'RUNNING','WAITING','UNKNOWN'}
+                           for row in connection.execute('SELECT state_json FROM research_workflows')):
+                        raise StoreConflict('Dừng hoặc đối soát workflow trước khi xóa project')
                 # Include hidden runs: deleting the folder must not orphan a Kaggle session.
                 for run in connection.execute('SELECT * FROM runs'):
                     if not self._can_delete_run(connection, run, require_leaf=False):
@@ -338,8 +343,18 @@ class ProjectStore:
                     if run['artifact_dir'].startswith('experiments/'):
                         raise StoreConflict('Experiment còn nằm ngoài project; khởi động lại backend để chuyển dữ liệu trước khi xóa')
                 target, receipt = project_files(self.root, directory)
+                team_database = directory/'agents/agent-management.sqlite'
+                if team_database.exists():
+                    from contextlib import closing
+                    with closing(sqlite3.connect(team_database)) as team_connection:
+                        if (team_connection.execute('SELECT 1 FROM rig_runtime WHERE enabled=1').fetchone()
+                            or team_connection.execute("SELECT 1 FROM tasks WHERE state IN ('PENDING','LEASED','UNKNOWN')").fetchone()
+                            or team_connection.execute("SELECT 1 FROM sessions WHERE state IN ('STARTING','RUNNING','UNKNOWN')").fetchone()):
+                            raise StoreConflict('Dừng và đối soát các phiên agent trước khi xóa project')
             # All in-process SQLite handles have closed; PATH_LOCK blocks new readers/writers.
             try:
+                if before_remove:
+                    before_remove()
                 remove_project_files(target)
             except OSError as exc:
                 raise StoreConflict('Chưa xóa hết project. Đóng file/thư mục đang mở rồi thử xóa lại.') from exc

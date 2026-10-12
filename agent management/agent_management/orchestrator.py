@@ -22,12 +22,12 @@ from .workspaces import Workspaces
 
 
 class TeamPlatform:
-    def __init__(self, queue, repository: Path, *, codex=None, registry=None, protected=(), provider_setup=None):
+    def __init__(self, queue, repository: Path, *, codex=None, registry=None, protected=(), data_root=None, catalog=None, provider_setup=None):
         self.store = ControlStore(queue)
-        self.workspaces = Workspaces(repository)
+        self.workspaces = Workspaces(repository, data_root=data_root)
         self.context = ContextRouter(repository, self.workspaces)
         self.permissions = PermissionBroker(self.store)
-        self.registry = registry or HarnessRegistry(self.store, codex=codex, permission=self.permissions, repository=repository, protected=protected,provider_setup=provider_setup)
+        self.registry = registry or HarnessRegistry(catalog or self.store, codex=codex, permission=self.permissions, repository=repository, protected=protected, provider_setup=provider_setup)
         self.active = {}
         self.lock = RLock()
         self.stopping = Event()

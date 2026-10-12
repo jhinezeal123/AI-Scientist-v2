@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "npm run build:t3css && vite",
     "build": "npm run build:t3css && tsc -b && vite build",
-    "test:activity": "node --test tests/researchActivity.test.mjs",
     "test:features": "node --test tests/agentFeatures.test.mjs",
     "build:t3css": "node scripts/build-t3-styles.mjs"
   },

@@ -1,0 +1,420 @@
+{
+  "id": "workbenchAgent",
+  "name": "Workbench · Agent and remote action loop",
+  "active": false,
+  "nodes": [
+    {
+      "id": "Agent_request",
+      "name": "Agent request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "workbench-agent",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "workbench-agent",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "Call_saved_agent_and_model",
+      "name": "Call saved agent and model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"http://127.0.0.1:8000/api/agent-management/n8n/tickets/\" + $(\"Agent request\").first().json.body.ticket_id + \"/turn\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {execution_id: $execution.id} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "Provider_failed?",
+      "name": "Provider failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Provider failed?",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Provider_running?",
+      "name": "Provider running?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Provider running?",
+              "leftValue": "={{ $json.pending }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Wait_for_provider",
+      "name": "Wait for provider",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        220
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "webhookId": "Wait-for-provider"
+    },
+    {
+      "id": "Review_provider_or_action_error",
+      "name": "Review provider or action error",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        500,
+        -220
+      ],
+      "parameters": {
+        "errorMessage": "={{ $json.error || \"Review this request in Workbench before resuming\" }}"
+      }
+    },
+    {
+      "id": "Result_complete?",
+      "name": "Result complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Result complete?",
+              "leftValue": "={{ $json.finished }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Execute_verified_remote_action",
+      "name": "Execute verified remote action",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"http://127.0.0.1:8000/api/agent-management/n8n/tickets/\" + $json.ticket_id + \"/action/\" + $json.turn }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "workbenchBridge",
+          "name": "Local Workbench bridge"
+        }
+      }
+    },
+    {
+      "id": "Action_failed?",
+      "name": "Action failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1190,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Action failed?",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Validated_result_returned_to_research",
+      "name": "Validated result returned to research",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "Note_10",
+      "name": "Note 10",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -70,
+        -420
+      ],
+      "parameters": {
+        "content": "## Agent request\nUses the project’s frozen preset and result schema. Every provider call counts against the saved grant.\nRemote commands, reads, writes and artifact fetches go through the approved Kaggle session.",
+        "width": 1350,
+        "height": 170,
+        "color": 4
+      }
+    },
+    {
+      "id": "Note_11",
+      "name": "Note 11",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        400,
+        420
+      ],
+      "parameters": {
+        "content": "## No automatic replay of uncertain work\nFailed or uncertain actions stop this execution and appear in the project. Review and reconcile before continuing.",
+        "width": 800,
+        "height": 170,
+        "color": 4
+      }
+    }
+  ],
+  "connections": {
+    "Agent request": {
+      "main": [
+        [
+          {
+            "node": "Call saved agent and model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call saved agent and model": {
+      "main": [
+        [
+          {
+            "node": "Provider failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider failed?": {
+      "main": [
+        [
+          {
+            "node": "Review provider or action error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Provider running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider running?": {
+      "main": [
+        [
+          {
+            "node": "Wait for provider",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for provider": {
+      "main": [
+        [
+          {
+            "node": "Call saved agent and model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result complete?": {
+      "main": [
+        [
+          {
+            "node": "Validated result returned to research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute verified remote action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute verified remote action": {
+      "main": [
+        [
+          {
+            "node": "Action failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action failed?": {
+      "main": [
+        [
+          {
+            "node": "Review provider or action error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call saved agent and model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodeGroups": []
+}

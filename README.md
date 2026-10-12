@@ -4,6 +4,7 @@
 > MVP 3 task tracker: [docs/customization/IMPLEMENT_MVP3.md](docs/customization/IMPLEMENT_MVP3.md).
 > MVP 0 developer plan: [docs/customization/IMPLEMENT_MVP0.md](docs/customization/IMPLEMENT_MVP0.md).
 > Local Codex/Kaggle GUI: [setup and run guide](docs/customization/MVP0_RUN_GUIDE.md).
+> Project autoresearch now uses [local n8n workflows](n8n/README.md); OpenRig Team setup is retired.
 > MVP0/T09 has verified the GUI workflow through real Codex code, Kaggle training,
 > validated outputs/report and restart without duplicate submission. See the roadmap acceptance table.
 

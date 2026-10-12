@@ -64,7 +64,7 @@ class FixtureWorking:
     async def stop(self, project, run):
         self.records[(project,run)]['stop_confirmed'] = True
 
-def setup(tmp_path, *, approval='agent', calls=10):
+def setup(tmp_path, *, approval='agent', calls=10, run_approval=False):
     from ai_scientist.workbench.runtime import _agent_gateway_class
     _agent_gateway_class()
     projects = ProjectStore(tmp_path/'projects', tmp_path)
@@ -78,7 +78,7 @@ def setup(tmp_path, *, approval='agent', calls=10):
     spec = WorkflowSpec(goal='Verify checksum correctness', mode='etc', desired_output='A checksum result JSON',
         account='fixture', execution_seconds=60, ttl_seconds=180, output_bytes=1000,
         max_agent_calls=calls, stages={s:{'seat':s,'actor':approval if s=='approval' else 'agent'} for s in STAGES},
-        allow_agent_approval=approval=='agent', search=SearchOptions(enabled=False))
+        allow_agent_approval=approval=='agent', require_run_approval=run_approval, search=SearchOptions(enabled=False))
     identity = uuid.uuid4().hex
     owner.create('rig', identity, spec)
     return owner, identity, project, spec
@@ -116,6 +116,42 @@ async def test_human_approval_waits_without_admission(tmp_path):
     await asyncio.wait_for(owner.tasks[identity],5)
     assert owner.store.get(project,identity)['state']['status']=='DONE'
     assert owner.store.get(project,identity)['state']['approvals'][0]['actor']=='human'
+    await owner.close()
+
+
+@run_async
+async def test_default_requires_separate_human_consent_for_every_run(tmp_path):
+    owner, identity, project, spec = setup(tmp_path, approval='human', run_approval=True)
+    async def variant(project, parent, request, title, text, changes, mode, output, research, tags, benchmark):
+        return owner.projects.save_idea(project, text, title, mode, output, research, tags, benchmark)
+    owner.planner.create_variant = variant
+    with owner.projects.connection(project) as con:
+        body = spec.model_dump()
+        body['max_runs'] = 2
+        con.execute('UPDATE research_workflows SET spec_json=? WHERE id=?', (json.dumps(body), identity))
+    async def pending(stage):
+        for _ in range(200):
+            rows = [i for i in owner.store.inputs(project,identity) if i['stage']==stage and i['state']=='PENDING']
+            if rows and owner.view('rig',identity)['state']['status'] == 'WAITING':
+                return rows[0]
+            await asyncio.sleep(.02)
+        raise AssertionError(owner.view('rig',identity))
+    await owner.start('rig',identity)
+    for iteration in range(2):
+        proposal = await pending('approval')
+        assert owner.working.admissions == iteration
+        owner.store.answer(project,identity,proposal['id'],{'approve':True,'reason':'Proposal reviewed'})
+        run = await pending('run_approval')
+        assert owner.working.admissions == iteration
+        assert run['prompt']['candidate']['run_id'] == owner.view('rig',identity)['state']['run_id']
+        if iteration == 0:
+            await owner.pause('rig',identity)
+            await owner.start('rig',identity)
+            assert (await pending('run_approval'))['id'] == run['id']
+        owner.store.answer(project,identity,run['id'],{'approve':True,'reason':'Start this run'})
+    await asyncio.wait_for(owner.tasks[identity],5)
+    assert owner.working.admissions == 2
+    assert owner.view('rig',identity)['state']['status'] == 'DONE'
     await owner.close()
 
 @run_async

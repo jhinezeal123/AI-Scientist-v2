@@ -14,7 +14,7 @@ export type Resource = {id: string; kind: 'text'|'url'|'dataset'|'pdf'|'file'; t
   attachment?:{filename:string;original_file_path:string;original_sha256:string;original_bytes:number;
     manifest_file_path:string;manifest_sha256:string;page_count:number|null;processed_pages:number;text_pages:number;issues:string[]}};
 export type ResearchPlan = {summary:boolean;report:boolean;plots:boolean;writeup:'none'|'icbinb'|'normal';
-  review:boolean;seeds:number[];seed_stages:number[];reflections:number};
+  review:boolean;literature:boolean;literature_rounds:number;citations:boolean;citation_rounds:number;vlm:boolean;seeds:number[];seed_stages:number[];reflections:number};
 export type ResearchPipeline = {status:string;updated_at:string;
   components:Record<string,{status:string;reason:string;artifacts:string[]}>};
 export type PlanBody = {needs_clarification: boolean; questions: string[]; paraphrase: string;

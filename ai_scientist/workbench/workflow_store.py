@@ -3,6 +3,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from .store import StoreConflict
+from .store import canonical
 from .workflow_models import WorkflowSpec
 
 def now():
@@ -16,10 +17,10 @@ class WorkflowStore:
         con.execute('CREATE TABLE IF NOT EXISTS research_workflows(id TEXT PRIMARY KEY,rig_id TEXT NOT NULL,spec_json TEXT NOT NULL,state_json TEXT NOT NULL,updated_at TEXT NOT NULL)')
         con.execute('CREATE TABLE IF NOT EXISTS workflow_inputs(id TEXT PRIMARY KEY,workflow_id TEXT NOT NULL,stage TEXT NOT NULL,prompt_json TEXT NOT NULL,result_json TEXT,state TEXT NOT NULL,created_at TEXT NOT NULL)')
 
-    def list(self, project, rig):
+    def list(self, project, rig=None):
         with self.projects.connection(project) as con:
             self.setup(con)
-            return [self.decode(row) for row in con.execute('SELECT * FROM research_workflows WHERE rig_id=? ORDER BY rowid DESC', (rig,))]
+            return [self.decode(row) for row in con.execute('SELECT * FROM research_workflows WHERE (? IS NULL OR rig_id=?) ORDER BY rowid DESC', (rig, rig))]
 
     @staticmethod
     def decode(row):
@@ -143,4 +144,33 @@ class WorkflowStore:
                 raise ValueError('Human stage result exceeds 60KB')
             con.execute("UPDATE workflow_inputs SET state='DONE',result_json=? WHERE id=?", (json.dumps(result), input_id))
             state['status']='RUNNING'
+            con.execute('UPDATE research_workflows SET state_json=?,updated_at=? WHERE id=?', (json.dumps(state),now(),identity))
+
+    def revise_proposal(self, project, identity, candidate, message, request_id):
+        """Atomically invalidate the candidate and save one human revision intent."""
+        with self.projects.connection(project) as con:
+            self.setup(con)
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT state_json FROM research_workflows WHERE id=?', (identity,)).fetchone()
+            state = json.loads(row['state_json'])
+            if state['status'] not in {'RUNNING', 'WAITING'} or state.get('run_id'):
+                raise StoreConflict('Proposal discussion has already closed')
+            proposal = con.execute('SELECT * FROM proposals WHERE id=?', (candidate['id'],)).fetchone()
+            latest = con.execute('SELECT MAX(version) FROM proposals WHERE idea_id=?', (state['idea_id'],)).fetchone()[0]
+            if (state.get('proposal_id') != candidate['id'] or not proposal
+                    or proposal['idea_id'] != state['idea_id'] or proposal['version'] != candidate['version']
+                    or latest != candidate['version'] or proposal['state'] not in {'AWAITING_APPROVAL','NEEDS_CLARIFICATION'}):
+                raise StoreConflict('This proposal version can no longer receive messages')
+            idea = con.execute('SELECT state,conversation_json FROM ideas WHERE id=? AND deleted_at IS NULL', (state['idea_id'],)).fetchone()
+            if not idea or idea['state'] == 'PLANNING':
+                raise StoreConflict('Wait for the current proposal before sending a message')
+            conversation = json.loads(idea['conversation_json'])
+            conversation.append({'role':'user','text':message,'reply_to':candidate['id'],'request_id':request_id})
+            con.execute("UPDATE ideas SET conversation_json=?,state='DRAFT',error=NULL WHERE id=?", (canonical(conversation),state['idea_id']))
+            con.execute("UPDATE proposals SET state='STALE' WHERE idea_id=? AND state IN ('AWAITING_APPROVAL','NEEDS_CLARIFICATION')", (state['idea_id'],))
+            state.update(proposal_id=None, proposal_round=state.get('proposal_round',0)+1, revise_proposal=True,
+                         status='RUNNING', stage='proposal')
+            state['proposal_revision_request']={'round':state['proposal_round'],'request_id':request_id}
+            state['events'] = (state['events']+[{'stage':'proposal','kind':'user_requested_proposal_revision',
+                'request_id':request_id,'proposal_id':candidate['id'],'at':now()}])[-200:]
             con.execute('UPDATE research_workflows SET state_json=?,updated_at=? WHERE id=?', (json.dumps(state),now(),identity))

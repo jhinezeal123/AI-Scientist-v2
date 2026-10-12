@@ -1,7 +1,7 @@
 import {ResearchPlan} from './api';
 
 export const emptyResearch = ():ResearchPlan=>({summary:false,report:false,plots:false,writeup:'none',review:false,
-  seeds:[],seed_stages:[2,3],reflections:1});
+  literature:false,literature_rounds:5,citations:false,citation_rounds:20,vlm:false,seeds:[],seed_stages:[2,3],reflections:1});
 
 export default function ResearchOptions({value,onChange,disabled=false,readOnly=false}:{value:ResearchPlan;
   onChange?:(plan:ResearchPlan)=>void;disabled?:boolean;readOnly?:boolean}) {
@@ -16,7 +16,10 @@ export default function ResearchOptions({value,onChange,disabled=false,readOnly=
         onChange={e=>update({writeup:e.target.checked ? 'icbinb' : 'none'})}/><span>PDF</span></label>
       <label className="check"><input type="checkbox" checked={value.review}
         onChange={e=>update({review:e.target.checked})}/><span>Review</span></label>
+      <label className="check"><input type="checkbox" checked={!!value.citations} onChange={e=>update({citations:e.target.checked})}/><span>Thu thập citation</span></label>
+      <label className="check"><input type="checkbox" checked={!!value.vlm} onChange={e=>update({vlm:e.target.checked})}/><span>VLM đánh giá hình</span></label>
     </div>
+    {value.citations && <label>Số vòng citation tối đa<input type="number" min={1} max={40} value={value.citation_rounds||20} onChange={e=>update({citation_rounds:Number(e.target.value)})}/></label>}
     {value.writeup!=='none' && <label>Mẫu PDF<select value={value.writeup}
       onChange={e=>update({writeup:e.target.value as 'icbinb'|'normal'})}>
       <option value="icbinb">ICBINB · 4 trang</option><option value="normal">ICML · 8 trang</option></select></label>}

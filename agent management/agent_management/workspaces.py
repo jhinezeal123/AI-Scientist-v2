@@ -37,9 +37,9 @@ def safe_path(root: Path, value: str, *, allow_missing=True) -> Path:
 
 
 class Workspaces:
-    def __init__(self, repository: Path):
+    def __init__(self, repository: Path, *, data_root: Path | None = None):
         self.repository = repository.resolve()
-        self.root = self.repository / ".workbench" / "agents" / "worktrees"
+        self.root = (data_root or self.repository / ".workbench" / "agents") / "worktrees"
         self._lock = threading.RLock()
 
     def git(self, directory: Path, *args, timeout=30) -> str:

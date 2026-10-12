@@ -72,7 +72,9 @@ def session_home(template: Path, workspace: Path):
     template = template.resolve(strict=True)
     key = hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()
     # Keep live state separate from provider templates denied to other sandboxes.
-    target = template.parents[1] / 'runtimes' / ('dsh-' + key)
+    from .project_storage import data_root
+    repository = template.parents[3]
+    target = data_root(repository, workspace) / 'runtimes' / ('dsh-' + key)
     if target.is_symlink() or target.parent.is_symlink():
         raise ValueError('Refusing redirected DSH session storage')
     target.mkdir(parents=True, exist_ok=True)

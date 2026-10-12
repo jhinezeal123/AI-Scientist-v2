@@ -29,6 +29,7 @@ class RuntimeRequest:
     timeout_seconds: int = 300
     max_output_bytes: int = 3_000_000
     stage: str | None = None
+    images: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

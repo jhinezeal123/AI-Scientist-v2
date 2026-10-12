@@ -38,7 +38,7 @@ def save_node(root, approved, payload, commands, run_id):
 async def finish_research(service, key, approved, descriptor, terminal, payload, manifest, node, journal, deadline):
     """Use existing Codex/query adapter and original report/plot/PDF/review code."""
     plan = ResearchPlan.model_validate(approved['body'].get('research') or {})
-    if not any((plan.summary, plan.report, plan.plots, plan.writeup != 'none', plan.review)):
+    if not any((plan.summary, plan.report, plan.plots, plan.writeup != 'none', plan.review, plan.citations, plan.vlm)):
         return payload, manifest
     from .tree_search import TreeSearchRun, SearchInterrupted
     from ai_scientist.treesearch.backend import use_query_provider
