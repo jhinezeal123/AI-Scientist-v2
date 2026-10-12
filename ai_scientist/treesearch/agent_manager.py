@@ -714,146 +714,151 @@ Your research idea:\n\n
         )
 
     def run(self, exec_callback, step_callback=None):
-        """Run the experiment through generated stages"""
-        while self.current_stage:  # Main stage loop
-            main_stage = self.parse_stage_names(self.current_stage.name)[0]
-            print(f"[green]Starting main stage: {main_stage}[/green]")
-            print(f"[cyan]Goals: {self.current_stage.goals}[/cyan]")
+        """Run the experiment through generated stages."""
+        while self.current_stage:
+            self.run_main_stage(exec_callback, step_callback)
 
-            current_substage = self.current_stage
-            while current_substage:  # Sub-stage loop
-                self.current_stage = current_substage
-                print(f"[green]Starting sub-stage: {current_substage.name}[/green]")
+    def run_main_stage(self, exec_callback, step_callback=None):
+        """Execute the current main stage, preserving upstream substage policy."""
+        main_stage = self.parse_stage_names(self.current_stage.name)[0]
+        print(f"[green]Starting main stage: {main_stage}[/green]")
+        print(f"[cyan]Goals: {self.current_stage.goals}[/cyan]")
 
-                with self._create_agent_for_stage(current_substage) as agent:
-                    # Initialize with best result from previous sub-stage if available
-                    if self.stage_history:
-                        prev_stage = self.stage_history[-1].from_stage
-                        print(f"[cyan]prev_stage: {prev_stage}[/cyan]")
-                        print(f"[cyan]self.stage_history: {self.stage_history}[/cyan]")
-                        prev_best = self._get_best_implementation(prev_stage)
-                        if prev_best:
-                            self.journals[self.current_stage.name].append(prev_best)
-                        else:
-                            print(
-                                f"[red]No previous best implementation found for {self.current_stage.name}. Something went wrong so finishing the experiment...[/red]"
-                            )
-                            self.current_stage = None
-                            current_substage = None
-                            break
+        current_substage = self.current_stage
+        while current_substage:  # Sub-stage loop
+            self.current_stage = current_substage
+            print(f"[green]Starting sub-stage: {current_substage.name}[/green]")
 
-                    # Run until sub-stage completion
-                    while True:
-                        agent.step(exec_callback)
-                        if step_callback:
-                            step_callback(
-                                current_substage, self.journals[current_substage.name]
-                            )
-
-                        # First check if main stage is complete
-                        (
-                            main_stage_complete,
-                            main_stage_feedback,
-                        ) = self._check_stage_completion(current_substage)
+            with self._create_agent_for_stage(current_substage) as agent:
+                # Initialize with best result from previous sub-stage if available
+                if self.stage_history:
+                    prev_stage = self.stage_history[-1].from_stage
+                    print(f"[cyan]prev_stage: {prev_stage}[/cyan]")
+                    print(f"[cyan]self.stage_history: {self.stage_history}[/cyan]")
+                    prev_best = self._get_best_implementation(prev_stage)
+                    if prev_best:
+                        self.journals[self.current_stage.name].append(prev_best)
+                    else:
                         print(
-                            f"[cyan]Feedback from _check_stage_completion: {main_stage_feedback}[/cyan]"
+                            f"[red]No previous best implementation found for {self.current_stage.name}. Something went wrong so finishing the experiment...[/red]"
                         )
-                        if main_stage_complete:
-                            # After main stage completion, run multi-seed eval on the best node
-                            if (current_substage.stage_number in [1, 2, 3, 4]
-                                    and current_substage.stage_number in self.cfg.agent.multi_seed_eval.get('stages', [1, 2, 3, 4])
-                                    and self.cfg.agent.multi_seed_eval.num_seeds > 0):
-                                best_node = self._get_best_implementation(
-                                    current_substage.name
-                                )
-                                if best_node:
-                                    seed_nodes = agent._run_multi_seed_evaluation(
-                                        best_node
-                                    )
-                                    if step_callback:
-                                        step_callback(
-                                            current_substage,
-                                            self.journals[current_substage.name],
-                                        )
-                                    agent._run_plot_aggregation(best_node, seed_nodes)
-                                    if step_callback:
-                                        step_callback(
-                                            current_substage,
-                                            self.journals[current_substage.name],
-                                        )
-                                    print(
-                                        f"Stage {current_substage.name} multi-seed eval done."
-                                    )
-                                else:
-                                    logger.error(
-                                        f"No best node found for {current_substage.name} during multi-seed eval, something went wrong so finishing the experiment..."
-                                    )
-                                    self.current_stage = None
-                                    current_substage = None
-                                    break
+                        self.current_stage = None
+                        current_substage = None
+                        break
 
-                            # Exit the loop to move to next main stage
-                            current_substage = None
-                            break
-
-                        (
-                            substage_complete,
-                            substage_feedback,
-                        ) = self._check_substage_completion(
+                # Run until sub-stage completion
+                while True:
+                    agent.step(exec_callback)
+                    if step_callback:
+                        step_callback(
                             current_substage, self.journals[current_substage.name]
                         )
 
-                        if substage_complete:
-                            # Create next sub-stage
-                            next_substage = self._create_next_substage(
-                                current_substage,
-                                self.journals[current_substage.name],
-                                substage_feedback,
+                    # First check if main stage is complete
+                    (
+                        main_stage_complete,
+                        main_stage_feedback,
+                    ) = self._check_stage_completion(current_substage)
+                    print(
+                        f"[cyan]Feedback from _check_stage_completion: {main_stage_feedback}[/cyan]"
+                    )
+                    if main_stage_complete:
+                        # After main stage completion, run multi-seed eval on the best node
+                        if (current_substage.stage_number in [1, 2, 3, 4]
+                                and current_substage.stage_number in self.cfg.agent.multi_seed_eval.get('stages', [1, 2, 3, 4])
+                                and self.cfg.agent.multi_seed_eval.num_seeds > 0):
+                            best_node = self._get_best_implementation(
+                                current_substage.name
                             )
-                            if next_substage:
-                                # Record sub-stage transition
-                                self.stage_history.append(
-                                    StageTransition(
-                                        from_stage=current_substage.name,
-                                        to_stage=next_substage.name,
-                                        reason=substage_feedback,
-                                        config_adjustments={},
-                                    )
+                            if best_node:
+                                seed_nodes = agent._run_multi_seed_evaluation(
+                                    best_node
                                 )
-
-                                # Setup new sub-stage
-                                self.stages.append(next_substage)
-                                self.journals[next_substage.name] = Journal()
-                                current_substage = next_substage
+                                if step_callback:
+                                    step_callback(
+                                        current_substage,
+                                        self.journals[current_substage.name],
+                                    )
+                                agent._run_plot_aggregation(best_node, seed_nodes)
+                                if step_callback:
+                                    step_callback(
+                                        current_substage,
+                                        self.journals[current_substage.name],
+                                    )
+                                print(
+                                    f"Stage {current_substage.name} multi-seed eval done."
+                                )
                             else:
-                                # If no next sub-stage could be created, end this main stage
+                                logger.error(
+                                    f"No best node found for {current_substage.name} during multi-seed eval, something went wrong so finishing the experiment..."
+                                )
+                                self.current_stage = None
                                 current_substage = None
-                            break
-            self._save_checkpoint()
-            # Main stage complete - create next main stage
-            if self.current_stage:
-                next_main_stage = self._create_next_main_stage(
-                    self.stages[-1], self.journals[self.stages[-1].name]
-                )
-                if next_main_stage:
-                    # Record main stage transition
-                    self.stage_history.append(
-                        StageTransition(
-                            from_stage=self.stages[-1].name,
-                            to_stage=next_main_stage.name,
-                            reason=f"Moving to {next_main_stage.description}",
-                            config_adjustments={},
-                        )
+                                break
+
+                        # Exit the loop to move to next main stage
+                        current_substage = None
+                        break
+
+                    (
+                        substage_complete,
+                        substage_feedback,
+                    ) = self._check_substage_completion(
+                        current_substage, self.journals[current_substage.name]
                     )
 
-                    self.stages.append(next_main_stage)
-                    self.journals[next_main_stage.name] = Journal()
-                    self.current_stage = next_main_stage
-                else:
-                    # Exit the outer loop if no more main stages
-                    logger.info(f"Completed stage: {self.current_stage.name}")
-                    logger.info("No more stages to run -- exiting the loop...")
-                    self.current_stage = None
+                    if substage_complete:
+                        # Create next sub-stage
+                        next_substage = self._create_next_substage(
+                            current_substage,
+                            self.journals[current_substage.name],
+                            substage_feedback,
+                        )
+                        if next_substage:
+                            # Record sub-stage transition
+                            self.stage_history.append(
+                                StageTransition(
+                                    from_stage=current_substage.name,
+                                    to_stage=next_substage.name,
+                                    reason=substage_feedback,
+                                    config_adjustments={},
+                                )
+                            )
+
+                            # Setup new sub-stage
+                            self.stages.append(next_substage)
+                            self.journals[next_substage.name] = Journal()
+                            current_substage = next_substage
+                        else:
+                            # If no next sub-stage could be created, end this main stage
+                            current_substage = None
+                        break
+        self._save_checkpoint()
+        # Main stage complete - create next main stage
+        if self.current_stage:
+            next_main_stage = self._create_next_main_stage(
+                self.stages[-1], self.journals[self.stages[-1].name]
+            )
+            if next_main_stage:
+                # Record main stage transition
+                self.stage_history.append(
+                    StageTransition(
+                        from_stage=self.stages[-1].name,
+                        to_stage=next_main_stage.name,
+                        reason=f"Moving to {next_main_stage.description}",
+                        config_adjustments={},
+                    )
+                )
+
+                self.stages.append(next_main_stage)
+                self.journals[next_main_stage.name] = Journal()
+                self.current_stage = next_main_stage
+            else:
+                # Exit the outer loop if no more main stages
+                logger.info(f"Completed stage: {self.current_stage.name}")
+                logger.info("No more stages to run -- exiting the loop...")
+                self.current_stage = None
+
 
     def _create_stage_analysis_prompt(
         self,

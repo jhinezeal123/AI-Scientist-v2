@@ -351,7 +351,7 @@ class TreeSearchRun:
         save_run(self.manager.cfg, journal, stage_name='stage_' + stage.name)
         self.checkpoint(self.manager)
 
-    def run(self):
+    def prepare_search(self):
         cfg = OmegaConf.load(Path(__file__).resolve().parents[2] / 'bfts_config.yaml')
         cfg.log_dir, cfg.workspace_dir, cfg.exp_name = str(self.logs), str(self.root), '0-run'
         # save_run operates on Paths; allow these objects in the original config.
@@ -373,89 +373,100 @@ class TreeSearchRun:
         for key in ('code', 'feedback', 'select_node', 'summary'):
             cfg.agent[key] = {'model': self.service.config.codex_model, 'temp': 0.3}
         cfg.report = {'model':self.service.config.codex_model,'temp':0.3}
+        return cfg
+
+    def prepare_manager(self, cfg):
         description = json.loads((self.root / 'idea.json').read_text(encoding='utf-8'))
         goals = json.loads(load_prompt('search.stage_goals'))
-        with use_query_provider(self.query):
-            self.manager = AgentManager(json.dumps(description, ensure_ascii=False), cfg, self.root,
-                agent_factory=lambda **kwargs: RemoteSearchAgent(self, **kwargs),
-                checkpoint_callback=self.checkpoint, stage_goals={int(key): value for key, value in goals.items()})
+        self.manager = AgentManager(json.dumps(description, ensure_ascii=False), cfg, self.root,
+            agent_factory=lambda **kwargs: RemoteSearchAgent(self, **kwargs),
+            checkpoint_callback=self.checkpoint, stage_goals={int(key): value for key, value in goals.items()})
+        self.checkpoint(self.manager)
+        write_json(self.root / 'token_tracker.json', {'usage_status': 'unavailable', 'models': {}, 'calls': []})
+
+    def finish_search(self, cfg):
+        # Keep original stage journals as evidence; the unified viewer combines
+        # every node once using its original ID and parent relationship.
+        cfg.unified_stage_paths = {}
+        for number, main_name in self.manager.main_stage_dict.items():
+            records = {}
+            for name, stage_journal in self.manager.journals.items():
+                if self.manager.parse_stage_names(name)[0] == number:
+                    for node in stage_journal.nodes:
+                        records.setdefault(node.id, node.to_dict())
+            if records:
+                combined = restore_journal({'nodes': list(records.values())})
+                directory = f'stage_{number}_{main_name}'
+                cfg.unified_stage_paths[f'Stage_{number}'] = directory
+                save_run(cfg, combined, stage_name=directory)
+        final_stage = self.manager.stages[-1]
+        journal = self.manager.journals[final_stage.name]
+        best = journal.get_best_node(cfg=cfg)
+        completed = {self.manager.parse_stage_names(stage.name)[0] for stage in self.manager.stages}
+        if best is None or best.id not in self.nodes:
+            raise ValueError('Tree search produced no verified working implementation')
+        self.selected_node_id = best.id
+        best_root, manifest, payload = self.nodes[best.id]
+        # Publish the verified selected solution; all other nodes remain immutable.
+        import shutil
+        for item in manifest['files']:
+            target = self.root / item['path']
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(best_root / item['path'], target)
+        write_json(self.root / 'journal.json', journal_snapshot(journal))
+        write_json(self.root / 'working-manifest.json', manifest)
+        reviews = [f'{name}: ' + json.dumps(response, ensure_ascii=False)
+                   for name, response in self.cache.items()]
+        (self.logs / 'selection-feedback.txt' if self.pipeline else self.root / 'review_text.txt').write_text('\n\n'.join(reviews), encoding='utf-8')
+        successful_stages = {int(name.split('_')[0]) for name, results in self.stage_results.items()
+                             if any(item['succeeded'] and item['id'] in self.nodes
+                                    and self.node_stages[item['id']] == name for item in results)}
+        success = completed == successful_stages == {1, 2, 3, 4}
+        # A selected baseline can originate in Draft even after all stages
+        # complete. Its limitations describe that node's execution time,
+        # not the final aggregate experiment outcome.
+        limitations = ['Giới hạn node được chọn lúc thực thi: ' + item for item in payload.limitations]
+        if not success:
+            limitations.append('Chưa có bản thử thành công ở đủ bốn giai đoạn.')
+        if self.pipeline:
+            # Restore the selected implementation before optional SSH finishing
+            # steps; the last ablation/seed can differ from the selected node.
+            if self.pipeline.plan.plots or self.pipeline.plan.writeup != 'none':
+                cleanup = "import pathlib,shutil; [(shutil.rmtree(p) if p.is_dir() and not p.is_symlink() else p.unlink()) for p in [pathlib.Path('source'),pathlib.Path('output')] if p.exists() or p.is_symlink()]"
+                if self.terminal.request('exec',command=f'cd {shlex.quote(self.descriptor["remote_directory"])} && python -c {shlex.quote(cleanup)}',timeout=30)['returncode'] != 0:
+                    raise ValueError('Cannot restore selected research implementation')
+                for item in manifest['files']:
+                    data = (best_root/item['path']).read_bytes()
+                    if hashlib.sha256(data).hexdigest()!=item['sha256']:
+                        raise ValueError('Selected node evidence changed')
+                    transfer_library_file(self.terminal,item['path'],data)
+            finished,extra_limits = self.pipeline.run(success)
+            success = success and finished
+            limitations.extend(extra_limits)
+            if self.pipeline.plan.plots or self.pipeline.plan.writeup != 'none':
+                manifest = collect_files(self.terminal,self.root,self.approved['body'].get('budget',{}).get('output_bytes'))
+                write_json(self.root/'working-manifest.json',manifest)
             self.checkpoint(self.manager)
-            write_json(self.root / 'token_tracker.json', {'usage_status': 'unavailable', 'models': {}, 'calls': []})
+        evidence = ['Kết quả được chọn: ' + payload.summary]
+        for name, results in self.stage_results.items():
+            own = [item for item in results if item['id'] in self.nodes
+                   and self.node_stages[item['id']] == name]
+            if own:
+                evidence.append(name + ': ' + own[-1]['summary'])
+        summary = WorkingPayload(succeeded=success, summary='\n\n'.join(evidence)[:20_000],
+                                 limitations=limitations, output_files=payload.output_files)
+        return summary, manifest, best
+
+
+    def run(self):
+        cfg = self.prepare_search()
+        with use_query_provider(self.query):
+            self.prepare_manager(cfg)
             try:
                 self.manager.run(exec_callback=None, step_callback=self.save_stage)
             finally:
                 self.checkpoint(self.manager)
-            # Keep original stage journals as evidence; the unified viewer combines
-            # every node once using its original ID and parent relationship.
-            cfg.unified_stage_paths = {}
-            for number, main_name in self.manager.main_stage_dict.items():
-                records = {}
-                for name, stage_journal in self.manager.journals.items():
-                    if self.manager.parse_stage_names(name)[0] == number:
-                        for node in stage_journal.nodes:
-                            records.setdefault(node.id, node.to_dict())
-                if records:
-                    combined = restore_journal({'nodes': list(records.values())})
-                    directory = f'stage_{number}_{main_name}'
-                    cfg.unified_stage_paths[f'Stage_{number}'] = directory
-                    save_run(cfg, combined, stage_name=directory)
-            final_stage = self.manager.stages[-1]
-            journal = self.manager.journals[final_stage.name]
-            best = journal.get_best_node(cfg=cfg)
-            completed = {self.manager.parse_stage_names(stage.name)[0] for stage in self.manager.stages}
-            if best is None or best.id not in self.nodes:
-                raise ValueError('Tree search produced no verified working implementation')
-            self.selected_node_id = best.id
-            best_root, manifest, payload = self.nodes[best.id]
-            # Publish the verified selected solution; all other nodes remain immutable.
-            import shutil
-            for item in manifest['files']:
-                target = self.root / item['path']
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(best_root / item['path'], target)
-            write_json(self.root / 'journal.json', journal_snapshot(journal))
-            write_json(self.root / 'working-manifest.json', manifest)
-            reviews = [f'{name}: ' + json.dumps(response, ensure_ascii=False)
-                       for name, response in self.cache.items()]
-            (self.logs / 'selection-feedback.txt' if self.pipeline else self.root / 'review_text.txt').write_text('\n\n'.join(reviews), encoding='utf-8')
-            successful_stages = {int(name.split('_')[0]) for name, results in self.stage_results.items()
-                                 if any(item['succeeded'] and item['id'] in self.nodes
-                                        and self.node_stages[item['id']] == name for item in results)}
-            success = completed == successful_stages == {1, 2, 3, 4}
-            # A selected baseline can originate in Draft even after all stages
-            # complete. Its limitations describe that node's execution time,
-            # not the final aggregate experiment outcome.
-            limitations = ['Giới hạn node được chọn lúc thực thi: ' + item for item in payload.limitations]
-            if not success:
-                limitations.append('Chưa có bản thử thành công ở đủ bốn giai đoạn.')
-            if self.pipeline:
-                # Restore the selected implementation before optional SSH finishing
-                # steps; the last ablation/seed can differ from the selected node.
-                if self.pipeline.plan.plots or self.pipeline.plan.writeup != 'none':
-                    cleanup = "import pathlib,shutil; [(shutil.rmtree(p) if p.is_dir() and not p.is_symlink() else p.unlink()) for p in [pathlib.Path('source'),pathlib.Path('output')] if p.exists() or p.is_symlink()]"
-                    if self.terminal.request('exec',command=f'cd {shlex.quote(self.descriptor["remote_directory"])} && python -c {shlex.quote(cleanup)}',timeout=30)['returncode'] != 0:
-                        raise ValueError('Cannot restore selected research implementation')
-                    for item in manifest['files']:
-                        data = (best_root/item['path']).read_bytes()
-                        if hashlib.sha256(data).hexdigest()!=item['sha256']:
-                            raise ValueError('Selected node evidence changed')
-                        transfer_library_file(self.terminal,item['path'],data)
-                finished,extra_limits = self.pipeline.run(success)
-                success = success and finished
-                limitations.extend(extra_limits)
-                if self.pipeline.plan.plots or self.pipeline.plan.writeup != 'none':
-                    manifest = collect_files(self.terminal,self.root,self.approved['body'].get('budget',{}).get('output_bytes'))
-                    write_json(self.root/'working-manifest.json',manifest)
-                self.checkpoint(self.manager)
-            evidence = ['Kết quả được chọn: ' + payload.summary]
-            for name, results in self.stage_results.items():
-                own = [item for item in results if item['id'] in self.nodes
-                       and self.node_stages[item['id']] == name]
-                if own:
-                    evidence.append(name + ': ' + own[-1]['summary'])
-            summary = WorkingPayload(succeeded=success, summary='\n\n'.join(evidence)[:20_000],
-                                     limitations=limitations, output_files=payload.output_files)
-            return summary, manifest, best
+            return self.finish_search(cfg)
 
     async def execute(self):
         try:
