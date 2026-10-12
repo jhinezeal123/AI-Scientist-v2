@@ -1,6 +1,7 @@
 """Project defaults and deliberate per-idea context overrides."""
 import json
 from .store import StoreConflict, canonical
+from .run_configuration import RunConfiguration
 
 
 class ProjectConfiguration:
@@ -30,6 +31,10 @@ class ProjectConfiguration:
             self.setup(con,project)
             row = con.execute('SELECT * FROM project_configuration').fetchone()
             body = json.loads(row['body_json'])
+            run = body.get('run') or RunConfiguration.from_workflow(body.get('workflow')).model_dump(mode='json')
+            body['run'] = run
+            if body.get('workflow'):
+                body['workflow'] = {**body['workflow'], **run}
             available = {r[0] for r in con.execute('SELECT id FROM resources WHERE id NOT IN (SELECT resource_id FROM source_deletions)')}
             body['resource_ids'] = [r for r in body['resource_ids'] if r in available]
             return {'version': row['version'], **body}
@@ -54,10 +59,40 @@ class ProjectConfiguration:
             if resource_ids is not None:
                 body['resource_ids'] = resource_ids
             if workflow is not None:
-                body['workflow'] = workflow
+                # Store orchestration separately. Older clients can seed the
+                # run defaults once, but cannot overwrite Run-owned settings.
+                body.setdefault('run',RunConfiguration.from_workflow(body.get('workflow') or workflow).model_dump(mode='json'))
+                body['workflow'] = {k:v for k,v in workflow.items() if k not in RunConfiguration.model_fields}
             if canonical(body) != row['body_json']:
                 con.execute('UPDATE project_configuration SET version=version+1,body_json=?', (canonical(body),))
         return self.get(project)
+
+    def save_run(self, project, version, run):
+        if run.benchmark_id:
+            from .benchmarks import BenchmarkCatalog
+            BenchmarkCatalog(self.projects).require(project,run.benchmark_id)
+        with self.projects.connection(project) as con:
+            self.setup(con,project)
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT * FROM project_configuration').fetchone()
+            if row['version']!=version:
+                raise StoreConflict('Cấu hình project đã thay đổi; tải lại trước khi lưu')
+            body = json.loads(row['body_json'])
+            body['run'] = run.model_dump(mode='json')
+            if body.get('workflow'):
+                body['workflow'] = {k:v for k,v in body['workflow'].items() if k not in RunConfiguration.model_fields}
+            if canonical(body)!=row['body_json']:
+                con.execute('UPDATE project_configuration SET version=version+1,body_json=?',(canonical(body),))
+        return self.get(project)
+
+    def workflow_spec(self, project, spec, version=None):
+        """Compose current project defaults without mutating existing grants."""
+        from .workflow_models import WorkflowSpec
+        saved = self.get(project)
+        if version is not None and saved['version']!=version:
+            raise StoreConflict('Cấu hình Run hoặc Library đã đổi; tải lại Workflow trước khi lưu')
+        return WorkflowSpec.model_validate({**spec.model_dump(mode='json'),**saved['run'],
+            'resource_ids':saved['resource_ids']})
 
     def selection(self, project, idea):
         self.projects.idea(project, idea)
@@ -108,7 +143,7 @@ class ProjectConfiguration:
 
     def idea_values(self, project, value):
         """Only omitted fields inherit; explicit empty/false choices are overrides."""
-        saved = self.get(project)['workflow'] or {}
+        saved = self.get(project)['run']
         body = value.model_dump()
         for field in ('mode','desired_output','benchmark_id','research'):
             if field not in value.model_fields_set and field in saved:

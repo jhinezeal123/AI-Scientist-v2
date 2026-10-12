@@ -2,7 +2,8 @@ import {useCallback,useEffect,useState} from 'react';
 import {api,Benchmark,History,Variant,Working,RunMode,RunOutput,Resource,ResearchPlan,ResearchPipeline,KaggleAccount} from './api';
 import WorkflowHumanStep from './WorkflowHumanStep';
 import {Flow,HumanInput} from './projectWorkflows';
-import {configuration} from './projectConfiguration';
+import {configuration,ProjectConfiguration} from './projectConfiguration';
+import ProjectRunConfiguration from './ProjectRunConfiguration';
 import RunMonitorPanel from './RunMonitorPanel';
 import OutputToLibrary from './OutputToLibrary';
 import ResearchScope from './ResearchScope';
@@ -20,8 +21,8 @@ type RunDetail={id:string;title:string;state:string;error:string|null;deleted_at
   result_metric?:{name:string;direction:string;final_value:number;best_value:number}};
 
 export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onWorking,onStop,onResumeQueue,onReconcile,
-  onDelete,onRestore,onBranch,onBatch,onOutputCopied,workflow,onWorkflowAnswer}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
-  workflow?:Flow;onWorkflowAnswer:(input:HumanInput,result:unknown)=>Promise<void>;
+  onDelete,onRestore,onBranch,onBatch,onOutputCopied,workflow,onWorkflowAnswer,onConfigurationSaved}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
+  onConfigurationSaved:(value:ProjectConfiguration)=>void;workflow?:Flow;onWorkflowAnswer:(input:HumanInput,result:unknown)=>Promise<void>;
   runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,account:string)=>Promise<void>;
   onStop:(id:string)=>Promise<void>;onResumeQueue:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;onDelete:(id:string)=>Promise<void>;
   onRestore:(id:string)=>Promise<void>;onBranch:(id:string,mode:RunMode)=>void;
@@ -41,7 +42,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
       .catch(e=>{if(!cancelled)setAccountError(e instanceof Error?e.message:String(e));});
     return ()=>{cancelled=true;};
   },[]);
-  useEffect(()=>{let stopped=false;configuration(projectId).then(value=>{if(!stopped&&value.workflow){setAccelerator(value.workflow.accelerator);setTtl(value.workflow.ttl_seconds);setAccount(value.workflow.account);}}).catch(e=>{if(!stopped)setError(e.message);});return()=>{stopped=true;};},[projectId]);
+  useEffect(()=>{let stopped=false;configuration(projectId).then(value=>{if(!stopped){setAccelerator(value.run.accelerator);setTtl(value.run.ttl_seconds);setAccount(value.run.account);}}).catch(e=>{if(!stopped)setError(e.message);});return()=>{stopped=true;};},[projectId]);
   const ownedRun=!!workflow&&workflow.state.run_id===selectedRunId;
   const runInputs=workflow?.inputs?.filter(i=>i.state==='PENDING'&&!['ideation','literature','approval'].includes(i.stage))||[];
   const selectedAccount=accounts.find(item=>item.account===account);
@@ -82,6 +83,7 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
     <a href={`/?page=run-tree&project=${projectId}`} target="_blank" rel="noreferrer">Mở cây toàn màn hình ↗</a>
     {runs.some(item=>item.deleted_at) && <button type="button" onClick={()=>{setShowDeleted(!showDeleted);onSelect('');}}>
       {showDeleted ? 'Cây hiện hành' : 'Run đã xóa trước đây'}</button>}</div>
+    <ProjectRunConfiguration projectId={projectId} disabled={busy} onSaved={value=>{setAccount(value.run.account);setAccelerator(value.run.accelerator);setTtl(value.run.ttl_seconds);onConfigurationSaved(value);}}/>
     <section className="run-comparison"><label>Biểu đồ MLflow theo benchmark<select value={benchmarkId} onChange={e=>setBenchmarkId(e.target.value)}><option value="">Chọn benchmark</option>{benchmarks.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label></section>
     {benchmarkId && <RunComparison projectId={projectId} benchmarkId={benchmarkId} runIds={[]} onClose={()=>setBenchmarkId('')} onOpen={onSelect}/>}
     <RunBoard runs={visible} selectedId={selectedId} onSelect={onSelect} onCompare={ids=>setComparison(ids)}

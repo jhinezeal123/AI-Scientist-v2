@@ -11,6 +11,7 @@ from .runtime import _agent_gateway_class
 class WorkflowInput(StrictModel):
     request_id: str = Field(pattern=r'^[a-f0-9]{32}$')
     spec: WorkflowSpec
+    configuration_version: int | None = Field(default=None,ge=1)
 
 
 class HumanAnswer(StrictModel):
@@ -99,7 +100,23 @@ def create_n8n_router():
 
     @router.post('/projects/{project}/workflows')
     def create(project: str, body: WorkflowInput, request: Request):
-        return owner(request, project, 'research').create(project, body.request_id, body.spec)
+        service = owner(request,project,'research')
+        # Retry an existing request against its frozen spec. A project default
+        # changed since the lost response must not rewrite that grant.
+        existing = next((r for r in service.list(project) if r['id']==body.request_id),None)
+        if existing:
+            from .run_configuration import RunConfiguration
+            from .store import StoreConflict
+            def orchestration(value):
+                result = {k:v for k,v in value.items() if k not in RunConfiguration.model_fields and k!='resource_ids'}
+                result['stages'] = {s:{'actor':b['actor'],'preset_id':b.get('preset_id') if b['actor']=='agent' else None,
+                                      'ask':b.get('ask',False) if b['actor']=='agent' else False} for s,b in result['stages'].items()}
+                return result
+            if orchestration(existing['spec'])!=orchestration(body.spec.model_dump(mode='json')):
+                raise StoreConflict('Workflow request ID belongs to different orchestration')
+            return service.view(project,body.request_id)
+        spec = service.controls.configuration.workflow_spec(project,body.spec,body.configuration_version)
+        return service.create(project, body.request_id, spec)
 
     @router.get('/projects/{project}/workflows/{identity}')
     def detail(project: str, identity: str, request: Request):

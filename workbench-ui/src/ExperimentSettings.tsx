@@ -1,6 +1,6 @@
-import {WorkflowSpec} from './projectWorkflows';
+import {RunConfiguration} from './projectConfiguration';
 
-export default function ExperimentSettings({spec,onChange}:{spec:WorkflowSpec;onChange:(value:Partial<WorkflowSpec>)=>void}){
+export default function ExperimentSettings({spec,onChange}:{spec:Pick<RunConfiguration,'search'>;onChange:(value:Pick<RunConfiguration,'search'>)=>void}){
   const search=spec.search;
   const set=(value:Partial<typeof search>)=>onChange({search:{...search,...value}});
   return <fieldset className="output-options experiment-settings"><legend>Experiment manager</legend>

@@ -9,9 +9,10 @@ export type N8nStatus={ready:boolean;editor_url:string;workflow_url:string;agent
 export type Flow={id:string;project_id:string;spec:WorkflowSpec;state:{status:string;stage:string;iteration:number;calls:number;runs:string[];run_id:string|null;idea_id:string|null;proposal_id:string|null;generation:number;events:{stage:string;kind:string;at:string;execution_id?:string;preset_id?:string}[];error?:string};inputs?:HumanInput[];n8n?:N8nStatus};
 export type WorkflowOptions={project_id:string;resources:{id:string;title:string}[];benchmarks:{id:string;title?:string;name?:string}[];accounts:{account:string;username:string;configured:boolean}[];n8n:N8nStatus;configuration:import('./projectConfiguration').ProjectConfiguration;literature?:{configured:boolean}};
 export const workflowBase=(project:string)=>'/projects/'+project+'/workflows';
-export async function saveWorkflow(project:string,spec:WorkflowSpec){
-  const intent=await teamIntent(project+':n8n-workflow',spec);
-  const result=await agentCall<Flow>(workflowBase(project),'POST',{request_id:intent.id.replaceAll('-',''),spec});
+export async function saveWorkflow(project:string,spec:WorkflowSpec,configuration_version?:number){
+  const body={spec,...(configuration_version!==undefined?{configuration_version}:{})};
+  const intent=await teamIntent(project+':n8n-workflow',body);
+  const result=await agentCall<Flow>(workflowBase(project),'POST',{request_id:intent.id.replaceAll('-',''),...body});
   intent.ack();return result;
 }
 export function defaults(preset='default'):WorkflowSpec{

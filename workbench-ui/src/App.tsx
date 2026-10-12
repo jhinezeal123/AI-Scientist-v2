@@ -129,7 +129,7 @@ export default function App() {
       .then(([r, i, h, p, b, c]) => {
         if (cancelled) return;
         setResources(r); setIdeas(i); setHistory(h); setProposals(p);setBenchmarks(b);setProjectConfig(c);
-        const defaultsKey=projectId+':'+JSON.stringify(c.workflow);if(initializedDefaults.current!==defaultsKey&&!ideaText.trim()&&!title.trim()&&!editingIdea&&!branch){initializedDefaults.current=defaultsKey;const d=c.workflow;if(d){setMode(d.mode);setResearch(d.research);setBenchmarkId(d.benchmark_id||'');setDesiredOutput(d.desired_output);}}
+        const defaultsKey=projectId+':'+JSON.stringify(c.run);if(initializedDefaults.current!==defaultsKey&&!ideaText.trim()&&!title.trim()&&!editingIdea&&!branch){initializedDefaults.current=defaultsKey;const d=c.run;if(d){setMode(d.mode);setResearch(d.research);setBenchmarkId(d.benchmark_id||'');setDesiredOutput(d.desired_output);}}
         setConnectionError('');
         setSelected(current=>current.filter(id=>r.some(source=>source.id===id && !source.deletion_pending)));
         setIdeaId(current => i.some(idea => idea.id === current && !idea.deleted_at) ? current : '');
@@ -222,7 +222,7 @@ export default function App() {
   const sourceVersionSignature=JSON.stringify(resources.filter(source=>!source.deletion_pending)
     .map(source=>[source.id,source.version,source.content_sha256]));
   useEffect(()=>{setReviewedVariantSources('');},[projectId,sourceVersionSignature]);
-  function resetIdeaSettings(){const d=projectConfig?.workflow;setDesiredOutput(d?.desired_output||'');setResearch(d?.research||emptyResearch());setBenchmarkId(d?.benchmark_id||'');setRunTags([]);if(d)setMode(d.mode);}
+  function resetIdeaSettings(){const d=projectConfig?.run;setDesiredOutput(d?.desired_output||'');setResearch(d?.research||emptyResearch());setBenchmarkId(d?.benchmark_id||'');setRunTags([]);if(d)setMode(d.mode);}
   function selectIdea(id:string) {
     setIdeaId(id);setContext(null);
     setReviewedVariantSources('');
@@ -266,8 +266,8 @@ export default function App() {
   function beginBranch(id:string,branchMode:RunMode) {
     const parent=history.runs.find(run=>run.id===id);
     setBranch({parentId:id,title:parent?.title || 'Run '+id.slice(0,8),mode:branchMode,requestId:crypto.randomUUID().replaceAll('-','')});
-    setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput(branchMode==='etc'?parent?.desired_output||projectConfig?.workflow?.desired_output||'':'');setBranchChanges('');
-    setResearch(proposals.find(p=>p.id===parent?.proposal_id)?.body.research||projectConfig?.workflow?.research||emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');setBenchmarkId(parent?.benchmark?.id||'');
+    setEditingIdea(null);setIdeaText('');setTitle('');setDesiredOutput(branchMode==='etc'?parent?.desired_output||projectConfig?.run.desired_output||'':'');setBranchChanges('');
+    setResearch(proposals.find(p=>p.id===parent?.proposal_id)?.body.research||projectConfig?.run.research||emptyResearch());setRunTags([]);setContext(null);setIdeaId('');setMode(branchMode);setTab('Idea');setBenchmarkId(parent?.benchmark?.id||'');
     setSelected((parent?.source_refs || []).map(source=>source.id).filter(id=>resources.some(source=>source.id===id && !source.deletion_pending)));
   }
   return <div className="app">
@@ -361,7 +361,7 @@ export default function App() {
             <div className="actions">{['research','tuning','ablation'].map(tag=><label className="check" key={tag}>
               <input type="checkbox" checked={runTags.includes(tag)} onChange={e=>setRunTags(old=>e.target.checked ? [...old,tag] : old.filter(value=>value!==tag))}/><span>{tag}</span></label>)}</div>
             <small className="muted">Chỉ để ghi nhớ; không thay đổi cách agent thực hiện.</small></fieldset>}
-          {projectConfig?.workflow&&!editingIdea&&<p className="muted">Đang dùng mặc định của project. Thay đổi dưới đây chỉ áp dụng cho idea này.</p>}
+          {projectConfig&&!editingIdea&&<p className="muted">Đang dùng cấu hình Run mặc định của project. Thay đổi dưới đây chỉ áp dụng cho idea này.</p>}
           {formMode==='training_research' && <ResearchOptions value={research} onChange={setResearch} disabled={busy || unavailable}/>}
           <div className="actions"><button className="primary" disabled={busy || unavailable || !title.trim() || !ideaText.trim() || (!!branch && !branchChanges.trim())}>{editingIdea ? 'Lưu thay đổi idea' : 'Lưu idea'}</button>
             {(editingIdea || branch) && <button type="button" onClick={()=>{setEditingIdea(null);setBranch(null);setBranchChanges('');setIdeaText('');setTitle('');resetIdeaSettings();}}>Hủy</button>}</div></form>
@@ -420,7 +420,7 @@ export default function App() {
           const run = await api<{id?:string;workflow_id?:string}>(`/projects/${projectId}/proposals/${proposal.id}/approve`,'POST',{version:proposal.version,context_sha256:proposal.context_sha256});setRevision(n => n+1);setNotice(run.workflow_id?'Đã gửi duyệt proposal; workflow sẽ tạo run và chờ bạn duyệt bắt đầu.':`Đã duyệt và tạo run ${run.id}. Chưa chạy code/training.`);
           if(run.workflow_id)setRunId('');else if(run.id)setRunId(run.id);setTab('Run');
         });}}/></div>}
-        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} selectedRunId={runId||currentFlow?.state.run_id||''} onSelect={setRunId} workflow={currentFlow||undefined} onWorkflowAnswer={async(input,result)=>{await action(async()=>{await agentCall(workflowBase(projectId)+'/'+currentFlow!.id+'/inputs/'+input.id,'POST',{result});setRevision(n=>n+1);});}} runs={history.runs} busy={busy || unavailable || planning}
+        {tab === 'Run' && <RunPanel key={projectId} projectId={projectId} onConfigurationSaved={value=>{setProjectConfig(value);setRevision(n=>n+1);}} selectedRunId={runId||currentFlow?.state.run_id||''} onSelect={setRunId} workflow={currentFlow||undefined} onWorkflowAnswer={async(input,result)=>{await action(async()=>{await agentCall(workflowBase(projectId)+'/'+currentFlow!.id+'/inputs/'+input.id,'POST',{result});setRevision(n=>n+1);});}} runs={history.runs} busy={busy || unavailable || planning}
           onOutputCopied={()=>setRevision(n=>n+1)}
           onBatch={async items=>{await action(async()=>{
             const result=await api<{runs:{run_id:string;state:string;reason?:string}[]}>(`/projects/${projectId}/runs/batch`,'POST',{runs:items});

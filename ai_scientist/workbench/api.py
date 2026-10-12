@@ -13,6 +13,7 @@ from .benchmark_tracking import TrackingUnavailable
 from .log_window import read_log_window
 from .resources import readiness_sources
 from .store import StoreConflict
+from .run_configuration import RunConfiguration
 
 
 class ProjectInput(StrictModel):
@@ -65,6 +66,11 @@ class ProjectSourcesInput(StrictModel):
 class IdeaSourcesInput(StrictModel):
     version: int = Field(ge=0)
     resource_ids: list[str] | None = Field(default=None,max_length=30)
+
+
+class RunConfigurationInput(StrictModel):
+    version: int = Field(ge=1)
+    run: RunConfiguration
 
 
 class IdeaUpdate(IdeaInput):
@@ -180,6 +186,12 @@ def library_router(store, workspace_root):
     @router.get('/projects/{project_id}/configuration')
     def project_configuration(project_id: str):
         return call(configuration.get,project_id)
+
+    @router.put('/projects/{project_id}/configuration/run')
+    def save_run_configuration(project_id: str, body: RunConfigurationInput, request: Request):
+        if body.run.account and request.app.state.working.accounts:
+            call(request.app.state.working.accounts.require,body.run.account)
+        return call(configuration.save_run,project_id,body.version,body.run)
 
     @router.put('/projects/{project_id}/configuration/sources')
     def project_sources(project_id: str, body: ProjectSourcesInput):
