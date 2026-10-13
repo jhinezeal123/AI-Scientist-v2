@@ -76,7 +76,7 @@ def test_run_api_save_then_workflow_uses_saved_settings_and_retries_frozen_grant
         assert client.put(prefix+'/run',json={'version':version,'run':{**run,'account':'later-account'}}).status_code==200
         retry=client.post(path,json=payload)
         assert retry.status_code==200 and retry.json()['spec']==grant
-        payload['spec']['goal']='Different request'
+        payload['spec']['max_runs']=2
         assert client.post(path,json=payload).status_code==409
         invalid={**run,'execution_seconds':599}
         assert client.put(prefix+'/run',json={'version':version,'run':invalid}).status_code==422

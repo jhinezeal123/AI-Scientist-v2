@@ -951,6 +951,8 @@ class ProjectStore:
             artifact_dir = "runs/" + run_id
             connection.execute("INSERT INTO runs(id,proposal_id,state,intent_key,artifact_dir) VALUES(?,?,'APPROVED',?,?)",
                                (run_id, proposal_id, intent_key, artifact_dir))
+            from .run_execution_configuration import RunExecutionConfigurations
+            RunExecutionConfigurations(self).seed_in_connection(connection, run_id)
             connection.execute("UPDATE proposals SET state='APPROVED',approved_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), proposal_id))
             connection.execute("UPDATE ideas SET state='APPROVED' WHERE id=?", (proposal["idea_id"],))
             return {**dict(connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()), **mode_metadata(snapshot)}
@@ -1065,7 +1067,8 @@ class ProjectStore:
             except OSError as exc:
                 raise StoreConflict('Chưa xóa hết file run. Đóng file đang mở rồi thử xóa lại.') from exc
             for table in ('logs', 'implementation_attempts', 'run_retries', 'working_telemetry',
-                          'working_collector_stats', 'working_runs', 'monitor_state', 'benchmarks'):
+                          'working_collector_stats', 'working_runs', 'monitor_state', 'benchmarks',
+                          'run_replans', 'run_execution_configuration'):
                 if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     connection.execute(f'DELETE FROM {table} WHERE run_id=?', (run_id,))
             connection.execute('DELETE FROM variant_ideas WHERE parent_run_id=?', (run_id,))

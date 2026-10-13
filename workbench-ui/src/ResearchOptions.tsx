@@ -9,6 +9,7 @@ export default function ResearchOptions({value,onChange,disabled=false,readOnly=
   return <fieldset className="output-options" disabled={disabled || readOnly}>
     <legend>Đầu ra tùy chọn</legend>
     <div className="output-option-grid">
+      <label className="check"><input type="checkbox" checked={value.literature} onChange={e=>update({literature:e.target.checked})}/><span>Literature / novelty</span></label>
       {(['summary','report','plots'] as const).map(key=><label className="check" key={key}>
         <input type="checkbox" checked={value[key]} onChange={e=>update({[key]:e.target.checked})}/>
         <span>{key==='summary' ? 'Summary' : key==='report' ? 'Report' : 'Plots'}</span></label>)}
@@ -23,6 +24,8 @@ export default function ResearchOptions({value,onChange,disabled=false,readOnly=
     {value.writeup!=='none' && <label>Mẫu PDF<select value={value.writeup}
       onChange={e=>update({writeup:e.target.value as 'icbinb'|'normal'})}>
       <option value="icbinb">ICBINB · 4 trang</option><option value="normal">ICML · 8 trang</option></select></label>}
+    {value.literature&&<label>Số vòng literature / novelty tối đa<input type="number" min={2} max={20} value={value.literature_rounds} onChange={e=>update({literature_rounds:Number(e.target.value)})}/></label>}
+    {(value.plots||value.writeup!=='none')&&<label>Số vòng sửa figures / bài<input type="number" min={0} max={10} value={value.reflections} onChange={e=>update({reflections:Number(e.target.value)})}/></label>}
     {!readOnly && <small className="muted">Chỉ tạo các đầu ra bạn chọn. Lựa chọn được ghim cùng proposal khi duyệt.</small>}
   </fieldset>;
 }

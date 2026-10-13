@@ -9,10 +9,17 @@ from .models import ROLE_PAYLOADS
 from .workflow_models import WorkflowSpec
 
 class StageRuntime:
-    def __init__(self, owner, project, workflow):
+    def __init__(self, owner, project, workflow, run_id=None):
         self.owner, self.project, self.workflow = owner, project, workflow
         self.row = owner.store.get(project, workflow)
         self.spec = WorkflowSpec.model_validate(self.row['spec'])
+        run = run_id or self.row['state'].get('run_id')
+        if run and self.spec.run_setup == 'per_run':
+            from .models import SearchOptions
+            value = owner.run_admission.configurations.get(project, run)
+            if value['approved']:
+                config = value['configuration']
+                self.spec = self.spec.model_copy(update={**config, 'search': SearchOptions.model_validate(config['search'])})
         self.search_options = self.spec.search if self.spec.search.enabled else None
         self.execution_deadline = None
         self.generation = self.row['state'].get('generation',0)

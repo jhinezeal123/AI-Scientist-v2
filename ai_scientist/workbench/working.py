@@ -251,6 +251,10 @@ class WorkingService:
             if len(pending) >= 16:
                 raise StoreConflict('Hàng chờ đã đủ 16 run; hoàn tất/hủy một run trước khi thêm')
             approved = await asyncio.to_thread(self.store.approved_snapshot, project_id, run_id)
+            approved = await asyncio.to_thread(self._execution_context, project_id, run_id, approved)
+            configured = approved.get('execution_configuration')
+            if configured and (account, accelerator, ttl) != (configured['account'], configured['accelerator'], configured['ttl_seconds']):
+                raise StoreConflict('Môi trường phải khớp cấu hình riêng đã duyệt của run')
             mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
             benchmark = approved['snapshot']['idea'].get('benchmark')
             if mode == 'training_research' and benchmark:
@@ -446,6 +450,18 @@ class WorkingService:
             arguments = {'account': account, 'session_id': run_id,
                          'wait_seconds': 60}
 
+    def _execution_context(self, project, run, approved):
+        from .run_execution_configuration import RunExecutionConfigurations
+        value = RunExecutionConfigurations(self.store).get(project, run)
+        if not value['approved'] or value['version'] == 1:
+            return approved
+        config = value['configuration']
+        budget = {**approved['body'].get('budget', {})}
+        seconds = budget.get('execution_seconds', budget.get('training_seconds', config['execution_seconds']))
+        budget['execution_seconds'] = min(seconds, config['execution_seconds'])
+        budget['output_bytes'] = min(budget.get('output_bytes', config['output_bytes']), config['output_bytes'])
+        return {**approved, 'body': {**approved['body'], 'budget': budget}, 'execution_configuration': config}
+
     def _request(self, key, approved, descriptor, workdir):
         mode, _ = snapshot_settings(approved['snapshot'], require_output=True)
         helper = str(Path(sys.executable))
@@ -500,10 +516,13 @@ class WorkingService:
         source = self.view.root(*key) / 'source/workload.py'
         if source.is_file() and not source.is_symlink():
             data['previous_source_file'] = 'source/workload.py'
+        if approved.get('execution_configuration'):
+            data['execution_configuration'] = approved['execution_configuration']
         (workdir / 'working-request.json').write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         return self.planner.bindings.request_type(key[1], 'mvp0_working',
             load_prompt('working.' + mode if mode in {'etc', 'benchmark'} else 'working.agent', workdir=workdir), workdir,
-            timeout_seconds=min(getattr(self.config, 'working_seconds', 900), max(1, descriptor['ttl_seconds'] - 60)),
+            timeout_seconds=min(getattr(self.config, 'working_seconds', 900), max(1, descriptor['ttl_seconds'] - 60),
+                                approved.get('execution_configuration', {}).get('execution_seconds', 43200)),
             max_output_bytes=3_000_000)
 
     def _collect_etc(self, key, terminal, root, approved):
@@ -515,6 +534,7 @@ class WorkingService:
         return manifest
 
     async def _work(self, key, approved, accelerator, ttl):
+        approved = await asyncio.to_thread(self._execution_context, *key, approved)
         # Recheck immediately before the first provider submission. Capacity may
         # have changed since the API accepted the batch, including external jobs.
         async with self.planner.lock:
@@ -583,11 +603,15 @@ class WorkingService:
                 write_run_json(root / 'execution.json', {'run_id': run_id, 'commands': commands})
             stage_runtime = self.run_worker(key).runtime
             search_options = getattr(stage_runtime, 'search_options', None)
+            if approved.get('execution_configuration'):
+                from .models import SearchOptions
+                search_options = SearchOptions.model_validate(approved['execution_configuration']['search'])
             if search_options and search_options.enabled and not is_etc:
                 from .tree_search import TreeSearchRun
                 runner = TreeSearchRun(self, key, approved, descriptor, terminal, search_options)
                 approved_seconds = approved['body']['budget'].get('execution_seconds',approved['body']['budget'].get('training_seconds'))
-                runner.deadline = time.monotonic() + min(stage_runtime.spec.execution_seconds, approved_seconds, descriptor['ttl_seconds'] - 120)
+                delegated_seconds = getattr(getattr(stage_runtime, 'spec', None), 'execution_seconds', approved_seconds)
+                runner.deadline = time.monotonic() + min(delegated_seconds, approved_seconds, descriptor['ttl_seconds'] - 120)
                 payload, manifest, node = await runner.execute()
                 collection_attempted = True
                 self.records.update(*key, manifest=manifest, summary=payload.model_dump())
@@ -884,6 +908,9 @@ class WorkingService:
         detail['execution_mode'] = 'ssh' if record or not detail['identity'] else 'legacy'
         detail['account'] = ((record.get('account') or self.config.kaggle_account_alias) if record
                              else (detail['identity'] or {}).get('account'))
+        if not detail['account']:
+            from .run_execution_configuration import RunExecutionConfigurations
+            detail['account'] = RunExecutionConfigurations(self.store).account(project_id, run_id)
         detail['session_id'] = record['session_id'] if record else (detail['identity'] or {}).get('session_id')
         approved = self.store.approved_snapshot(project_id, run_id)
         detail['protocol'] = {'split': approved['body'].get('split'), 'metric': approved['body'].get('metric'),

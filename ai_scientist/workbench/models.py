@@ -69,6 +69,12 @@ class ResearchPlan(StrictModel):
         return self
 
 
+class ExecutionRequirements(StrictModel):
+    """Hardware the proposed method can use; empty means no hardware restriction."""
+    accelerators: list[Literal['cpu','NvidiaT4','TpuV5E8','TpuV6E8']] = Field(default_factory=list)
+    reason: str = Field(default='', max_length=2000)
+
+
 class PlanPayload(StrictModel):
     needs_clarification: bool
     questions: list[str] = Field(default_factory=list)
@@ -81,6 +87,7 @@ class PlanPayload(StrictModel):
     budget: dict[str, JsonValue] | None = None
     expected_outputs: list[str] | None = None
     research: ResearchPlan | None = None
+    execution_requirements: ExecutionRequirements | None = None
 
     @model_validator(mode="after")
     def check_clarification(self):
@@ -105,6 +112,7 @@ class WorkingProposal(StrictModel):
     metric: str | dict[str, JsonValue] | None = None
     budget: dict[str, JsonValue] = Field(default_factory=dict)
     research: ResearchPlan | None = None
+    execution_requirements: ExecutionRequirements | None = None
 
     @model_validator(mode="after")
     def user_constraints(self):

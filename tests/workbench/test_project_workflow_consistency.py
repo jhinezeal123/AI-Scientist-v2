@@ -91,7 +91,10 @@ def test_shared_idea_commands_advance_n8n_and_cannot_bypass_run_gate(repository)
             await wait_for(lambda:owner.store.get(project,flow)['state']['status']=='WAITING')
             wrong=await client.post(f'/api/projects/{project}/runs/{run}/working',json={'account':'different','accelerator':'cpu','ttl_seconds':180})
             assert wrong.status_code==409 and owner.working.admissions==0
-            approved=await client.post(f'/api/projects/{project}/runs/{run}/working',json={'account':spec.account,'accelerator':spec.accelerator,'ttl_seconds':spec.ttl_seconds})
+            configured=(await client.get(f'/api/projects/{project}/runs/{run}/configuration')).json()
+            stale=await client.post(f'/api/projects/{project}/runs/{run}/start',json={'version':configured['version']+1,'configuration':configured['configuration']})
+            assert stale.status_code==409 and owner.working.admissions==0
+            approved=await client.post(f'/api/projects/{project}/runs/{run}/start',json={'version':configured['version'],'configuration':configured['configuration']})
             assert approved.status_code==202 and approved.json()['workflow_id']==flow
             await wait_for(lambda:owner.tasks[(flow,'0:run_approval')].done())
             await owner.step(project,flow,generation,0,'execution')

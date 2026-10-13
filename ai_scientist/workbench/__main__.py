@@ -2,11 +2,23 @@
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 import uuid
 
 from .app import create_app
 from .models import WorkbenchConfig
+
+
+def restore_control_token(workspace_root):
+    """Reuse the local bootstrap credential; explicit environment takes priority."""
+    if os.environ.get('AI_SCIENTIST_AGENT_CONTROL_TOKEN'):
+        return
+    saved = workspace_root / '.workbench/agent-control-token.txt'
+    if saved.is_file():
+        token = saved.read_text(encoding='utf-8').strip()
+        if token:
+            os.environ['AI_SCIENTIST_AGENT_CONTROL_TOKEN'] = token
 
 
 async def smoke(app, config):
@@ -30,6 +42,7 @@ def main():
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
     config = WorkbenchConfig.load(args.config)
+    restore_control_token(config.workspace_root)
     app = create_app(config)
     if args.smoke:
         asyncio.run(smoke(app, config))

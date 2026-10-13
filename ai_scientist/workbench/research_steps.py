@@ -1,6 +1,7 @@
 """Individual research operations shared by local and visual orchestration."""
 import asyncio
 import json
+from .models import SearchOptions
 import uuid
 from .agents.contracts import RuntimeUncertain
 from .models import WorkingProposal
@@ -47,6 +48,13 @@ class ResearchSteps:
                 'grant_id': state['grant_id'], 'account': spec.account, 'max_runs': spec.max_runs,
                 'configuration_version': state.get('configuration_version'),
                 'search': spec.search.model_dump(), 'approval_actor': spec.stages['approval'].actor}
+            if spec.run_setup == 'per_run' and spec.require_run_approval:
+                context['snapshot']['workflow_constraints'].pop('account', None)
+                context['snapshot']['workflow_constraints'].pop('accelerator', None)
+                context['snapshot']['workflow_constraints']['environment_selection'] = 'Human chooses a compatible environment per run before execution.'
+                context['snapshot']['workflow_constraints']['hardware_contract'] = 'Declare execution_requirements.accelerators when the method requires particular hardware. Empty means it works on any supported hardware.'
+                if state.get('execution_preference'):
+                    context['snapshot']['workflow_constraints']['execution_preference'] = state['execution_preference']
             from .store import canonical, digest
             context['context_sha256'] = digest(canonical(context['snapshot']))
             worker = RuntimeWorker(runtime, owner.projects.directory(project) / 'automation' / identity / 'planner-state.json', uncertain_error=RuntimeUncertain)
@@ -113,13 +121,21 @@ class ResearchSteps:
                 decision = await owner.run_admission.review(runtime)
                 if not decision['approve']:
                     raise StoreConflict('Run rejected: ' + decision['reason'][:500])
+            if spec.run_setup == 'per_run':
+                value = (owner.run_admission.configurations.approved(project, run) if spec.require_run_approval
+                         else owner.run_admission.delegated(runtime))
+                config = value['configuration']
+                spec = runtime.spec.model_copy(update={**config, 'search': SearchOptions.model_validate(config['search'])})
+                runtime.spec = spec
+                runtime.search_options = spec.search if spec.search.enabled else None
             runtime.check()
             await asyncio.to_thread(owner.preflight,runtime.row['rig_id'],spec)
             root = owner.working.view.root(project, run)
             root.mkdir(parents=True, exist_ok=True)
             (root / 'workflow-provenance.json').write_text(json.dumps({'workflow_id': identity,
                 'rig_id': runtime.row['rig_id'], 'grant_id': state['grant_id'], 'approval': state['approvals'][-1],
-                'stages': spec.model_dump()['stages'], 'search': spec.search.model_dump()}, indent=2), encoding='utf-8')
+                'stages': spec.model_dump()['stages'], 'search': spec.search.model_dump(),
+                'execution_configuration': config if spec.run_setup == 'per_run' else None}, indent=2), encoding='utf-8')
             await owner.working.start(project, run, accelerator=spec.accelerator, ttl_seconds=spec.ttl_seconds, account=spec.account)
 
     async def collect_run(self, runtime):

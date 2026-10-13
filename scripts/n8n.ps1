@@ -26,7 +26,7 @@ function ManagedProcess {
     if (Test-Path -LiteralPath $pidFile) {
         $savedProcessId = [int](Get-Content -LiteralPath $pidFile)
         $process = Get-CimInstance Win32_Process -Filter "ProcessId=$savedProcessId" -ErrorAction SilentlyContinue
-        if ($process -and $process.CommandLine.Contains($entry)) { return $process }
+        if ($process -and $process.CommandLine -and $process.CommandLine.Contains($entry)) { return $process }
     }
     return $null
 }

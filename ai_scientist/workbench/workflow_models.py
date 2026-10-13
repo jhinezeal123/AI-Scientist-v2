@@ -26,13 +26,15 @@ class WorkflowSpec(StrictModel):
     stages: dict[str, StageBinding]
     allow_agent_approval: bool = False
     require_run_approval: bool = True
+    # Missing on historical grants: preserve their original admission contract.
+    run_setup: Literal['workflow', 'per_run'] = 'workflow'
     max_runs: int = Field(default=1, ge=1, le=100)
     ttl_seconds: int = Field(default=600, ge=180, le=43200)
-    execution_seconds: int = Field(default=480, ge=60, le=43080)
+    execution_seconds: int = Field(default=480, ge=1, le=43080)
     max_agent_calls: int = Field(default=40, ge=1, le=1000)
     output_bytes: int = Field(default=1000000, ge=1, le=10000000)
     accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
-    account: str = Field(min_length=1, max_length=128)
+    account: str = Field(default='', max_length=128)
     research: ResearchPlan = Field(default_factory=ResearchPlan)
     search: SearchOptions = Field(default_factory=SearchOptions)
     ideation: IdeationOptions = Field(default_factory=IdeationOptions)
@@ -66,10 +68,13 @@ class WorkflowSpec(StrictModel):
             raise ValueError('Configure exactly one actor for each research stage')
         if self.stages['approval'].actor == 'agent' and not self.allow_agent_approval:
             raise ValueError('Agent approval requires an explicit operator delegation')
-        if self.mode == 'training_research' and not self.benchmark_id:
+        needs_scope = self.run_setup == 'workflow' or self.stages['ideation'].actor == 'agent'
+        if needs_scope and self.mode == 'training_research' and not self.benchmark_id:
             raise ValueError('Training/Research requires a completed benchmark')
-        if self.mode == 'etc' and (not self.desired_output.strip() or self.search.enabled):
+        if self.mode == 'etc' and (needs_scope and not self.desired_output.strip() or self.search.enabled):
             raise ValueError('Etc requires desired output and cannot use research tree search')
+        if (self.run_setup == 'workflow' or not self.require_run_approval) and not self.account.strip():
+            raise ValueError('Full agent requires a saved execution account in Run')
         if self.execution_seconds > self.ttl_seconds - 120:
             raise ValueError('Reserve 120 seconds of the session for collection')
         if len(self.resource_ids) != len(set(self.resource_ids)):

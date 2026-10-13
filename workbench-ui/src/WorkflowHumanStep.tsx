@@ -7,6 +7,11 @@ export default function WorkflowHumanStep({input,disabled,answer}:{input:HumanIn
   const proposal=input.prompt.kind==='proposal';
   const candidate=input.prompt.candidate as {version?:number;body?:{paraphrase?:string;objective?:string;implementation_steps?:string[]}}|undefined;
   const review=input.prompt.kind==='review'||input.stage==='approval';
+  if(input.prompt.kind==='run_configuration'){
+    const target=input.prompt.candidate as {run_id:string;project_id:string};
+    return <article className="workflow-human"><h3>Chờ cấu hình và chạy</h3><p>Chọn môi trường riêng cho run rồi duyệt bắt đầu.</p>
+      <a className="button" href={`/?project=${target.project_id}&view=run&run=${target.run_id}`}>Mở cấu hình run</a></article>;
+  }
   return <article className="workflow-human"><span className="eyebrow">CHỜ BẠN</span><h3>{proposal?'Thiết kế proposal':input.stage==='run_approval'?'Duyệt bắt đầu run':stages.find(([s])=>s===input.stage)?.[1]||input.stage}</h3>
     {proposal?<><p>Proposal v{candidate?.version} · {candidate?.body?.paraphrase}</p>{candidate?.body?.objective&&<p>{candidate.body.objective}</p>}
       {input.prompt.questions?.length? <><p className="alert">Agent cần bạn làm rõ trước khi duyệt.</p><ul>{input.prompt.questions.map((question,i)=><li key={i}>{question}</li>)}</ul></>:null}

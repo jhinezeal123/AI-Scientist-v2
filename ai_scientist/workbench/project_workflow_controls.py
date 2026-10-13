@@ -12,7 +12,7 @@ class ProjectWorkflowControls:
     def owning(self, project, *, idea=None, proposal=None, run=None):
         for row in self.owner.list(project):
             state = row['state']
-            if row['archived'] or state['status'] == 'DONE':
+            if row['archived'] or state['status'] in {'DONE','CANCELLED'}:
                 continue
             if ((idea and state.get('idea_id') == idea) or (proposal and state.get('proposal_id') == proposal)
                     or (run and state.get('run_id') == run)):
@@ -51,6 +51,13 @@ class ProjectWorkflowControls:
         idea = owner.projects.idea(project, idea_id)
         if idea['deleted_at'] or idea['mode'] == 'benchmark' or idea['state'] in {'PLANNING','APPROVED'}:
             raise StoreConflict('Chọn một idea chưa duyệt và chưa có lượt lập proposal đang chạy')
+        if idea['mode'] == 'training_research':
+            if not idea.get('benchmark_id'):
+                raise StoreConflict('Chọn benchmark trong Idea trước khi lập proposal')
+            from .benchmarks import BenchmarkCatalog
+            BenchmarkCatalog(owner.projects).require(project, idea['benchmark_id'])
+        elif not idea['desired_output'].strip():
+            raise StoreConflict('Nhập đầu ra mong muốn trong Idea trước khi lập proposal')
         parent = row['state'].get('parent_run_id') if not row['state']['runs'] else row['state']['runs'][-1]
         if parent and (idea.get('variant') or {}).get('parent_run_id') != parent:
             raise StoreConflict('Tạo idea Improve từ run cha trong tab Run để kế thừa kết quả đã ghim')

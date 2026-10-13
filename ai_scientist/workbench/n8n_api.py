@@ -106,9 +106,10 @@ def create_n8n_router():
         existing = next((r for r in service.list(project) if r['id']==body.request_id),None)
         if existing:
             from .run_configuration import RunConfiguration
+            from .idea_configuration import IdeaConfiguration
             from .store import StoreConflict
             def orchestration(value):
-                result = {k:v for k,v in value.items() if k not in RunConfiguration.model_fields and k!='resource_ids'}
+                result = {k:v for k,v in value.items() if k not in set(RunConfiguration.model_fields)|set(IdeaConfiguration.model_fields)|{'resource_ids','run_setup'}}
                 result['stages'] = {s:{'actor':b['actor'],'preset_id':b.get('preset_id') if b['actor']=='agent' else None,
                                       'ask':b.get('ask',False) if b['actor']=='agent' else False} for s,b in result['stages'].items()}
                 return result
@@ -147,6 +148,9 @@ def create_n8n_router():
         pending = next((i for i in service.store.inputs(project,identity) if i['id']==input_id),None)
         if pending and pending['stage']=='ideation' and 'idea_id' in body.result:
             service.controls.choose_idea(project,identity,input_id,body.result['idea_id'])
+        elif pending and pending['prompt']['kind']=='run_configuration' and body.result.get('approve'):
+            from .store import StoreConflict
+            raise StoreConflict('Cấu hình và duyệt run tại tab Run để ghim đúng môi trường chạy')
         else:
             service.store.answer(project, identity, input_id, body.result)
         return service.view(project, identity)

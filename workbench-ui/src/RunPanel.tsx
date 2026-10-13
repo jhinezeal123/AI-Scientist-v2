@@ -2,8 +2,10 @@ import {useCallback,useEffect,useState} from 'react';
 import {api,Benchmark,History,Variant,Working,RunMode,RunOutput,Resource,ResearchPlan,ResearchPipeline,KaggleAccount} from './api';
 import WorkflowHumanStep from './WorkflowHumanStep';
 import {Flow,HumanInput} from './projectWorkflows';
-import {configuration,ProjectConfiguration} from './projectConfiguration';
+import {ProjectConfiguration} from './projectConfiguration';
 import ProjectRunConfiguration from './ProjectRunConfiguration';
+import RunConfigurationEditor from './RunConfigurationEditor';
+import BatchRunConfiguration,{ConfiguredBatchItem} from './BatchRunConfiguration';
 import RunMonitorPanel from './RunMonitorPanel';
 import OutputToLibrary from './OutputToLibrary';
 import ResearchScope from './ResearchScope';
@@ -20,48 +22,26 @@ type RunDetail={id:string;title:string;state:string;error:string|null;deleted_at
   identity:{kernel_ref:string;username:string;status?:string;session_id?:number}|null;
   result_metric?:{name:string;direction:string;final_value:number;best_value:number}};
 
-export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onWorking,onStop,onResumeQueue,onReconcile,
-  onDelete,onRestore,onBranch,onBatch,onOutputCopied,workflow,onWorkflowAnswer,onConfigurationSaved}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
+export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onStop,onResumeQueue,onReconcile,
+  onDelete,onRestore,onBranch,onBatch,onOutputCopied,workflow,onWorkflowAnswer,onConfigurationSaved,onConfigured,onReplanned}:{projectId:string;selectedRunId:string;onSelect:(id:string)=>void;
+  onConfigured:()=>void;onReplanned:(ideaId:string)=>void;
   onConfigurationSaved:(value:ProjectConfiguration)=>void;workflow?:Flow;onWorkflowAnswer:(input:HumanInput,result:unknown)=>Promise<void>;
-  runs:History['runs'];busy:boolean;onWorking:(id:string,accelerator:string,ttl:number,account:string)=>Promise<void>;
+  runs:History['runs'];busy:boolean;
   onStop:(id:string)=>Promise<void>;onResumeQueue:(id:string)=>Promise<void>;onReconcile:(id:string)=>Promise<void>;onDelete:(id:string)=>Promise<void>;
   onRestore:(id:string)=>Promise<void>;onBranch:(id:string,mode:RunMode)=>void;
-  onBatch:(items:{run_id:string;account:string;accelerator:string;ttl_seconds:number}[])=>Promise<void>;
+  onBatch:(items:ConfiguredBatchItem[])=>Promise<void>;
   onOutputCopied:(resource:Resource)=>void}) {
   const [showDeleted,setShowDeleted]=useState(false),[detail,setDetail]=useState<RunDetail|null>(null),[error,setError]=useState('');
-  const [accelerator,setAccelerator]=useState('cpu'),[ttl,setTtl]=useState(1800);
-  const [accounts,setAccounts]=useState<KaggleAccount[]>([]),[account,setAccount]=useState('');
-  const [accountError,setAccountError]=useState(''),[checking,setChecking]=useState(false);
-  const [startingRun,setStartingRun]=useState('');
+  const [configurationRevision,setConfigurationRevision]=useState(0);
+  const [accounts,setAccounts]=useState<KaggleAccount[]>([]);
   const [comparison,setComparison]=useState<string[]>([]);
   const [benchmarks,setBenchmarks]=useState<Benchmark[]>([]),[benchmarkId,setBenchmarkId]=useState('');
   useEffect(()=>{let cancelled=false;api<Benchmark[]>(`/projects/${projectId}/benchmarks`).then(items=>{if(!cancelled)setBenchmarks(items);}).catch(e=>{if(!cancelled)setError(e.message);});return ()=>{cancelled=true;};},[projectId,runs.length,runs.map(run=>run.state).join(',')]);
-  const [batchIds,setBatchIds]=useState<string[]>([]),[batchAccounts,setBatchAccounts]=useState<Record<string,string>>({});
-  useEffect(()=>{let cancelled=false;
-    api<KaggleAccount[]>('/kaggle/accounts').then(items=>{if(!cancelled){setAccounts(items);setAccount(current=>current || items.find(item=>item.default)?.account || items[0]?.account || '');}})
-      .catch(e=>{if(!cancelled)setAccountError(e instanceof Error?e.message:String(e));});
-    return ()=>{cancelled=true;};
-  },[]);
-  useEffect(()=>{let stopped=false;configuration(projectId).then(value=>{if(!stopped){setAccelerator(value.run.accelerator);setTtl(value.run.ttl_seconds);setAccount(value.run.account);}}).catch(e=>{if(!stopped)setError(e.message);});return()=>{stopped=true;};},[projectId]);
+  const [batchIds,setBatchIds]=useState<string[]>([]);
+  useEffect(()=>{let cancelled=false;api<KaggleAccount[]>('/kaggle/accounts').then(items=>{if(!cancelled)setAccounts(items);})
+    .catch(e=>{if(!cancelled)setError(e.message);});return()=>{cancelled=true;};},[]);
   const ownedRun=!!workflow&&workflow.state.run_id===selectedRunId;
   const runInputs=workflow?.inputs?.filter(i=>i.state==='PENDING'&&!['ideation','literature','approval'].includes(i.stage))||[];
-  const selectedAccount=accounts.find(item=>item.account===account);
-  const readinessLabel={verified_idle:'đã kiểm tra idle',unverified:'chưa kiểm tra',busy:'đang có phiên chạy',
-    needs_login:'cần đăng nhập lại',unavailable:'chưa kết nối được'};
-  async function checkAccount() {
-    if(!account)return;
-    setChecking(true);setAccountError('');
-    try {const updated=await api<KaggleAccount>(`/kaggle/accounts/${encodeURIComponent(account)}/readiness`,'POST');
-      setAccounts(items=>items.map(item=>item.account===updated.account?updated:item));
-    } catch(e) {setAccountError(e instanceof Error?e.message:String(e));}
-    finally {setChecking(false);}
-  }
-  async function beginWorking(id:string) {
-    if(startingRun)return;
-    setStartingRun(id);
-    try {await onWorking(id,accelerator,ttl,account);}
-    finally {setStartingRun('');}
-  }
   const visible=runs.filter(run=>Boolean(run.deleted_at)===showDeleted);
   const selectedId=visible.some(run=>run.id===selectedRunId && !run.deleted_at) ? selectedRunId : null;
   const parent=detail?.variant?.parent_run_id || detail?.parent_run_id;
@@ -76,6 +56,9 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
     return ()=>{cancelled=true;};
   },[projectId,selectedId,runs]);
   const run=detail?.id===selectedId ? detail : null;
+  useEffect(()=>{
+    if(run?.id)document.getElementById('run-detail')?.scrollIntoView({block:'start',behavior:'smooth'});
+  },[run?.id]);
   const canBranch=!!run && ['COMPLETED','FAILED','CANCELLED','REMOTE_SUCCEEDED','REMOTE_FAILED'].includes(run.state)
     && (run.execution_mode!=='ssh' || run.working?.stop_confirmed);
   return <section className="panel run-panel"><div className="panel-head"><h2>Cây run của project</h2>
@@ -83,22 +66,14 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
     <a href={`/?page=run-tree&project=${projectId}`} target="_blank" rel="noreferrer">Mở cây toàn màn hình ↗</a>
     {runs.some(item=>item.deleted_at) && <button type="button" onClick={()=>{setShowDeleted(!showDeleted);onSelect('');}}>
       {showDeleted ? 'Cây hiện hành' : 'Run đã xóa trước đây'}</button>}</div>
-    <ProjectRunConfiguration projectId={projectId} disabled={busy} onSaved={value=>{setAccount(value.run.account);setAccelerator(value.run.accelerator);setTtl(value.run.ttl_seconds);onConfigurationSaved(value);}}/>
-    <section className="run-comparison"><label>Biểu đồ MLflow theo benchmark<select value={benchmarkId} onChange={e=>setBenchmarkId(e.target.value)}><option value="">Chọn benchmark</option>{benchmarks.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label></section>
+    <ProjectRunConfiguration key={configurationRevision} projectId={projectId} disabled={busy} onSaved={onConfigurationSaved}/>
+    {!!benchmarks.length&&<section className="run-comparison"><label>Biểu đồ MLflow theo benchmark<select value={benchmarkId} onChange={e=>setBenchmarkId(e.target.value)}><option value="">Chọn benchmark</option>{benchmarks.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label></section>}
     {benchmarkId && <RunComparison projectId={projectId} benchmarkId={benchmarkId} runIds={[]} onClose={()=>setBenchmarkId('')} onOpen={onSelect}/>}
     <RunBoard runs={visible} selectedId={selectedId} onSelect={onSelect} onCompare={ids=>setComparison(ids)}
-      onBatch={ids=>{if(workflow&&ids.includes(workflow.state.run_id||'')){setError('Run này được điều phối qua workflow. Duyệt tại bước chờ bên dưới.');return;}setBatchIds(ids);setBatchAccounts(Object.fromEntries(ids.map(id=>[id,account])));}}/>
-    {batchIds.length>=2 && <section className="run-comparison" aria-label="Batch Working"><div className="panel-head"><h3>Batch đã duyệt</h3>
-      <button type="button" onClick={()=>setBatchIds([])}>Đóng</button></div>
-      <p className="muted">Các run chạy song song, tối đa 2 session cho mỗi account, gồm cả phiên đang chạy trên Kaggle. Run vượt giới hạn tự vào hàng chờ và bắt đầu khi có chỗ trống.</p>
-      {batchIds.map(id=><label key={id}>{runs.find(run=>run.id===id)?.title||id.slice(0,8)} · account
-        <select value={batchAccounts[id]||account} onChange={e=>setBatchAccounts(current=>({...current,[id]:e.target.value}))}>
-          {accounts.filter(item=>item.configured).map(item=><option key={item.account} value={item.account}>{item.username}</option>)}
-        </select></label>)}
-      <button className="primary" type="button" disabled={busy || batchIds.some(id=>!batchAccounts[id])}
-        onClick={()=>void onBatch(batchIds.map(id=>({run_id:id,account:batchAccounts[id],accelerator,ttl_seconds:ttl})))
-          .then(()=>setBatchIds([]))}>Chạy batch song song</button></section>}
-    {workflow&&runInputs.map(input=><WorkflowHumanStep key={input.id} input={input} disabled={busy||workflow.state.status!=='WAITING'} answer={result=>void onWorkflowAnswer(input,result)}/>)}
+      onBatch={ids=>{if(workflow&&ids.includes(workflow.state.run_id||'')){setError('Run này được điều phối qua workflow. Duyệt tại bước chờ bên dưới.');return;}setBatchIds(ids);}}/>
+    {batchIds.length>=2&&<BatchRunConfiguration projectId={projectId} runIds={batchIds} accounts={accounts} disabled={busy}
+      onClose={()=>setBatchIds([])} onOpen={id=>{setBatchIds([]);onSelect(id);}} onStart={onBatch}/>}
+    {workflow&&runInputs.filter(input=>input.prompt.kind!=='run_configuration').map(input=><WorkflowHumanStep key={input.id} input={input} disabled={busy||workflow.state.status!=='WAITING'} answer={result=>void onWorkflowAnswer(input,result)}/>)}
     {comparison.length>=2 && <RunComparison projectId={projectId} runIds={comparison}
       onClose={()=>setComparison([])} onOpen={onSelect}/>}
     {!visible.length ? <p className="empty">Chưa có run. Lập và duyệt proposal trong Idea để tạo draft.</p>
@@ -127,27 +102,11 @@ export default function RunPanel({projectId,selectedRunId,onSelect,runs,busy,onW
         <div className="actions"><button type="button" disabled={busy} onClick={()=>onBranch(run.id,'training_research')}>Improve</button>
           <button type="button" disabled={busy} onClick={()=>onBranch(run.id,'etc')}>Etc</button></div></div>}
       {parent && <p>Run cha: <button type="button" onClick={()=>onSelect(parent)}>{runs.find(item=>item.id===parent)?.title || parent.slice(0,8)}</button></p>}
-      {!ownedRun && !run.identity && !run.working && ['APPROVED','FAILED','PREFLIGHT'].includes(run.state) && <div className="context stack">
-        <h3>Working</h3>{run.mode==='training_research' && !run.benchmark && <p role="alert" className="alert error">Run cũ chưa có benchmark. Tạo Improve và chọn benchmark để chạy phiên mới.</p>}<p>Một run, một phiên SSH. Agent tự sửa lỗi trong run này. Bạn chủ động tạo các phiên bản improve.</p>
-        <label>Account Kaggle<select value={account} disabled={busy || checking} onChange={e=>setAccount(e.target.value)}>
-          {accounts.map(item=><option key={item.account} value={item.account} disabled={!item.configured}>
-            {item.username} · {readinessLabel[item.readiness]}
-          </option>)}</select></label>
-        {selectedAccount && <div className="actions"><small className="muted">{selectedAccount.readiness==='verified_idle'
-          ? `Idle đã xác minh ${selectedAccount.observed_at || ''}` : readinessLabel[selectedAccount.readiness]}</small>
-          <button type="button" disabled={busy || checking} onClick={()=>void checkAccount()}>
-            {checking?'Đang kiểm tra…':'Kiểm tra account'}</button></div>}
-        {accountError && <p role="alert" className="alert error">{accountError}</p>}
-        <label>Phần cứng<select value={accelerator} disabled={busy} onChange={e=>setAccelerator(e.target.value)}>
-          <option value="cpu">CPU</option><option value="NvidiaT4">GPU · T4 x2</option>
-          <option value="TpuV5E8">TPU · v5e-8</option><option value="TpuV6E8">TPU · v6e-8</option></select></label>
-        <label>Thời gian tối đa của phiên (phút)<input type="number" min={1} max={720} step={1} value={ttl/60}
-          disabled={busy} onChange={e=>setTtl(Number(e.target.value)*60)}/></label>
-        <p className="muted">Cookie hết hạn sẽ được tự đăng nhập lại trước khi bắt đầu run.</p>
-        {startingRun===run.id && <p role="status">Đang kiểm tra cookie của {selectedAccount?.username}. Nếu hết hạn, tự đăng nhập rồi tiếp tục run.</p>}
-        <button className="primary" disabled={(run.mode==='training_research' && !run.benchmark) || busy || checking || !!startingRun || !selectedAccount?.configured || !Number.isInteger(ttl) || ttl<60 || ttl>43200}
-          onClick={()=>void beginWorking(run.id)}>{startingRun===run.id?'Đang kiểm tra account…':'Bắt đầu Working'}</button></div>}
-      {ownedRun&&!run.working&&<div className="context"><h3>Cấu hình run đã ghim</h3><p>Account: {workflow!.spec.account} · {workflow!.spec.accelerator} · {workflow!.spec.ttl_seconds/60} phút</p><p>{workflow!.state.status==='WAITING'?'Duyệt bước đang chờ ở trên để n8n tiếp tục.':'n8n sẽ bắt đầu run theo cấu hình và phạm vi đã duyệt.'}</p></div>}
+      {!run.identity&&!run.working&&['APPROVED','FAILED','PREFLIGHT'].includes(run.state)&&(!ownedRun||workflow!.spec.run_setup==='per_run'&&workflow!.spec.require_run_approval)&&
+        <RunConfigurationEditor key={run.id} projectId={projectId} runId={run.id} disabled={busy}
+          canStart={!ownedRun||workflow!.state.status==='WAITING'&&runInputs.some(input=>input.prompt.kind==='run_configuration')}
+          onChanged={()=>{setConfigurationRevision(n=>n+1);onConfigured();}} onReplanned={onReplanned}/>}
+      {ownedRun&&!run.working&&(workflow!.spec.run_setup!=='per_run'||!workflow!.spec.require_run_approval)&&<div className="context"><h3>Môi trường đã được cấp trước</h3><p>{workflow!.spec.account} · {workflow!.spec.accelerator} · {workflow!.spec.ttl_seconds/60} phút</p></div>}
       {run.working && <div className="context"><h3>Phiên Working</h3>
         <p>Account: {accounts.find(item=>item.account===run.working?.account)?.username || run.working.account || 'chưa rõ'}</p>
         <p>{run.working.accelerator==='NvidiaT4' ? 'GPU · T4 x2' : run.working.accelerator} · tối đa {run.working.ttl_seconds/60} phút</p>

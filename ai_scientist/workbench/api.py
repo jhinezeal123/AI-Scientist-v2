@@ -73,6 +73,17 @@ class RunConfigurationInput(StrictModel):
     run: RunConfiguration
 
 
+class RunExecutionInput(StrictModel):
+    version: int = Field(ge=1)
+    configuration: RunConfiguration
+    remember_defaults: bool = False
+
+
+class IdeaScopeInput(StrictModel):
+    version: int = Field(ge=1)
+    idea_id: str = Field(pattern=r'^[a-f0-9]{32}$')
+
+
 class IdeaUpdate(IdeaInput):
     mode: RunMode | None = None
     desired_output: str | None = Field(default=None, max_length=20_000)
@@ -138,7 +149,9 @@ class CompareInput(StrictModel):
 
 class BatchItem(StrictModel):
     run_id: str = Field(pattern=r'^[0-9a-f]{32}$')
-    account: str = Field(pattern=r'^[a-zA-Z0-9_-]+(?:\.txt)?$')
+    account: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]+(?:\.txt)?$')
+    version: int | None = Field(default=None,ge=1)
+    configuration: RunConfiguration | None = None
     accelerator: Literal['cpu', 'NvidiaT4', 'TpuV5E8', 'TpuV6E8'] = 'cpu'
     ttl_seconds: int = Field(default=1800, ge=60, le=43200)
 
@@ -192,6 +205,38 @@ def library_router(store, workspace_root):
         if body.run.account and request.app.state.working.accounts:
             call(request.app.state.working.accounts.require,body.run.account)
         return call(configuration.save_run,project_id,body.version,body.run)
+
+    @router.put('/projects/{project_id}/configuration/idea')
+    def use_idea_scope(project_id: str, body: IdeaScopeInput):
+        return call(configuration.use_idea_scope, project_id, body.version, body.idea_id)
+
+    def run_admission(request):
+        owner = getattr(request.app.state, 'research_workflows', None)
+        if owner:
+            return owner.run_admission
+        from types import SimpleNamespace
+        from .run_admission import RunAdmission
+        return RunAdmission(SimpleNamespace(projects=store, working=request.app.state.working))
+
+    @router.get('/projects/{project_id}/runs/{run_id}/configuration')
+    def run_configuration(project_id: str, run_id: str, request: Request):
+        return call(run_admission(request).configurations.get, project_id, run_id)
+
+    @router.put('/projects/{project_id}/runs/{run_id}/configuration')
+    def save_execution_configuration(project_id: str, run_id: str, body: RunExecutionInput, request: Request):
+        return call(run_admission(request).save, project_id, run_id, body.version, body.configuration, body.remember_defaults)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/start', status_code=202)
+    async def configure_and_start(project_id: str, run_id: str, body: RunExecutionInput, request: Request):
+        require_run_benchmark(project_id, run_id)
+        return await async_call(run_admission(request).start, project_id, run_id, body.version,
+                                body.configuration, body.remember_defaults)
+
+    @router.post('/projects/{project_id}/runs/{run_id}/replan', status_code=202)
+    async def replan_run(project_id: str, run_id: str, body: RunExecutionInput, request: Request):
+        if not getattr(request.app.state, 'research_workflows', None):
+            raise HTTPException(409, 'Lưu cấu hình Workflow trước khi lập lại proposal')
+        return await async_call(run_admission(request).replan, project_id, run_id, body.version, body.configuration)
 
     @router.put('/projects/{project_id}/configuration/sources')
     def project_sources(project_id: str, body: ProjectSourcesInput):
@@ -438,8 +483,8 @@ def library_router(store, workspace_root):
             selection = configuration.selection(project_id,body.idea_id)
             if body.resource_ids is not None and body.resource_ids != selection['resource_ids']:
                 call(configuration.select,project_id,body.idea_id,body.resource_ids,selection['version'])
-            saved = {**saved,'resource_ids':configuration.get(project_id)['resource_ids']}
-            call(owner.create,project_id,identity,WorkflowSpec.model_validate(saved))
+            saved = configuration.workflow_spec(project_id, WorkflowSpec.model_validate({**saved, 'run_setup':'per_run'}))
+            call(owner.create,project_id,identity,saved,save_defaults=False)
             return await async_call(lambda:owner.start(project_id,identity,idea_id=body.idea_id))
         return await async_call(request.app.state.service.start, project_id, body.idea_id, sources)
 
@@ -500,8 +545,21 @@ def library_router(store, workspace_root):
             if owner and owner.controls.owning(project_id,run=item.run_id):
                 raise HTTPException(409,'Run đang thuộc workflow; duyệt bắt đầu trong tab Run')
             require_run_benchmark(project_id, item.run_id)
+        if any(item.configuration is not None for item in body.runs):
+            if any(item.configuration is None or item.version is None for item in body.runs):
+                raise HTTPException(422,'Mỗi run trong batch cần cấu hình và phiên bản riêng')
+            results = []
+            for item in body.runs:
+                try:
+                    result = await run_admission(request).start(project_id, item.run_id, item.version, item.configuration)
+                    results.append({'run_id':item.run_id, **(result or {'state':store.run(project_id,item.run_id)['state']})})
+                except (StoreConflict,ValueError,KeyError) as exc:
+                    results.append({'run_id':item.run_id,'state':'REJECTED','reason':str(exc)})
+            return {'runs':results}
+        if any(not item.account for item in body.runs):
+            raise HTTPException(422,'Chọn account cho từng run')
         return await async_call(request.app.state.working.start_batch, project_id,
-                                [item.model_dump() for item in body.runs])
+                                [item.model_dump(exclude_none=True) for item in body.runs])
 
     @router.post('/projects/{project_id}/runs/{run_id}/implement', status_code=202)
     async def implement(project_id: str, run_id: str, request: Request):
@@ -514,6 +572,8 @@ def library_router(store, workspace_root):
         if owner:
             flow = owner.controls.owning(project_id,run=run_id)
             if flow:
+                if flow['spec'].get('run_setup') == 'per_run':
+                    raise HTTPException(409, 'Configure and approve this run through its versioned Run configuration')
                 if (body.account,body.accelerator,body.ttl_seconds)!=(flow['spec']['account'],flow['spec']['accelerator'],flow['spec']['ttl_seconds']):
                     raise HTTPException(409,'Run dùng cấu hình đã ghim. Duyệt đúng phiên trong tab Run.')
                 pending = call(owner.controls.pending,project_id,flow['id'],'run_approval')

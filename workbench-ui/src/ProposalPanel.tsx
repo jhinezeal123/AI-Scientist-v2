@@ -73,6 +73,11 @@ export default function ProposalPanel({idea,proposals,resources,busy,workflow,on
         {latest.body.split && <><h3>Chia dữ liệu</h3><Details value={latest.body.split}/></>}
         {latest.body.metric && <><h3>Cách đánh giá</h3><Details value={latest.body.metric}/></>}
         <h3>Cách triển khai</h3><ol>{latest.body.implementation_steps?.map((step,i) => <li key={i}>{step}</li>)}</ol>
+        {latest.context_snapshot.workflow_constraints?.search&&<><h3>Chiến lược thí nghiệm</h3><p>{latest.context_snapshot.workflow_constraints.search.enabled
+          ? `Draft → Tuning → Research → Ablation · ${latest.context_snapshot.workflow_constraints.search.num_workers} nhánh song song`
+          : 'Một thí nghiệm theo proposal'}</p></>}
+        {!!latest.body.execution_requirements?.accelerators.length&&<><h3>Phần cứng phù hợp</h3><p>{latest.body.execution_requirements.accelerators.join(' · ')}</p>
+          {latest.body.execution_requirements.reason&&<p>{latest.body.execution_requirements.reason}</p>}</>}
         {latest.body.budget && Object.keys(latest.body.budget).some(key=>!['coder_calls','training_attempts'].includes(key)) && <><h3>Giới hạn bạn yêu cầu</h3><Details value={latest.body.budget}/></>}
         <p className="muted">{latest.approval_provenance||workflow?'Workflow chỉ chạy trong phạm vi và hạn mức bạn đã ủy quyền.':'Bạn quyết định từng lượt Working, không giới hạn tổng số lượt.'}</p>
         {pinnedIdea?.mode!=='etc' && latest.body.research && <><h3>Phạm vi Research</h3>

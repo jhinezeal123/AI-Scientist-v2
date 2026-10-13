@@ -39,7 +39,7 @@ class N8nResearchWorkflows:
         self.tasks, self.workers, self.locks = {}, {}, {}
         self.closed = False
 
-    def create(self, project, identity, spec):
+    def create(self, project, identity, spec, *, save_defaults=True):
         self.projects.project(project)
         from _ai_scientist_agent_management.presets import Presets
         presets = {p['id']: p for p in Presets(self.gateway.control_store).list()}
@@ -57,7 +57,7 @@ class N8nResearchWorkflows:
         if spec.benchmark_id:
             from .benchmarks import BenchmarkCatalog
             BenchmarkCatalog(self.projects).require(project, spec.benchmark_id)
-        if self.working.accounts:
+        if self.working.accounts and (spec.run_setup == 'workflow' or not spec.require_run_approval):
             self.working.accounts.require(spec.account)
         resources = self.projects.resources(project)
         if set(spec.resource_ids) - {r['id'] for r in resources}:
@@ -65,9 +65,12 @@ class N8nResearchWorkflows:
         fingerprints = {r['id']: digest(canonical(r)) for r in resources if r['id'] in spec.resource_ids}
         existing = any(r['id']==identity for r in self.store.list(project))
         self.store.create(project, project, identity, spec, fingerprints)
-        if not existing:
+        if not existing and save_defaults:
             saved = self.controls.configuration.update(project, workflow=spec.model_dump(mode='json'))
             self.store.change(project,identity,lambda s:s.update(configuration_version=saved['version']))
+        elif not existing:
+            version = self.controls.configuration.get(project)['version']
+            self.store.change(project,identity,lambda s:s.update(configuration_version=version))
         self.write_grant(project, identity)
         return self.view(project, identity)
 
@@ -118,7 +121,7 @@ class N8nResearchWorkflows:
         project, run = key
         for row in self.list(project):
             if not row['archived'] and (row['state'].get('run_id') == run or run in row['state']['runs']):
-                runtime = StageRuntime(self, project, row['id'])
+                runtime = StageRuntime(self, project, row['id'], run_id=run)
                 runtime.run_phases = self.run_phases.bind(runtime, run)
                 return runtime
         return self.planner.worker.runtime
@@ -147,7 +150,7 @@ class N8nResearchWorkflows:
             row = self.current(project, identity)
             if row['state']['status'] in {'RUNNING', 'WAITING'}:
                 return row
-            if row['state']['status'] in {'DONE', 'UNKNOWN'}:
+            if row['state']['status'] in {'DONE', 'UNKNOWN', 'CANCELLED'}:
                 raise StoreConflict('Completed/uncertain workflow cannot be replayed')
             if not row['n8n']['ready']:
                 raise StoreConflict('Start local n8n before starting this workflow')
@@ -306,6 +309,8 @@ class N8nResearchWorkflows:
 
     async def approve_run(self, runtime):
         if not runtime.spec.require_run_approval:
+            if runtime.spec.run_setup == 'per_run':
+                self.run_admission.delegated(runtime)
             return
         state = self.store.get(runtime.project, runtime.workflow)['state']
         decision = await self.run_admission.review(runtime)

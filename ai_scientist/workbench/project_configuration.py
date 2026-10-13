@@ -2,11 +2,28 @@
 import json
 from .store import StoreConflict, canonical
 from .run_configuration import RunConfiguration
+from .idea_configuration import IdeaConfiguration
 
 
 class ProjectConfiguration:
     def __init__(self, projects):
         self.projects = projects
+
+    @staticmethod
+    def normalize(body):
+        legacy = {**(body.get('workflow') or {}), **(body.get('run') or {})}
+        idea = body.get('idea') or IdeaConfiguration.from_legacy(legacy).model_dump(mode='json')
+        run = RunConfiguration.from_workflow(body.get('run') or body.get('workflow')).model_dump(mode='json')
+        owned = set(RunConfiguration.model_fields) | set(IdeaConfiguration.model_fields) | {'resource_ids'}
+        workflow = {k: v for k, v in body['workflow'].items() if k not in owned} if body.get('workflow') else None
+        return {**body, 'idea': idea, 'run': run, 'workflow': workflow}
+
+    @staticmethod
+    def compose(body):
+        if not body.get('workflow'):
+            return None
+        return {**body['workflow'], **body['idea'], **body['run'], 'resource_ids': body['resource_ids'],
+                'goal': body['idea']['goal'] or 'Nghiên cứu theo idea được chọn'}
 
     @staticmethod
     def setup(con, project=None):
@@ -30,14 +47,12 @@ class ProjectConfiguration:
         with self.projects.connection(project) as con:
             self.setup(con,project)
             row = con.execute('SELECT * FROM project_configuration').fetchone()
-            body = json.loads(row['body_json'])
-            run = body.get('run') or RunConfiguration.from_workflow(body.get('workflow')).model_dump(mode='json')
-            body['run'] = run
-            if body.get('workflow'):
-                body['workflow'] = {**body['workflow'], **run}
+            body = self.normalize(json.loads(row['body_json']))
+            if canonical(body) != row['body_json']:
+                con.execute('UPDATE project_configuration SET body_json=?', (canonical(body),))
             available = {r[0] for r in con.execute('SELECT id FROM resources WHERE id NOT IN (SELECT resource_id FROM source_deletions)')}
             body['resource_ids'] = [r for r in body['resource_ids'] if r in available]
-            return {'version': row['version'], **body}
+            return {'version': row['version'], **body, 'workflow': self.compose(body)}
 
     def validate_sources(self, project, sources):
         if len(sources) > 30 or len(sources) != len(set(sources)):
@@ -55,34 +70,49 @@ class ProjectConfiguration:
             row = con.execute('SELECT * FROM project_configuration').fetchone()
             if version is not None and row['version'] != version:
                 raise StoreConflict('Cấu hình project đã thay đổi; tải lại trước khi lưu')
-            body = json.loads(row['body_json'])
+            body = self.normalize(json.loads(row['body_json']))
             if resource_ids is not None:
                 body['resource_ids'] = resource_ids
             if workflow is not None:
                 # Store orchestration separately. Older clients can seed the
                 # run defaults once, but cannot overwrite Run-owned settings.
-                body.setdefault('run',RunConfiguration.from_workflow(body.get('workflow') or workflow).model_dump(mode='json'))
-                body['workflow'] = {k:v for k,v in workflow.items() if k not in RunConfiguration.model_fields}
+                owned = set(RunConfiguration.model_fields) | set(IdeaConfiguration.model_fields) | {'resource_ids'}
+                body['workflow'] = {k:v for k,v in workflow.items() if k not in owned}
             if canonical(body) != row['body_json']:
                 con.execute('UPDATE project_configuration SET version=version+1,body_json=?', (canonical(body),))
         return self.get(project)
 
     def save_run(self, project, version, run):
-        if run.benchmark_id:
-            from .benchmarks import BenchmarkCatalog
-            BenchmarkCatalog(self.projects).require(project,run.benchmark_id)
         with self.projects.connection(project) as con:
             self.setup(con,project)
             con.execute('BEGIN IMMEDIATE')
             row = con.execute('SELECT * FROM project_configuration').fetchone()
             if row['version']!=version:
                 raise StoreConflict('Cấu hình project đã thay đổi; tải lại trước khi lưu')
-            body = json.loads(row['body_json'])
+            body = self.normalize(json.loads(row['body_json']))
             body['run'] = run.model_dump(mode='json')
-            if body.get('workflow'):
-                body['workflow'] = {k:v for k,v in body['workflow'].items() if k not in RunConfiguration.model_fields}
             if canonical(body)!=row['body_json']:
                 con.execute('UPDATE project_configuration SET version=version+1,body_json=?',(canonical(body),))
+        return self.get(project)
+
+    def use_idea_scope(self, project, version, idea_id):
+        idea = self.projects.idea(project, idea_id)
+        if idea.get('deleted_at') or idea['mode'] == 'benchmark':
+            raise StoreConflict('Chọn một idea nghiên cứu hoặc Etc còn hiện hành')
+        sources = self.selection(project, idea_id)['resource_ids']
+        scope = IdeaConfiguration(goal=idea['text'][:10000], mode=idea['mode'],
+            benchmark_id=idea.get('benchmark_id'), desired_output=idea.get('desired_output', ''),
+            research=idea.get('research') or {}).model_dump(mode='json')
+        with self.projects.connection(project) as con:
+            self.setup(con, project)
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT * FROM project_configuration').fetchone()
+            if row['version'] != version:
+                raise StoreConflict('Phạm vi project đã đổi; tải lại Idea trước khi lưu')
+            body = self.normalize(json.loads(row['body_json']))
+            body.update(idea=scope, resource_ids=sources)
+            if canonical(body) != row['body_json']:
+                con.execute('UPDATE project_configuration SET version=version+1,body_json=?', (canonical(body),))
         return self.get(project)
 
     def workflow_spec(self, project, spec, version=None):
@@ -91,8 +121,9 @@ class ProjectConfiguration:
         saved = self.get(project)
         if version is not None and saved['version']!=version:
             raise StoreConflict('Cấu hình Run hoặc Library đã đổi; tải lại Workflow trước khi lưu')
-        return WorkflowSpec.model_validate({**spec.model_dump(mode='json'),**saved['run'],
-            'resource_ids':saved['resource_ids']})
+        return WorkflowSpec.model_validate({**spec.model_dump(mode='json'), **saved['idea'], **saved['run'],
+            'goal': saved['idea']['goal'] or 'Nghiên cứu theo idea được chọn',
+            'resource_ids':saved['resource_ids'], 'run_setup': 'per_run'})
 
     def selection(self, project, idea):
         self.projects.idea(project, idea)
@@ -143,7 +174,7 @@ class ProjectConfiguration:
 
     def idea_values(self, project, value):
         """Only omitted fields inherit; explicit empty/false choices are overrides."""
-        saved = self.get(project)['run']
+        saved = self.get(project)['idea']
         body = value.model_dump()
         for field in ('mode','desired_output','benchmark_id','research'):
             if field not in value.model_fields_set and field in saved:
