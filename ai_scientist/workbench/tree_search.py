@@ -27,27 +27,11 @@ from .journal import journal_snapshot, restore_journal
 from .models import WorkingPayload
 from .ssh_terminal import AgentTerminalBridge, collect_files, transfer_library_file
 from .system_prompt import load_prompt
+from .json_files import write_json
 
 
 class SearchInterrupted(BaseException):
     """Cancellation must pass through upstream provider fallback handlers."""
-
-
-def write_json(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + '.tmp')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    # Windows readers (GUI polling/virus scanners) may temporarily open the
-    # destination without FILE_SHARE_DELETE. Keep publication atomic and bound
-    # the wait; persistent permission failures must still reach the run owner.
-    for attempt in range(10):
-        try:
-            temporary.replace(path)
-            return
-        except PermissionError as exc:
-            if getattr(exc, 'winerror', None) not in {5, 32, 33} or attempt == 9:
-                raise
-            time.sleep(.02)
 
 
 class RemoteSearchAgent:

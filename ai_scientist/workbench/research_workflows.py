@@ -17,6 +17,7 @@ APPROVAL_SCHEMA = {'type': 'object', 'required': ['approve', 'reason'], 'propert
     'approve': {'type': 'boolean'}, 'reason': {'type': 'string', 'minLength': 1}}, 'additionalProperties': False}
 
 from .research_steps import ResearchSteps
+from .run_admission import RunAdmission
 
 class ResearchWorkflows:
     check_budget = staticmethod(ResearchSteps.check_budget)
@@ -28,6 +29,7 @@ class ResearchWorkflows:
         self.locks = {}
         self.closed = False
         self.steps = ResearchSteps(self)
+        self.run_admission = RunAdmission(self)
 
     def control(self, rig_id):
         resolve = getattr(self.gateway, 'team_platform', None)

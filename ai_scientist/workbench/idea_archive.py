@@ -55,7 +55,7 @@ class IdeaArchive:
             body = {**json.loads(row[0]), **fields}
             con.execute('UPDATE research_idea_archive SET body_json=? WHERE id=?', (json.dumps(body), identity))
         folder = self.projects.directory(project) / 'automation' / body['workflow_id'] / 'ideation' / str(body['iteration'])
-        from .tree_search import write_json
+        from .json_files import write_json
         write_json(folder / 'archive.json', self.list(project, body['workflow_id'], body['iteration']))
         return body
 
