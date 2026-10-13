@@ -110,12 +110,7 @@ class ResearchSteps:
         run = state['run_id']
         if not owner.working.record(project, run):
             if spec.require_run_approval and state.get('run_approval_id') != run:
-                decision = await asyncio.to_thread(runtime.human, 'run_approval',
-                    {'kind': 'review', 'candidate': {'run_id': run, 'proposal': {
-                     k: proposal[k] for k in ('id','version','context_sha256','body')},
-                     'account': spec.account, 'accelerator': spec.accelerator,
-                     'ttl_seconds': spec.ttl_seconds}, 'instruction': 'Approve starting this exact run.'},
-                    __import__('time').monotonic() + 86400, lambda: False)
+                decision = await owner.run_admission.review(runtime)
                 if not decision['approve']:
                     raise StoreConflict('Run rejected: ' + decision['reason'][:500])
             runtime.check()

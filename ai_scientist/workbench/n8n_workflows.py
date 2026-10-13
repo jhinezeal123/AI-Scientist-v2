@@ -9,6 +9,7 @@ from .n8n_client import N8nClient
 from .n8n_callbacks import StepCallbacks
 from .preset_stage_executor import PresetStageExecutor
 from .research_steps import ResearchSteps
+from .run_admission import RunAdmission
 from .run_phases import RunPhases, RUN_PHASES, enabled as phase_enabled
 from .research_candidates import generate_candidates, assess_candidates, select_candidate
 from .stage_runtime import StageRuntime
@@ -28,6 +29,7 @@ class N8nResearchWorkflows:
         self.store = WorkflowStore(self.projects)
         self.client = client or N8nClient(self.projects.workspace)
         self.steps = ResearchSteps(self)
+        self.run_admission = RunAdmission(self)
         self.executor = PresetStageExecutor(self)
         self.agent_turns = N8nAgentTurns(self.client, self.executor)
         self.callbacks = StepCallbacks(self.store, self.client)
@@ -306,13 +308,7 @@ class N8nResearchWorkflows:
         if not runtime.spec.require_run_approval:
             return
         state = self.store.get(runtime.project, runtime.workflow)['state']
-        proposal = next(p for p in self.projects.proposals(runtime.project) if p['id'] == state['proposal_id'])
-        decision = await asyncio.to_thread(runtime.human, 'run_approval',
-            {'kind': 'review', 'candidate': {'run_id': state['run_id'], 'proposal': {
-             k: proposal[k] for k in ('id', 'version', 'context_sha256', 'body')},
-             'account': runtime.spec.account, 'accelerator': runtime.spec.accelerator,
-             'ttl_seconds': runtime.spec.ttl_seconds}, 'instruction': 'Approve starting this exact run.'},
-            __import__('time').monotonic()+86400, lambda: False)
+        decision = await self.run_admission.review(runtime)
         if not decision['approve']:
             raise StoreConflict('Run rejected: ' + decision['reason'][:500])
         self.store.change(runtime.project,runtime.workflow,lambda s:s.update(run_approval_id=state['run_id']))

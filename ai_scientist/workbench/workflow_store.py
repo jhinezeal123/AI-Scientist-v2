@@ -145,31 +145,36 @@ class WorkflowStore:
         with self.projects.connection(project) as con:
             self.setup(con)
             con.execute('BEGIN IMMEDIATE')
-            row = con.execute('SELECT * FROM workflow_inputs WHERE id=? AND workflow_id=?', (input_id, identity)).fetchone()
-            if row is None:
-                raise KeyError('Human input not found')
-            if row['state'] != 'PENDING':
-                if json.loads(row['result_json']) != result:
-                    raise StoreConflict('Human response already committed')
-                return
-            workflow = con.execute('SELECT state_json FROM research_workflows WHERE id=?', (identity,)).fetchone()
-            state = json.loads(workflow['state_json'])
-            if state['status'] != 'WAITING':
-                raise StoreConflict('Resume the paused workflow before answering')
-            prompt = json.loads(row['prompt_json'])
-            import jsonschema
-            schema = ({'type':'object','required':['approve','reason'],'properties':{
-                'approve':{'type':'boolean'},'reason':{'type':'string','minLength':1}},'additionalProperties':False}
-                if prompt['kind']=='review' else prompt['schema'])
-            try:
-                jsonschema.validate(result, schema)
-            except jsonschema.ValidationError:
-                raise ValueError('Human response does not match this stage result schema') from None
-            if len(json.dumps(result).encode()) > 60000:
-                raise ValueError('Human stage result exceeds 60KB')
-            con.execute("UPDATE workflow_inputs SET state='DONE',result_json=? WHERE id=?", (json.dumps(result), input_id))
-            state['status']='RUNNING'
-            con.execute('UPDATE research_workflows SET state_json=?,updated_at=? WHERE id=?', (json.dumps(state),now(),identity))
+            self.answer_in_connection(con, identity, input_id, result)
+
+    @staticmethod
+    def answer_in_connection(con, identity, input_id, result):
+        """Complete a human gate in the caller's project transaction."""
+        row = con.execute('SELECT * FROM workflow_inputs WHERE id=? AND workflow_id=?', (input_id, identity)).fetchone()
+        if row is None:
+            raise KeyError('Human input not found')
+        if row['state'] != 'PENDING':
+            if json.loads(row['result_json']) != result:
+                raise StoreConflict('Human response already committed')
+            return
+        workflow = con.execute('SELECT state_json FROM research_workflows WHERE id=?', (identity,)).fetchone()
+        state = json.loads(workflow['state_json'])
+        if state['status'] != 'WAITING':
+            raise StoreConflict('Resume the paused workflow before answering')
+        prompt = json.loads(row['prompt_json'])
+        import jsonschema
+        schema = ({'type':'object','required':['approve','reason'],'properties':{
+            'approve':{'type':'boolean'},'reason':{'type':'string','minLength':1}},'additionalProperties':False}
+            if prompt['kind']=='review' else prompt['schema'])
+        try:
+            jsonschema.validate(result, schema)
+        except jsonschema.ValidationError:
+            raise ValueError('Human response does not match this stage result schema') from None
+        if len(json.dumps(result).encode()) > 60000:
+            raise ValueError('Human stage result exceeds 60KB')
+        con.execute("UPDATE workflow_inputs SET state='DONE',result_json=? WHERE id=?", (json.dumps(result), input_id))
+        state['status']='RUNNING'
+        con.execute('UPDATE research_workflows SET state_json=?,updated_at=? WHERE id=?', (json.dumps(state),now(),identity))
 
     def revise_proposal(self, project, identity, candidate, message, request_id):
         """Atomically invalidate the candidate and save one human revision intent."""
